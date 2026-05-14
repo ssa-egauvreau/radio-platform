@@ -23,6 +23,8 @@ data class RadioUiState(
     val channelsLoading: Boolean,
     val channelSyncError: String?,
     val channelSourceLabel: String,
+    val micPermissionGranted: Boolean,
+    val micHint: String,
 ) {
     init {
         require(softKeyLabels.size == SOFT_KEY_COUNT) {
@@ -53,6 +55,8 @@ data class RadioUiState(
             channelsLoading = true,
             channelSyncError = null,
             channelSourceLabel = "---",
+            micPermissionGranted = false,
+            micHint = "MIC: ALLOW ACCESS",
         )
     }
 }

@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.securityradio.ptt.domain.ChannelCatalogOrigin
 import com.securityradio.ptt.domain.ChannelRepository
+import com.securityradio.ptt.device.PttMicCapture
 import com.securityradio.ptt.device.RadioUiSoundPlayer
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -19,6 +20,7 @@ import kotlinx.coroutines.flow.update
 class RadioViewModel(
     private val channelRepository: ChannelRepository,
     private val soundPlayer: RadioUiSoundPlayer,
+    private val pttMicCapture: PttMicCapture,
 ) : ViewModel() {
 
     private var channelNames: List<String> = emptyList()
@@ -42,6 +44,15 @@ class RadioViewModel(
         }
     }
 
+    fun onMicPermissionResult(granted: Boolean) {
+        _uiState.update {
+            it.copy(
+                micPermissionGranted = granted,
+                micHint = if (granted) "MIC: READY" else "MIC: DENIED",
+            )
+        }
+    }
+
     fun onEvent(event: RadioUiEvent) {
         when (event) {
             RadioUiEvent.RetryChannelSync -> {
@@ -49,11 +60,29 @@ class RadioViewModel(
             }
             RadioUiEvent.PttPressed -> {
                 soundPlayer.startTalkPermitLoop()
-                _uiState.update { it.copy(isPttPressed = true, statusMessage = "TX PERMIT") }
+                val granted = _uiState.value.micPermissionGranted
+                if (granted) {
+                    pttMicCapture.startCapture()
+                }
+                _uiState.update {
+                    it.copy(
+                        isPttPressed = true,
+                        statusMessage = if (granted) "TX + MIC" else "TX (NO MIC)",
+                        micHint = if (granted) "MIC: CAPTURING" else "MIC: ALLOW MIC",
+                    )
+                }
             }
             RadioUiEvent.PttReleased -> {
+                pttMicCapture.stopCapture()
                 soundPlayer.stopTalkPermitLoop()
-                _uiState.update { it.copy(isPttPressed = false, statusMessage = "RX IDLE") }
+                val granted = _uiState.value.micPermissionGranted
+                _uiState.update {
+                    it.copy(
+                        isPttPressed = false,
+                        statusMessage = "RX IDLE",
+                        micHint = if (granted) "MIC: READY" else "MIC: ALLOW MIC",
+                    )
+                }
             }
             RadioUiEvent.EmergencyPressed -> {
                 soundPlayer.playEmergencyAlert()
@@ -175,6 +204,7 @@ class RadioViewModel(
     }
 
     override fun onCleared() {
+        pttMicCapture.release()
         soundPlayer.release()
         super.onCleared()
     }

@@ -16,6 +16,10 @@ class StubChannelRepository : ChannelRepository {
     )
 
     companion object {
-        val DEFAULT_CHANNELS: List<String> = (1..16).map { idx -> "CH %02d".format(idx) }
+        val DEFAULT_CHANNELS: List<String> = listOf(
+            "Green 1",
+            "Green 2",
+            "Green 3",
+        )
     }
 }

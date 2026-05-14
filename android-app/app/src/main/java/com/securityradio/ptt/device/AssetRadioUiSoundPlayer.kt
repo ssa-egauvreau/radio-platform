@@ -9,10 +9,10 @@ import java.io.IOException
 /**
  * Plays packaged handset cues from `assets/sounds/` when files exist (formats supported by [MediaPlayer]).
  *
- * Expected filenames:
- * - channel_switch.mp3
- * - ptt_permit.mp3
- * - emergency.mp3
+ * Expected filenames (WAV recommended):
+ * - channel_switch.wav
+ * - ptt_permit.wav
+ * - emergency.wav
  */
 class AssetRadioUiSoundPlayer(
     private val app: Application,
@@ -110,8 +110,8 @@ class AssetRadioUiSoundPlayer(
 
     companion object {
         const val SOUNDS_DIR = "sounds"
-        const val FILE_CHANNEL_SWITCH = "channel_switch.mp3"
-        const val FILE_TALK_PERMIT = "ptt_permit.mp3"
-        const val FILE_EMERGENCY = "emergency.mp3"
+        const val FILE_CHANNEL_SWITCH = "channel_switch.wav"
+        const val FILE_TALK_PERMIT = "ptt_permit.wav"
+        const val FILE_EMERGENCY = "emergency.wav"
     }
 }

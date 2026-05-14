@@ -53,6 +53,7 @@ import com.securityradio.ptt.presentation.RadioUiState
 fun RadioShell(
     state: RadioUiState,
     onEvent: (RadioUiEvent) -> Unit,
+    onRequestMicPermission: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -64,7 +65,11 @@ fun RadioShell(
                 .fillMaxSize()
                 .padding(horizontal = 12.dp, vertical = 10.dp),
         ) {
-            RadioScreen(state = state, onEvent = onEvent)
+            RadioScreen(
+                state = state,
+                onEvent = onEvent,
+                onRequestMicPermission = onRequestMicPermission,
+            )
         }
     }
 }
@@ -76,6 +81,7 @@ fun RadioShell(
 fun RadioScreen(
     state: RadioUiState,
     onEvent: (RadioUiEvent) -> Unit,
+    onRequestMicPermission: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
@@ -87,7 +93,11 @@ fun RadioScreen(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(gutter),
         ) {
-            StatusStrip(state = state, onEvent = onEvent)
+            StatusStrip(
+                state = state,
+                onEvent = onEvent,
+                onRequestMicPermission = onRequestMicPermission,
+            )
             RadioFaceplate(
                 state = state,
                 onEvent = onEvent,
@@ -111,6 +121,7 @@ fun RadioScreen(
 private fun StatusStrip(
     state: RadioUiState,
     onEvent: (RadioUiEvent) -> Unit,
+    onRequestMicPermission: () -> Unit,
 ) {
     Row(
         modifier = Modifier
@@ -151,6 +162,21 @@ private fun StatusStrip(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontFamily = FontFamily.Monospace,
             )
+            Text(
+                text = state.micHint,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontFamily = FontFamily.Monospace,
+            )
+            if (!state.micPermissionGranted) {
+                Text(
+                    text = "ALLOW MIC",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.clickable { onRequestMicPermission() },
+                )
+            }
             if (state.channelSyncError != null) {
                 Text(
                     text = "RETRY SYNC",
@@ -335,6 +361,7 @@ private fun CenterDisplay(
             LcdLine(text = state.displayLine1, fontSize = 18.sp)
             LcdLine(text = state.displayLine2, fontSize = 16.sp)
             LcdLine(text = state.displayLine3, fontSize = 15.sp)
+            LcdLine(text = state.micHint, fontSize = 14.sp)
         }
         Text(
             text = state.statusMessage,
