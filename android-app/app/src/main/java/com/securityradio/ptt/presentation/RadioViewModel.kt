@@ -14,6 +14,7 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -428,7 +429,7 @@ class RadioViewModel(
     }
 
     private suspend fun pollTalkHints() {
-        while (isActive) {
+        while (coroutineContext.isActive) {
             delay(TALK_ACTIVITY_POLL_MS)
             if (_uiState.value.networkLabel == "OFFLINE") {
                 if (_uiState.value.rxAttributedLine.isNotEmpty()) {
