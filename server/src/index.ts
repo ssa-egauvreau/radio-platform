@@ -45,6 +45,13 @@ app.get("/v1/channels", async (_req, res) => {
   }
 });
 
+/** While PTT is held, Android polls this. Set AIR_OCCUPIED=1 on Railway to simulate another caller. */
+app.get("/v1/air", (_req, res) => {
+  const raw = process.env.AIR_OCCUPIED?.trim().toLowerCase();
+  const occupied = raw === "1" || raw === "true" || raw === "yes";
+  res.json({ occupied });
+});
+
 const port = Number(process.env.PORT ?? 8080);
 
 async function main(): Promise<void> {

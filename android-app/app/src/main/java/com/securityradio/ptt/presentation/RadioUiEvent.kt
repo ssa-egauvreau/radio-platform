@@ -6,8 +6,7 @@ package com.securityradio.ptt.presentation
 sealed interface RadioUiEvent {
     data object PttPressed : RadioUiEvent
     data object PttReleased : RadioUiEvent
-    data object EmergencyPressed : RadioUiEvent
-    data object EmergencyReleased : RadioUiEvent
+    data object EmergencyToggle : RadioUiEvent
     data object ChannelUp : RadioUiEvent
     data object ChannelDown : RadioUiEvent
     data object RetryChannelSync : RadioUiEvent

@@ -402,52 +402,30 @@ private fun EmergencyColumn(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
-        MomentaryButton(
-            label = "EMER",
-            baseColor = MaterialTheme.colorScheme.error,
-            contentColor = Color.White,
-            active = state.isEmergencyActive,
-            onPress = { onEvent(RadioUiEvent.EmergencyPressed) },
-            onRelease = { onEvent(RadioUiEvent.EmergencyReleased) },
+        val interaction = remember { MutableInteractionSource() }
+        Surface(
+            onClick = { onEvent(RadioUiEvent.EmergencyToggle) },
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
-        )
-    }
-}
-
-@Composable
-private fun MomentaryButton(
-    label: String,
-    baseColor: Color,
-    contentColor: Color,
-    active: Boolean,
-    onPress: () -> Unit,
-    onRelease: () -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    val shape = RoundedCornerShape(12.dp)
-    Box(
-        modifier = modifier
-            .clip(shape)
-            .background(if (active) baseColor.copy(alpha = 0.95f) else baseColor.copy(alpha = 0.75f))
-            .border(1.dp, baseColor, shape)
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    awaitFirstDown(requireUnconsumed = false)
-                    onPress()
-                    waitForUpOrCancellation()
-                    onRelease()
-                }
+            shape = RoundedCornerShape(12.dp),
+            color = if (state.isEmergencyActive) {
+                MaterialTheme.colorScheme.error.copy(alpha = 0.95f)
+            } else {
+                MaterialTheme.colorScheme.error.copy(alpha = 0.75f)
             },
-        contentAlignment = Alignment.Center,
-    ) {
-        Text(
-            text = label,
-            style = MaterialTheme.typography.titleMedium,
-            color = contentColor,
-            fontWeight = FontWeight.Black,
-        )
+            border = BorderStroke(1.dp, MaterialTheme.colorScheme.error),
+            interactionSource = interaction,
+        ) {
+            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                Text(
+                    text = "EMER",
+                    style = MaterialTheme.typography.titleMedium,
+                    color = Color.White,
+                    fontWeight = FontWeight.Black,
+                )
+            }
+        }
     }
 }
 
@@ -501,7 +479,11 @@ private fun ControlDeck(
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
             Text(
-                text = if (state.isPttPressed) "TRANSMITTING" else "RECEIVE",
+                text = when {
+                    !state.isPttPressed -> "RECEIVE"
+                    state.pttBusyTone -> "BUSY"
+                    else -> "TRANSMITTING"
+                },
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 fontFamily = FontFamily.Monospace,

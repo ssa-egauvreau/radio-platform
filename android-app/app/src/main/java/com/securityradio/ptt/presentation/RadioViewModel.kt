@@ -2,6 +2,7 @@ package com.securityradio.ptt.presentation
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.securityradio.ptt.data.remote.ChannelsApi
 import com.securityradio.ptt.domain.ChannelCatalogOrigin
 import com.securityradio.ptt.domain.ChannelRepository
 import com.securityradio.ptt.device.PttMicCapture
@@ -9,6 +10,7 @@ import com.securityradio.ptt.device.RadioUiSoundPlayer
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -21,10 +23,13 @@ class RadioViewModel(
     private val channelRepository: ChannelRepository,
     private val soundPlayer: RadioUiSoundPlayer,
     private val pttMicCapture: PttMicCapture,
+    private val channelsApi: ChannelsApi,
 ) : ViewModel() {
 
     private var channelNames: List<String> = emptyList()
     private var channelIndex: Int = 0
+
+    private var pttToneJob: Job? = null
 
     private val timeFormatter: DateTimeFormatter =
         DateTimeFormatter.ofPattern("HH:mm", Locale.US)
@@ -58,41 +63,18 @@ class RadioViewModel(
             RadioUiEvent.RetryChannelSync -> {
                 viewModelScope.launch { syncCatalog(playConnectSoundIfNetwork = true) }
             }
-            RadioUiEvent.PttPressed -> {
-                soundPlayer.startTalkPermitLoop()
-                val granted = _uiState.value.micPermissionGranted
-                if (granted) {
-                    pttMicCapture.startCapture()
+            RadioUiEvent.PttPressed -> onPttPressed()
+            RadioUiEvent.PttReleased -> onPttReleased()
+            RadioUiEvent.EmergencyToggle -> {
+                val activating = !_uiState.value.isEmergencyActive
+                if (activating) {
+                    soundPlayer.playEmergencyAlert()
                 }
                 _uiState.update {
                     it.copy(
-                        isPttPressed = true,
-                        statusMessage = if (granted) "TX + MIC" else "TX (NO MIC)",
-                        micHint = if (granted) "MIC: CAPTURING" else "MIC: ALLOW MIC",
+                        isEmergencyActive = activating,
+                        statusMessage = if (activating) "EMERGENCY ACTIVE" else "EMERGENCY OFF",
                     )
-                }
-            }
-            RadioUiEvent.PttReleased -> {
-                pttMicCapture.stopCapture()
-                soundPlayer.stopTalkPermitLoop()
-                val granted = _uiState.value.micPermissionGranted
-                _uiState.update {
-                    it.copy(
-                        isPttPressed = false,
-                        statusMessage = "RX IDLE",
-                        micHint = if (granted) "MIC: READY" else "MIC: ALLOW MIC",
-                    )
-                }
-            }
-            RadioUiEvent.EmergencyPressed -> {
-                soundPlayer.playEmergencyAlert()
-                _uiState.update {
-                    it.copy(isEmergencyActive = true, statusMessage = "EMERGENCY ACTIVE")
-                }
-            }
-            RadioUiEvent.EmergencyReleased -> {
-                _uiState.update {
-                    it.copy(isEmergencyActive = false, statusMessage = "EMERGENCY CLEARED")
                 }
             }
             RadioUiEvent.ChannelUp -> bumpChannel(+1)
@@ -106,6 +88,80 @@ class RadioViewModel(
                     state.copy(statusMessage = "SOFT KEY: $label")
                 }
             }
+        }
+    }
+
+    private fun onPttPressed() {
+        val granted = _uiState.value.micPermissionGranted
+        if (granted) {
+            pttMicCapture.startCapture()
+        }
+        _uiState.update {
+            it.copy(
+                isPttPressed = true,
+                pttBusyTone = false,
+                statusMessage = if (granted) "TX + MIC" else "TX (NO MIC)",
+                micHint = if (granted) "MIC: CAPTURING" else "MIC: ALLOW MIC",
+            )
+        }
+
+        pttToneJob?.cancel()
+        pttToneJob = viewModelScope.launch {
+            var lastUseBusy: Boolean? = null
+            while (isActive && _uiState.value.isPttPressed) {
+                val snapshot = _uiState.value
+                val online = snapshot.networkLabel == "ONLINE"
+                val occupied = if (online) {
+                    try {
+                        channelsApi.airState().occupied
+                    } catch (_: Exception) {
+                        true
+                    }
+                } else {
+                    false
+                }
+                val useBusy = !online || occupied
+                if (lastUseBusy != useBusy) {
+                    if (useBusy) {
+                        soundPlayer.stopTalkPermitLoop()
+                        soundPlayer.startBusyLoop()
+                    } else {
+                        soundPlayer.stopBusyLoop()
+                        soundPlayer.startTalkPermitLoop()
+                    }
+                    val mic = snapshot.micPermissionGranted
+                    _uiState.update { s ->
+                        s.copy(
+                            pttBusyTone = useBusy,
+                            statusMessage = when {
+                                useBusy && !online -> "NO CONNECTION"
+                                useBusy -> "CHANNEL BUSY"
+                                mic -> "TX + MIC"
+                                else -> "TX (NO MIC)"
+                            },
+                        )
+                    }
+                }
+                lastUseBusy = useBusy
+                delay(AIR_POLL_MS)
+            }
+        }
+    }
+
+    private fun onPttReleased() {
+        pttToneJob?.cancel()
+        pttToneJob = null
+        pttMicCapture.stopCapture()
+        soundPlayer.stopTalkPermitLoop()
+        soundPlayer.stopBusyLoop()
+        val granted = _uiState.value.micPermissionGranted
+        _uiState.update {
+            it.copy(
+                isPttPressed = false,
+                pttBusyTone = false,
+                statusMessage = "RX IDLE",
+                micHint = if (granted) "MIC: READY" else "MIC: ALLOW MIC",
+            )
         }
     }
 
@@ -204,6 +260,7 @@ class RadioViewModel(
     }
 
     override fun onCleared() {
+        pttToneJob?.cancel()
         pttMicCapture.release()
         soundPlayer.release()
         super.onCleared()
@@ -211,5 +268,6 @@ class RadioViewModel(
 
     private companion object {
         const val CLOCK_TICK_MS = 1_000L
+        const val AIR_POLL_MS = 400L
     }
 }

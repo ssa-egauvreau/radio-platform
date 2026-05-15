@@ -6,6 +6,9 @@ import retrofit2.http.GET
 interface ChannelsApi {
     @GET("v1/channels")
     suspend fun channels(): ChannelsResponseDto
+
+    @GET("v1/air")
+    suspend fun airState(): AirStateDto
 }
 
 data class ChannelsResponseDto(
@@ -15,4 +18,8 @@ data class ChannelsResponseDto(
 data class ChannelDto(
     @SerializedName("id") val id: Int,
     @SerializedName("name") val name: String,
+)
+
+data class AirStateDto(
+    @SerializedName("occupied") val occupied: Boolean,
 )
