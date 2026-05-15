@@ -198,7 +198,9 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        HardwareButtonRelay.sendRawKeyCode(keyCode)
+        if (event?.repeatCount == 0) {
+            HardwareButtonRelay.sendRawKeyCode(keyCode)
+        }
 
         val isPtt = repository.getMapping(HardwareAction.PTT).contains(keyCode)
         val isEmergency = repository.getMapping(HardwareAction.EMERGENCY).contains(keyCode)

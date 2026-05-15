@@ -25,10 +25,10 @@ class HardwareMappingRepository(context: Context) {
 
     private fun getDefaultKeyCodes(action: HardwareAction): Set<String> {
         return when (action) {
-            HardwareAction.PTT -> setOf("229", "286", "142", "230", "290", "249")
-            HardwareAction.EMERGENCY -> setOf("141", "135", "285")
-            HardwareAction.CHANNEL_UP -> setOf("230")
-            HardwareAction.CHANNEL_DOWN -> setOf("232")
+            HardwareAction.PTT -> setOf("232")
+            HardwareAction.EMERGENCY -> setOf("141")
+            HardwareAction.CHANNEL_UP -> setOf("231")
+            HardwareAction.CHANNEL_DOWN -> setOf("230")
             HardwareAction.SCAN_TOGGLE -> emptySet()
         }
     }

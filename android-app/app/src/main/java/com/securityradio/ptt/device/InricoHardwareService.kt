@@ -17,9 +17,11 @@ class InricoHardwareService : AccessibilityService() {
 
     override fun onKeyEvent(event: KeyEvent): Boolean {
         val keyCode = event.keyCode
-        
-        // Always relay the keycode for the mapping UI if it's "listening"
-        HardwareButtonRelay.sendRawKeyCode(keyCode)
+
+        // One raw sample per physical press for the mapping learner (avoid DOWN+UP duplicates).
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+            HardwareButtonRelay.sendRawKeyCode(keyCode)
+        }
 
         val isPtt = repository.getMapping(HardwareAction.PTT).contains(keyCode)
         val isEmergency = repository.getMapping(HardwareAction.EMERGENCY).contains(keyCode)

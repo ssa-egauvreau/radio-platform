@@ -1,24 +1,35 @@
 package com.securityradio.ptt.device
 
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.launch
 
 /**
- * A singleton relay for hardware button events (PTT, Emergency) intercepted by background services.
+ * Relays hardware key events. Uses suspending [emit] (not [tryEmit]) so key codes are not dropped
+ * when the UI is busy mapping or multiple collectors are active.
  */
 object HardwareButtonRelay {
-    private val _events = MutableSharedFlow<HardwareButtonEvent>(extraBufferCapacity = 8)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    private val _events = MutableSharedFlow<HardwareButtonEvent>(extraBufferCapacity = 32)
     val events = _events.asSharedFlow()
 
-    private val _rawKeyCodes = MutableSharedFlow<Int>(extraBufferCapacity = 64)
+    private val _rawKeyCodes = MutableSharedFlow<Int>(extraBufferCapacity = 256)
     val rawKeyCodes = _rawKeyCodes.asSharedFlow()
 
     fun sendEvent(event: HardwareButtonEvent) {
-        _events.tryEmit(event)
+        scope.launch {
+            _events.emit(event)
+        }
     }
 
     fun sendRawKeyCode(keyCode: Int) {
-        _rawKeyCodes.tryEmit(keyCode)
+        scope.launch {
+            _rawKeyCodes.emit(keyCode)
+        }
     }
 }
 

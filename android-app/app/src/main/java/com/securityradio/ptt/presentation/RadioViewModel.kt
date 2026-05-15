@@ -264,21 +264,32 @@ class RadioViewModel(
         mappingJob?.cancel()
         _uiState.update { it.copy(currentlyMappingAction = action) }
         mappingJob = viewModelScope.launch {
-            // Re-collect to get the very next key event
             HardwareButtonRelay.rawKeyCodes.collect { keyCode ->
                 val currentMappings = hardwareMappingRepository.getMapping(action)
-                if (keyCode !in currentMappings) {
-                    val nextMappings = currentMappings + keyCode
-                    hardwareMappingRepository.setMapping(action, nextMappings)
+                if (keyCode in currentMappings) {
+                    soundPlayer.playChannelSwitch()
                     _uiState.update {
                         it.copy(
-                            hardwareMappings = hardwareMappingRepository.getAllMappings(),
-                            currentlyMappingAction = null
+                            currentlyMappingAction = null,
+                            lastDetectedKey = keyCode,
+                            statusMessage = "KEY $keyCode ALREADY ON ${action.label.uppercase(Locale.US)} — CLEAR OR PICK ANOTHER",
                         )
                     }
-                    soundPlayer.playChannelSwitch()
                     mappingJob?.cancel()
+                    return@collect
                 }
+                val nextMappings = currentMappings + keyCode
+                hardwareMappingRepository.setMapping(action, nextMappings)
+                _uiState.update {
+                    it.copy(
+                        hardwareMappings = hardwareMappingRepository.getAllMappings(),
+                        currentlyMappingAction = null,
+                        lastDetectedKey = keyCode,
+                        statusMessage = "MAPPED ${action.label.uppercase(Locale.US)} ← $keyCode",
+                    )
+                }
+                soundPlayer.playChannelSwitch()
+                mappingJob?.cancel()
             }
         }
     }
