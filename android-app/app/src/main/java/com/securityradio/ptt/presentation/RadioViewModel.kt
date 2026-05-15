@@ -22,7 +22,6 @@ import java.util.Locale
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,10 +42,7 @@ class RadioViewModel(
     private val radioPreferences: RadioPreferences,
 ) : ViewModel() {
 
-    private val _wakeUiRequests = MutableSharedFlow<String>(
-        extraBufferCapacity = 24,
-        onBufferOverflow = BufferOverflow.DROP_OLDEST,
-    )
+    private val _wakeUiRequests = MutableSharedFlow<String>(extraBufferCapacity = 24)
     /** Emits reasons why the tactical UI might need to reorder to the foreground while not visible. */
     val wakeUiSignals: SharedFlow<String> = _wakeUiRequests.asSharedFlow()
 
