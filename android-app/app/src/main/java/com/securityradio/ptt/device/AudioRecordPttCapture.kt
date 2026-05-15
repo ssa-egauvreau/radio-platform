@@ -1,7 +1,9 @@
 package com.securityradio.ptt.device
 
+import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioRecord
+import android.media.AudioTrack
 import android.media.MediaRecorder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -11,10 +13,12 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Lightweight [AudioRecord] loop for PTT. Intended to run only while the app is in the foreground.
- * Captured audio is discarded until a transport layer is added.
+ * Step A — local sidetone: while PTT is held, mic PCM is played back on this device so you can
+ * verify capture. Audio is still not sent to the server (Step B will add transport).
  */
-class AudioRecordPttCapture : PttMicCapture {
+class AudioRecordPttCapture(
+    private val enableSidetone: Boolean = true,
+) : PttMicCapture {
 
     private val supervisor = SupervisorJob()
     private val scope = CoroutineScope(supervisor + Dispatchers.IO)
@@ -24,14 +28,16 @@ class AudioRecordPttCapture : PttMicCapture {
 
     private var job: Job? = null
     private var audioRecord: AudioRecord? = null
+    private var audioTrack: AudioTrack? = null
 
     override fun startCapture() {
         synchronized(this) {
             stopCaptureInternal()
-            val sampleRate = 16_000
-            val channelConfig = AudioFormat.CHANNEL_IN_MONO
+            val sampleRate = SAMPLE_RATE_HZ
+            val channelConfigIn = AudioFormat.CHANNEL_IN_MONO
+            val channelConfigOut = AudioFormat.CHANNEL_OUT_MONO
             val audioFormat = AudioFormat.ENCODING_PCM_16BIT
-            val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfig, audioFormat)
+            val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfigIn, audioFormat)
             if (minBuffer <= 0) {
                 return
             }
@@ -39,7 +45,7 @@ class AudioRecordPttCapture : PttMicCapture {
             val record = AudioRecord(
                 MediaRecorder.AudioSource.VOICE_COMMUNICATION,
                 sampleRate,
-                channelConfig,
+                channelConfigIn,
                 audioFormat,
                 minBuffer * 2,
             )
@@ -48,14 +54,49 @@ class AudioRecordPttCapture : PttMicCapture {
                 return
             }
 
+            var track: AudioTrack? = null
+            if (enableSidetone) {
+                val trackBuffer = AudioTrack.getMinBufferSize(sampleRate, channelConfigOut, audioFormat)
+                if (trackBuffer > 0) {
+                    track = AudioTrack.Builder()
+                        .setAudioAttributes(
+                            AudioAttributes.Builder()
+                                .setUsage(AudioAttributes.USAGE_MEDIA)
+                                .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                                .build(),
+                        )
+                        .setAudioFormat(
+                            AudioFormat.Builder()
+                                .setSampleRate(sampleRate)
+                                .setEncoding(audioFormat)
+                                .setChannelMask(channelConfigOut)
+                                .build(),
+                        )
+                        .setBufferSizeInBytes(trackBuffer * 2)
+                        .setTransferMode(AudioTrack.MODE_STREAM)
+                        .build()
+                    if (track.state == AudioTrack.STATE_INITIALIZED) {
+                        track.setVolume(1f)
+                        track.play()
+                    } else {
+                        track.release()
+                        track = null
+                    }
+                }
+            }
+
             audioRecord = record
+            audioTrack = track
             record.startRecording()
             captureActive = true
 
             val buffer = ByteArray(minBuffer)
             job = scope.launch {
                 while (isActive && captureActive && record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
-                    record.read(buffer, 0, buffer.size)
+                    val read = record.read(buffer, 0, buffer.size)
+                    if (read > 0 && track != null && track.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                        track.write(buffer, 0, read)
+                    }
                 }
             }
         }
@@ -78,10 +119,21 @@ class AudioRecordPttCapture : PttMicCapture {
             release()
         }
         audioRecord = null
+        audioTrack?.runCatching {
+            if (playState == AudioTrack.PLAYSTATE_PLAYING) {
+                stop()
+            }
+            release()
+        }
+        audioTrack = null
     }
 
     override fun release() {
         stopCapture()
         supervisor.cancel()
+    }
+
+    companion object {
+        const val SAMPLE_RATE_HZ = 16_000
     }
 }

@@ -118,7 +118,7 @@ class RadioViewModel(
                 isPttPressed = true,
                 pttBusyTone = false,
                 statusMessage = if (granted) "TX + MIC" else "TX (NO MIC)",
-                micHint = if (granted) "MIC: CAPTURING" else "MIC: ALLOW MIC",
+                micHint = if (granted) "MIC: MONITOR ON" else "MIC: ALLOW MIC",
             )
         }
 
@@ -191,7 +191,7 @@ class RadioViewModel(
                 isPttPressed = false,
                 pttBusyTone = false,
                 statusMessage = "RX IDLE",
-                micHint = if (granted) "MIC: READY" else "MIC: ALLOW MIC",
+                micHint = if (granted) "MIC: READY (NO MONITOR)" else "MIC: ALLOW MIC",
             )
         }
     }
