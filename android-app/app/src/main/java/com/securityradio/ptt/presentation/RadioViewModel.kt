@@ -60,6 +60,9 @@ class RadioViewModel(
 
     fun onEvent(event: RadioUiEvent) {
         when (event) {
+            RadioUiEvent.ToggleDayNight -> {
+                _uiState.update { it.copy(displayNightMode = !it.displayNightMode) }
+            }
             RadioUiEvent.RetryChannelSync -> {
                 viewModelScope.launch { syncCatalog(playConnectSoundIfNetwork = true) }
             }
@@ -83,9 +86,23 @@ class RadioViewModel(
                 require(event.index in 0 until RadioUiState.SOFT_KEY_COUNT) {
                     "Soft key index out of bounds: ${event.index}"
                 }
-                _uiState.update { state ->
-                    val label = state.softKeyLabels[event.index]
-                    state.copy(statusMessage = "SOFT KEY: $label")
+                when (event.index) {
+                    4 -> bumpChannel(+1)
+                    else -> _uiState.update { state ->
+                        when (event.index) {
+                            0 -> state.copy(statusMessage = "PTT: HOLD LCD BAR")
+                            1 -> state.copy(rssiExpanded = !state.rssiExpanded)
+                            2 -> state.copy(
+                                scanActive = !state.scanActive,
+                                statusMessage = if (!state.scanActive) "SCAN ON" else "SCAN OFF",
+                            )
+                            3 -> state.copy(
+                                gpsActive = !state.gpsActive,
+                                statusMessage = if (!state.gpsActive) "GPS ON" else "GPS OFF",
+                            )
+                            else -> state
+                        }
+                    }
                 }
             }
         }
@@ -246,7 +263,7 @@ class RadioViewModel(
                 channelLabel = "----",
                 channelPosition = "-- / --",
                 totalChannels = 0,
-                displayLine2 = "TALKGROUP: ----",
+                displayLine2 = "OPERATIONS",
             )
         }
         val safeIndex = index.coerceIn(0, names.lastIndex)
@@ -255,7 +272,7 @@ class RadioViewModel(
             channelLabel = label,
             channelPosition = "%02d / %02d".format(safeIndex + 1, names.size),
             totalChannels = names.size,
-            displayLine2 = "TALKGROUP: $label",
+            displayLine2 = "OPS: ${label.uppercase(Locale.US)}",
         )
     }
 
