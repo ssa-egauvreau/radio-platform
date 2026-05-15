@@ -4,6 +4,7 @@ import android.app.Application
 import com.securityradio.ptt.BuildConfig
 import com.securityradio.ptt.data.RadioChannelGateway
 import com.securityradio.ptt.data.StubChannelRepository
+import com.securityradio.ptt.data.remote.ChannelsApi
 import com.securityradio.ptt.data.remote.NetworkModule
 import com.securityradio.ptt.device.AssetRadioUiSoundPlayer
 import com.securityradio.ptt.device.AudioRecordPttCapture
@@ -19,7 +20,7 @@ class RadioAppGraph(application: Application) {
 
     private val stubChannelRepository = StubChannelRepository()
 
-    private val channelsApi = NetworkModule.channelsApi(
+    val channelsApi: ChannelsApi = NetworkModule.channelsApi(
         baseUrl = BuildConfig.API_BASE_URL,
         apiKey = BuildConfig.RADIO_API_KEY,
     )

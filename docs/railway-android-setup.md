@@ -42,7 +42,12 @@ Railway sets **`PORT`** automatically. The server already reads `process.env.POR
 
 After this, your API process will see `DATABASE_URL` and will create/seed the `radio_channels` table on boot.
 
-### A5. (Recommended) Set a shared API key
+### A5. (Optional) Simulate “someone else is transmitting”
+
+1. On the API service → **Variables**, add **`AIR_OCCUPIED`** with value **`1`** (or **`true`**).
+2. Redeploy. While PTT is held, the handset polls **`GET /v1/air`**; when `occupied` is true it plays the **`busy.wav`** loop instead of the talk-permit tone.
+
+### A6. (Recommended) Set a shared API key
 
 1. Open the API service → **Variables**.
 2. Add **`RADIO_API_KEY`** with a long random string (example: 32+ characters).  
@@ -54,7 +59,7 @@ When `RADIO_API_KEY` is set, every request (except `GET /health`) must include h
 
 The Android app sends this header when you set `radio.api.key` in `local.properties` (see Part B).
 
-### A6. Assign a public HTTPS URL
+### A7. Assign a public HTTPS URL
 
 1. Open the API service → **Settings** → **Networking**.
 2. Under **Public Networking**, click **Generate Domain** (or attach a custom domain).
@@ -65,13 +70,19 @@ Copy the HTTPS URL, for example:
 
 Keep the trailing slash out of your copy if you like; the Android Gradle snippet normalizes it.
 
-### A7. Verify from your laptop browser
+### A8. Verify from your laptop browser
 
 Open:
 
 `https://your-service-name.up.railway.app/health`
 
 You should see JSON like `{ "status": "ok", ... }`.
+
+Then open:
+
+`https://your-service-name.up.railway.app/v1/air`
+
+You should see `{"occupied":false}` unless you set **`AIR_OCCUPIED=1`**.
 
 Then open:
 
@@ -152,6 +163,7 @@ Rebuild after adding files.
 
 | Symptom | What to check |
 |--------|----------------|
+| Android shows **BUSY** while PTT even on Wi‑Fi | You are **OFFLINE** (no `ONLINE` in status), or **`AIR_OCCUPIED=1`** on the server, or `/v1/air` returns errors (treated as busy). |
 | Android shows **OFFLINE** / fallback | Wrong `radio.api.base.url`, device offline, or server sleeping on free tier. Open `/health` in a browser. |
 | **401 unauthorized** from `/v1/channels` | `RADIO_API_KEY` set on server but `radio.api.key` missing/wrong in `local.properties`. |
 | Gradle can’t find `local.properties` | It must live in **`android-app/`** root (Gradle project root), not inside `app/`. |

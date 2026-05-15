@@ -13,6 +13,7 @@ import java.io.IOException
  * - channel_switch.wav
  * - ptt_permit.wav
  * - emergency.wav
+ * - busy.wav (repeater busy / no path to air)
  */
 class AssetRadioUiSoundPlayer(
     private val app: Application,
@@ -20,6 +21,7 @@ class AssetRadioUiSoundPlayer(
 
     private val main = Handler(Looper.getMainLooper())
     private var talkPermitPlayer: MediaPlayer? = null
+    private var busyTonePlayer: MediaPlayer? = null
 
     override fun playChannelSwitch() {
         playOneShot(FILE_CHANNEL_SWITCH)
@@ -27,6 +29,7 @@ class AssetRadioUiSoundPlayer(
 
     override fun startTalkPermitLoop() {
         main.post {
+            stopBusyLoopInternal()
             stopTalkPermitLoopInternal()
             val player = createLoopingPlayer(FILE_TALK_PERMIT) ?: return@post
             talkPermitPlayer = player
@@ -37,6 +40,19 @@ class AssetRadioUiSoundPlayer(
         main.post { stopTalkPermitLoopInternal() }
     }
 
+    override fun startBusyLoop() {
+        main.post {
+            stopTalkPermitLoopInternal()
+            stopBusyLoopInternal()
+            val player = createLoopingPlayer(FILE_BUSY) ?: return@post
+            busyTonePlayer = player
+        }
+    }
+
+    override fun stopBusyLoop() {
+        main.post { stopBusyLoopInternal() }
+    }
+
     override fun playEmergencyAlert() {
         playOneShot(FILE_EMERGENCY)
     }
@@ -44,6 +60,7 @@ class AssetRadioUiSoundPlayer(
     override fun release() {
         main.post {
             stopTalkPermitLoopInternal()
+            stopBusyLoopInternal()
         }
     }
 
@@ -53,6 +70,14 @@ class AssetRadioUiSoundPlayer(
             release()
         }
         talkPermitPlayer = null
+    }
+
+    private fun stopBusyLoopInternal() {
+        busyTonePlayer?.runCatching {
+            stop()
+            release()
+        }
+        busyTonePlayer = null
     }
 
     private fun playOneShot(fileName: String) {
@@ -113,5 +138,6 @@ class AssetRadioUiSoundPlayer(
         const val FILE_CHANNEL_SWITCH = "channel_switch.wav"
         const val FILE_TALK_PERMIT = "ptt_permit.wav"
         const val FILE_EMERGENCY = "emergency.wav"
+        const val FILE_BUSY = "busy.wav"
     }
 }

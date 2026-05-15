@@ -19,12 +19,20 @@ data class RadioUiState(
     val softKeyLabels: List<String>,
     val isPttPressed: Boolean,
     val isEmergencyActive: Boolean,
+    val pttBusyTone: Boolean,
     val statusMessage: String,
     val channelsLoading: Boolean,
     val channelSyncError: String?,
     val channelSourceLabel: String,
     val micPermissionGranted: Boolean,
     val micHint: String,
+    /** Reflective day LCD vs backlit night LCD (UI only). */
+    val displayNightMode: Boolean,
+    /** UI toggles for scan / GPS rows (soft keys). */
+    val scanActive: Boolean,
+    val gpsActive: Boolean,
+    /** Soft-key RSSI detail expansion (UI only). */
+    val rssiExpanded: Boolean,
 ) {
     init {
         require(softKeyLabels.size == SOFT_KEY_COUNT) {
@@ -33,7 +41,7 @@ data class RadioUiState(
     }
 
     companion object {
-        const val SOFT_KEY_COUNT = 4
+        const val SOFT_KEY_COUNT = 5
 
         fun initial(): RadioUiState = RadioUiState(
             systemTime = "--:--",
@@ -41,22 +49,27 @@ data class RadioUiState(
             batteryPercent = 100,
             signalBars = 0,
             maxSignalBars = 5,
-            zoneLabel = "ZONE 1",
+            zoneLabel = "ZONE 01",
             channelLabel = "----",
             channelPosition = "-- / --",
             totalChannels = 0,
-            displayLine1 = "ENTERPRISE PTT",
-            displayLine2 = "PRIVATE MODE",
+            displayLine1 = "SUNSET SAFETY AGENCY",
+            displayLine2 = "OPERATIONS",
             displayLine3 = "CHANNELS: LOADING",
-            softKeyLabels = listOf("MENU", "SCAN", "GPS", "EXIT"),
+            softKeyLabels = listOf("PTT", "RSSI", "SCAN", "GPS", "CHAN"),
             isPttPressed = false,
             isEmergencyActive = false,
+            pttBusyTone = false,
             statusMessage = "STARTING",
             channelsLoading = true,
             channelSyncError = null,
             channelSourceLabel = "---",
             micPermissionGranted = false,
             micHint = "MIC: ALLOW ACCESS",
+            displayNightMode = true,
+            scanActive = false,
+            gpsActive = false,
+            rssiExpanded = false,
         )
     }
 }

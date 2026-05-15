@@ -7,6 +7,8 @@ interface RadioUiSoundPlayer {
     fun playChannelSwitch()
     fun startTalkPermitLoop()
     fun stopTalkPermitLoop()
+    fun startBusyLoop()
+    fun stopBusyLoop()
     fun playEmergencyAlert()
     fun release()
 }
