@@ -1,13 +1,15 @@
 package com.securityradio.ptt.device
 
 import android.app.Application
+import android.media.AudioAttributes
 import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
 import java.io.IOException
 
 /**
- * Plays packaged handset cues from `assets/sounds/` when files exist (formats supported by [MediaPlayer]).
+ * Default short synthetic tones are bundled under `assets/sounds/` so the app is audible out of the box;
+ * replace them with your own WAV files anytime (same filenames).
  *
  * Expected filenames (WAV recommended):
  * - channel_switch.wav
@@ -22,6 +24,18 @@ class AssetRadioUiSoundPlayer(
     private val main = Handler(Looper.getMainLooper())
     private var talkPermitPlayer: MediaPlayer? = null
     private var busyTonePlayer: MediaPlayer? = null
+
+    private val uiAudioAttrs: AudioAttributes =
+        AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+
+    private fun MediaPlayer.applyUiAudio(): MediaPlayer {
+        setAudioAttributes(uiAudioAttrs)
+        setVolume(1f, 1f)
+        return this
+    }
 
     override fun playChannelSwitch() {
         playOneShot(FILE_CHANNEL_SWITCH)
@@ -91,7 +105,7 @@ class AssetRadioUiSoundPlayer(
                 return@post
             }
             afd.use {
-                val player = MediaPlayer()
+                val player = MediaPlayer().applyUiAudio()
                 try {
                     player.setDataSource(it.fileDescriptor, it.startOffset, it.length)
                     player.setOnPreparedListener { prepared ->
@@ -119,7 +133,7 @@ class AssetRadioUiSoundPlayer(
             return null
         }
         return try {
-            MediaPlayer().apply {
+            MediaPlayer().applyUiAudio().apply {
                 setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
                 afd.close()
                 isLooping = false
@@ -152,7 +166,7 @@ class AssetRadioUiSoundPlayer(
             return null
         }
         return try {
-            MediaPlayer().apply {
+            MediaPlayer().applyUiAudio().apply {
                 setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
                 afd.close()
                 isLooping = true
