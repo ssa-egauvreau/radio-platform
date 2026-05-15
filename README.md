@@ -12,6 +12,7 @@ Build a private enterprise push-to-talk radio platform. Android comes first. iOS
 - Distribution: private APKs
 
 Step-by-step Railway + Android configuration: `docs/railway-android-setup.md`.
+
 ## Architecture rules
 - Keep UI, ViewModel, domain logic, data access, and device integration separate.
 - Use a state-driven Compose architecture.
