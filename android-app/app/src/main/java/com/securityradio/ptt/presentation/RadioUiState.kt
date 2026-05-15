@@ -43,6 +43,21 @@ data class RadioUiState(
     val gpsActive: Boolean,
     /** Soft-key RSSI detail expansion (UI only). */
     val rssiExpanded: Boolean,
+    
+    /** Theme settings. */
+    val themeMode: ThemeMode,
+    
+    /** Hardware button mapping settings. */
+    val mappingSettingsVisible: Boolean,
+    val hardwareMappings: Map<com.securityradio.ptt.device.HardwareAction, Set<Int>>,
+    val currentlyMappingAction: com.securityradio.ptt.device.HardwareAction?,
+
+    /** Setup / Permission state. */
+    val needsAudioPermission: Boolean,
+    val needsAccessibilityService: Boolean,
+
+    /** Debug / Mapping info. */
+    val lastDetectedKey: Int?,
 ) {
     init {
         require(softKeyLabels.size == SOFT_KEY_COUNT) {
@@ -85,6 +100,13 @@ data class RadioUiState(
             scanActive = false,
             gpsActive = false,
             rssiExpanded = false,
+            themeMode = ThemeMode.NIGHT, // Default to Night for tactical look
+            mappingSettingsVisible = false,
+            hardwareMappings = emptyMap(),
+            currentlyMappingAction = null,
+            needsAudioPermission = false,
+            needsAccessibilityService = false,
+            lastDetectedKey = null,
         )
     }
 }

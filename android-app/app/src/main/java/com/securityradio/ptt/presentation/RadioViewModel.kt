@@ -5,23 +5,27 @@ import androidx.lifecycle.viewModelScope
 import com.securityradio.ptt.data.remote.ChannelsApi
 import com.securityradio.ptt.data.remote.TalkActivityDto
 import com.securityradio.ptt.data.remote.TalkerSnapshotDto
+import com.securityradio.ptt.device.HardwareAction
+import com.securityradio.ptt.device.HardwareButtonEvent
+import com.securityradio.ptt.device.HardwareButtonRelay
+import com.securityradio.ptt.device.HardwareMappingRepository
 import com.securityradio.ptt.device.LocalUnitIdentifier
-import com.securityradio.ptt.domain.ChannelCatalogOrigin
-import com.securityradio.ptt.domain.ChannelRepository
 import com.securityradio.ptt.device.PttMicCapture
 import com.securityradio.ptt.device.RadioUiSoundPlayer
+import com.securityradio.ptt.domain.ChannelCatalogOrigin
+import com.securityradio.ptt.domain.ChannelRepository
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.coroutineContext
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 class RadioViewModel(
     private val channelRepository: ChannelRepository,
@@ -29,12 +33,14 @@ class RadioViewModel(
     private val pttMicCapture: PttMicCapture,
     private val channelsApi: ChannelsApi,
     localUnitIdentifier: LocalUnitIdentifier,
+    private val hardwareMappingRepository: HardwareMappingRepository,
 ) : ViewModel() {
 
     private var channelNames: List<String> = emptyList()
     private var channelIndex: Int = 0
 
     private var pttToneJob: Job? = null
+    private var mappingJob: Job? = null
 
     @Volatile
     private var pttMicLiveThisHold: Boolean = false
@@ -48,7 +54,12 @@ class RadioViewModel(
     val uiState: StateFlow<RadioUiState> = _uiState.asStateFlow()
 
     init {
-        _uiState.update { it.copy(localShortUnitId = unitIdUpper) }
+        _uiState.update { 
+            it.copy(
+                localShortUnitId = unitIdUpper,
+                hardwareMappings = hardwareMappingRepository.getAllMappings()
+            ) 
+        }
         viewModelScope.launch {
             while (isActive) {
                 refreshClock()
@@ -60,6 +71,25 @@ class RadioViewModel(
         }
         viewModelScope.launch {
             pollTalkHints()
+        }
+        viewModelScope.launch {
+            HardwareButtonRelay.rawKeyCodes.collect { keyCode ->
+                _uiState.update { it.copy(lastDetectedKey = keyCode) }
+            }
+        }
+        viewModelScope.launch {
+            HardwareButtonRelay.events.collect { event ->
+                when (event) {
+                    HardwareButtonEvent.PttPressed -> onPttPressed()
+                    HardwareButtonEvent.PttReleased -> onPttReleased()
+                    HardwareButtonEvent.EmergencyPressed -> toggleEmergency()
+                    HardwareButtonEvent.ChannelUpPressed -> bumpChannel(+1)
+                    HardwareButtonEvent.ChannelDownPressed -> bumpChannel(-1)
+                    HardwareButtonEvent.ScanTogglePressed -> {
+                        _uiState.update { s -> onScanSoftKeyToggle(s) }
+                    }
+                }
+            }
         }
     }
 
@@ -81,7 +111,16 @@ class RadioViewModel(
         when (event) {
             RadioUiEvent.ToggleDayNight -> {
                 soundPlayer.playChannelSwitch()
-                _uiState.update { it.copy(displayNightMode = !it.displayNightMode) }
+                val nextMode = when (_uiState.value.themeMode) {
+                    ThemeMode.DAY -> ThemeMode.NIGHT
+                    ThemeMode.NIGHT -> ThemeMode.DAY
+                    ThemeMode.AUTO -> ThemeMode.NIGHT
+                }
+                _uiState.update { it.copy(themeMode = nextMode, displayNightMode = nextMode == ThemeMode.NIGHT) }
+            }
+            is RadioUiEvent.SetThemeMode -> {
+                soundPlayer.playChannelSwitch()
+                _uiState.update { it.copy(themeMode = event.mode, displayNightMode = event.mode == ThemeMode.NIGHT) }
             }
             RadioUiEvent.RetryChannelSync -> {
                 soundPlayer.playChannelSwitch()
@@ -89,18 +128,7 @@ class RadioViewModel(
             }
             RadioUiEvent.PttPressed -> onPttPressed()
             RadioUiEvent.PttReleased -> onPttReleased()
-            RadioUiEvent.EmergencyToggle -> {
-                val activating = !_uiState.value.isEmergencyActive
-                if (activating) {
-                    soundPlayer.playEmergencyAlert()
-                }
-                _uiState.update {
-                    it.copy(
-                        isEmergencyActive = activating,
-                        statusMessage = if (activating) "EMERGENCY ACTIVE" else "EMERGENCY OFF",
-                    )
-                }
-            }
+            RadioUiEvent.EmergencyToggle -> toggleEmergency()
             RadioUiEvent.ChannelUp -> bumpChannel(+1)
             RadioUiEvent.ChannelDown -> bumpChannel(-1)
             RadioUiEvent.OpenScanPicker -> {
@@ -119,7 +147,13 @@ class RadioViewModel(
                     "Soft key index out of bounds: ${event.index}"
                 }
                 when (event.index) {
-                    4 -> bumpChannel(+1)
+                    4 -> {
+                        // Use index 4 as a long-press or settings trigger for demonstration,
+                        // or just add a button in the UI. For now, let's keep it as is
+                        // but maybe index 1 long press opens settings?
+                        // Actually, I'll just add the events and let the UI trigger them.
+                        bumpChannel(+1)
+                    }
                     else -> {
                         soundPlayer.playChannelSwitch()
                         _uiState.update { state ->
@@ -135,6 +169,74 @@ class RadioViewModel(
                             }
                         }
                     }
+                }
+            }
+            RadioUiEvent.OpenMappingSettings -> {
+                soundPlayer.playChannelSwitch()
+                _uiState.update { it.copy(mappingSettingsVisible = true) }
+            }
+            RadioUiEvent.CloseMappingSettings -> {
+                soundPlayer.playChannelSwitch()
+                _uiState.update { it.copy(mappingSettingsVisible = false, currentlyMappingAction = null) }
+                mappingJob?.cancel()
+            }
+            is RadioUiEvent.StartListeningForMapping -> {
+                soundPlayer.playChannelSwitch()
+                startMappingSession(event.action)
+            }
+            RadioUiEvent.StopListeningForMapping -> {
+                _uiState.update { it.copy(currentlyMappingAction = null) }
+                mappingJob?.cancel()
+            }
+            is RadioUiEvent.ClearMapping -> {
+                soundPlayer.playChannelSwitch()
+                hardwareMappingRepository.setMapping(event.action, emptySet())
+                _uiState.update { it.copy(hardwareMappings = hardwareMappingRepository.getAllMappings()) }
+            }
+            is RadioUiEvent.ResetMappingToDefault -> {
+                soundPlayer.playChannelSwitch()
+                hardwareMappingRepository.resetToDefault(event.action)
+                _uiState.update { it.copy(hardwareMappings = hardwareMappingRepository.getAllMappings()) }
+            }
+            is RadioUiEvent.UpdatePermissionState -> {
+                _uiState.update { 
+                    it.copy(
+                        needsAudioPermission = event.needsAudio,
+                        needsAccessibilityService = event.needsAccessibility
+                    )
+                }
+            }
+            RadioUiEvent.RequestAudioPermission -> {
+                // Handled in Activity via side effect or observation if needed, 
+                // but we can just trigger the launcher.
+            }
+            RadioUiEvent.OpenAccessibilitySettings -> {
+                // Handled in Activity
+            }
+            RadioUiEvent.RequestIgnoreBatteryOptimizations -> {
+                // Handled in Activity
+            }
+        }
+    }
+
+    private fun startMappingSession(action: HardwareAction) {
+        mappingJob?.cancel()
+        _uiState.update { it.copy(currentlyMappingAction = action) }
+        mappingJob = viewModelScope.launch {
+            // Re-collect to get the very next key event
+            HardwareButtonRelay.rawKeyCodes.collect { keyCode ->
+                val currentMappings = hardwareMappingRepository.getMapping(action)
+                if (keyCode !in currentMappings) {
+                    val nextMappings = currentMappings + keyCode
+                    hardwareMappingRepository.setMapping(action, nextMappings)
+                    _uiState.update {
+                        it.copy(
+                            hardwareMappings = hardwareMappingRepository.getAllMappings(),
+                            currentlyMappingAction = null
+                        )
+                    }
+                    soundPlayer.playChannelSwitch()
+                    mappingJob?.cancel()
                 }
             }
         }
@@ -216,7 +318,7 @@ class RadioViewModel(
                 )
 
                 _uiState.update { s ->
-                    val nextMicHint = micHintForPtt(useBusy = useBusy, micGranted = mic, micLive = micLive)
+                    val nextMicHint = micHintForPtt(micGranted = mic, micLive = micLive)
                     s.copy(
                         pttBusyTone = useBusy,
                         statusMessage = statusHint,
@@ -262,18 +364,17 @@ class RadioViewModel(
             useBusy && !online -> "NO CONNECTION"
             useBusy -> "CHANNEL BUSY"
             micLive && micGranted -> "TX + MIC"
-            micLive && !micGranted -> "TX (NO MIC)"
-            !useBusy && !micLive && stableEnough -> "AIR: OK — PERMIT"
+            micLive -> "TX (NO MIC)"
+            stableEnough -> "AIR: OK — PERMIT"
             else -> "AIR: CHECKING"
         }
     }
 
-    private fun micHintForPtt(useBusy: Boolean, micGranted: Boolean, micLive: Boolean): String {
+    private fun micHintForPtt(micGranted: Boolean, micLive: Boolean): String {
         return when {
             micLive && micGranted -> "MIC: MONITOR ON"
-            micGranted && !micLive -> "MIC: STANDBY"
-            !micGranted -> "MIC: ALLOW MIC"
-            else -> "MIC: STANDBY"
+            micGranted -> "MIC: STANDBY"
+            else -> "MIC: ALLOW MIC"
         }
     }
 
@@ -309,6 +410,19 @@ class RadioViewModel(
                 pttBusyTone = false,
                 statusMessage = "RX IDLE",
                 micHint = if (granted) "MIC: READY" else "MIC: ALLOW MIC",
+            )
+        }
+    }
+
+    private fun toggleEmergency() {
+        val activating = !_uiState.value.isEmergencyActive
+        if (activating) {
+            soundPlayer.playEmergencyAlert()
+        }
+        _uiState.update {
+            it.copy(
+                isEmergencyActive = activating,
+                statusMessage = if (activating) "EMERGENCY ACTIVE" else "EMERGENCY OFF",
             )
         }
     }
@@ -429,7 +543,7 @@ class RadioViewModel(
     }
 
     private suspend fun pollTalkHints() {
-        while (coroutineContext.isActive) {
+        while (currentCoroutineContext().isActive) {
             delay(TALK_ACTIVITY_POLL_MS)
             if (_uiState.value.networkLabel == "OFFLINE") {
                 if (_uiState.value.rxAttributedLine.isNotEmpty()) {

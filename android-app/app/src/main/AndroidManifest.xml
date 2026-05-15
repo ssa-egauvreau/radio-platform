@@ -22,6 +22,36 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".device.InricoHardwareService"
+            android:exported="true"
+            android:label="@string/app_name"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/accessibility_service_config" />
+        </service>
+
+        <receiver
+            android:name=".device.InricoBroadcastReceiver"
+            android:exported="true">
+            <intent-filter android:priority="999">
+                <action android:name="com.zello.ptt.down" />
+                <action android:name="com.zello.ptt.up" />
+                <action android:name="android.intent.action.PTT.down" />
+                <action android:name="android.intent.action.PTT.up" />
+                <action android:name="com.android.ptt.down" />
+                <action android:name="com.android.ptt.up" />
+                <action android:name="com.zello.intent.channelUp" />
+                <action android:name="com.zello.intent.channelDown" />
+                <action android:name="com.android.intent.action.CHANNEL_UP" />
+                <action android:name="com.android.intent.action.CHANNEL_DOWN" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

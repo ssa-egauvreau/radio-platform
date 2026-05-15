@@ -21,13 +21,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
-import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
@@ -36,7 +36,10 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.securityradio.ptt.device.HardwareAction
 import com.securityradio.ptt.presentation.RadioUiEvent
 import com.securityradio.ptt.presentation.RadioUiState
 import com.securityradio.ptt.ui.lcd.LcdDayNightIcon
@@ -74,8 +78,15 @@ fun RadioShell(
     onRequestMicPermission: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val systemDark = isSystemInDarkTheme()
+    val isNight = when (state.themeMode) {
+        com.securityradio.ptt.presentation.ThemeMode.AUTO -> systemDark
+        com.securityradio.ptt.presentation.ThemeMode.DAY -> false
+        com.securityradio.ptt.presentation.ThemeMode.NIGHT -> true
+    }
+
     Crossfade(
-        targetState = state.displayNightMode,
+        targetState = isNight,
         animationSpec = tween(durationMillis = 210),
         label = "lcd_day_night",
         modifier = modifier.fillMaxSize(),
@@ -161,6 +172,8 @@ fun RadioScreen(
             LcdSoftKeyRow(labels = state.softKeyLabels, state = state, onEvent = onEvent, styles = styles)
         }
         ScanChannelPickerDialog(state = state, onEvent = onEvent)
+        HardwareMappingDialog(state = state, onEvent = onEvent, styles = styles)
+        SetupRequiredDialog(state = state, onEvent = onEvent)
     }
 }
 
@@ -243,6 +256,18 @@ private fun LcdStatusBar(
                     style = styles.status,
                     color = p.textSecondary,
                 )
+                Box(
+                    modifier = Modifier
+                        .size(22.dp)
+                        .clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "⚙",
+                        style = styles.status.copy(fontSize = 16.sp),
+                        color = p.textSecondary,
+                    )
+                }
                 Box(
                     modifier = Modifier
                         .size(22.dp)
@@ -803,5 +828,181 @@ private fun ScanChannelPickerDialog(
                 Text("DONE", color = p.statusBlue)
             }
         },
+    )
+}
+
+@Composable
+fun HardwareMappingDialog(
+    state: RadioUiState,
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+) {
+    if (!state.mappingSettingsVisible) return
+    val p = RadioLcdTheme.palette
+
+    AlertDialog(
+        onDismissRequest = { onEvent(RadioUiEvent.CloseMappingSettings) },
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "BUTTON MAPPING",
+                    color = p.textPrimary,
+                )
+                state.lastDetectedKey?.let {
+                    Text(
+                        text = "LAST KEY: $it",
+                        style = styles.status,
+                        color = p.statusBlue
+                    )
+                }
+            }
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 450.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                itemsIndexed(HardwareAction.entries) { _, action ->
+                    val codes = state.hardwareMappings[action] ?: emptySet()
+                    val isListening = state.currentlyMappingAction == action
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(1.dp, p.divider, RoundedCornerShape(4.dp))
+                            .background(if (isListening) p.statusBlue.copy(alpha = 0.1f) else Color.Transparent)
+                            .padding(8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = action.label.uppercase(Locale.US),
+                                style = styles.body.copy(fontWeight = FontWeight.Bold),
+                                color = p.textPrimary
+                            )
+                            if (isListening) {
+                                Text(
+                                    text = "PRESS BUTTON...",
+                                    style = styles.status,
+                                    color = p.statusAmber
+                                )
+                            }
+                        }
+                        
+                        Text(
+                            text = if (codes.isEmpty()) "NO KEYS MAPPED" else "KEYS: ${codes.joinToString(", ")}",
+                            style = styles.status,
+                            color = p.textMuted,
+                            modifier = Modifier.padding(vertical = 4.dp)
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    if (isListening) onEvent(RadioUiEvent.StopListeningForMapping)
+                                    else onEvent(RadioUiEvent.StartListeningForMapping(action))
+                                },
+                                modifier = Modifier.weight(1f),
+                                colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                    containerColor = if (isListening) p.statusAmber else p.softKeyInactiveFill,
+                                    contentColor = p.textOnButton
+                                )
+                            ) {
+                                Text(if (isListening) "STOP" else "ADD")
+                            }
+                            TextButton(
+                                onClick = { onEvent(RadioUiEvent.ResetMappingToDefault(action)) },
+                                modifier = Modifier.weight(1f),
+                                colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                    containerColor = p.softKeyInactiveFill,
+                                    contentColor = p.textOnButton
+                                )
+                            ) {
+                                Text("DEFAULT")
+                            }
+                            TextButton(
+                                onClick = { onEvent(RadioUiEvent.ClearMapping(action)) },
+                                modifier = Modifier.weight(1f),
+                                colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                    containerColor = p.softKeyInactiveFill,
+                                    contentColor = p.textOnButton
+                                )
+                            ) {
+                                Text("CLEAR")
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onEvent(RadioUiEvent.CloseMappingSettings) }) {
+                Text("DONE", color = p.statusBlue)
+            }
+        },
+    )
+}
+
+@Composable
+fun SetupRequiredDialog(
+    state: RadioUiState,
+    onEvent: (RadioUiEvent) -> Unit,
+) {
+    if (!state.needsAudioPermission && !state.needsAccessibilityService) return
+    val p = RadioLcdTheme.palette
+
+    AlertDialog(
+        onDismissRequest = { /* Force setup */ },
+        title = {
+            Text(
+                text = "SETUP REQUIRED",
+                color = p.textPrimary,
+            )
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Text(
+                    text = "The radio requires permissions to function correctly.",
+                    color = p.textSecondary
+                )
+                
+                if (state.needsAudioPermission) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("• MICROPHONE ACCESS", fontWeight = FontWeight.Bold, color = p.textPrimary)
+                        Text("Required for transmitting voice over the radio.", fontSize = 12.sp, color = p.textMuted)
+                        TextButton(
+                            onClick = { onEvent(RadioUiEvent.RequestAudioPermission) },
+                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(containerColor = p.softKeyInactiveFill)
+                        ) {
+                            Text("GRANT MICROPHONE", color = p.textOnButton)
+                        }
+                    }
+                }
+
+                if (state.needsAccessibilityService) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("• ACCESSIBILITY SERVICE", fontWeight = FontWeight.Bold, color = p.textPrimary)
+                        Text("Required for physical PTT & Emergency buttons to work in background.", fontSize = 12.sp, color = p.textMuted)
+                        TextButton(
+                            onClick = { onEvent(RadioUiEvent.OpenAccessibilitySettings) },
+                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(containerColor = p.softKeyInactiveFill)
+                        ) {
+                            Text("ENABLE SERVICE", color = p.textOnButton)
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {}
     )
 }
