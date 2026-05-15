@@ -13,6 +13,12 @@ data class RadioUiState(
     val channelLabel: String,
     val channelPosition: String,
     val totalChannels: Int,
+    /** Channel names from catalog (for scan picker labels). */
+    val channelCatalog: List<String>,
+    /** Indices into [channelCatalog] included in scan when [scanActive] is true (never includes home channel). */
+    val scanIncludedChannelIndices: Set<Int>,
+    /** Multi-select picker for scan list. */
+    val scanPickerVisible: Boolean,
     val displayLine1: String,
     val displayLine2: String,
     val displayLine3: String,
@@ -26,6 +32,10 @@ data class RadioUiState(
     val channelSourceLabel: String,
     val micPermissionGranted: Boolean,
     val micHint: String,
+    /** Stable short unit id for TX line (persisted). */
+    val localShortUnitId: String,
+    /** Server hint: formatted RX attribution when someone else is keyed (main channel wins over scan). */
+    val rxAttributedLine: String,
     /** Reflective day LCD vs backlit night LCD (UI only). */
     val displayNightMode: Boolean,
     /** UI toggles for scan / GPS rows (soft keys). */
@@ -53,6 +63,9 @@ data class RadioUiState(
             channelLabel = "----",
             channelPosition = "-- / --",
             totalChannels = 0,
+            channelCatalog = emptyList(),
+            scanIncludedChannelIndices = emptySet(),
+            scanPickerVisible = false,
             displayLine1 = "SUNSET SAFETY AGENCY",
             displayLine2 = "OPERATIONS",
             displayLine3 = "CHANNELS: LOADING",
@@ -66,6 +79,8 @@ data class RadioUiState(
             channelSourceLabel = "---",
             micPermissionGranted = false,
             micHint = "MIC: ALLOW ACCESS",
+            localShortUnitId = "",
+            rxAttributedLine = "",
             displayNightMode = true,
             scanActive = false,
             gpsActive = false,

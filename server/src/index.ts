@@ -52,6 +52,37 @@ app.get("/v1/air", (_req, res) => {
   res.json({ occupied });
 });
 
+/**
+ * Optional talker hints for UI ("who is keyed"). Android merges with main vs scan priority locally.
+ * Railway env (optional):
+ *   MOCK_TALK_MAIN_ACTIVE, MOCK_TALK_MAIN_CHANNEL, MOCK_TALK_MAIN_UNIT, MOCK_TALK_MAIN_USER
+ *   MOCK_TALK_SCAN_ACTIVE, MOCK_TALK_SCAN_CHANNEL, MOCK_TALK_SCAN_UNIT, MOCK_TALK_SCAN_USER
+ */
+app.get("/v1/talk-activity", (_req, res) => {
+  const truthy = (v: string | undefined): boolean => {
+    const t = (v ?? "").trim().toLowerCase();
+    return t === "1" || t === "true" || t === "yes";
+  };
+
+  const mainActive = truthy(process.env.MOCK_TALK_MAIN_ACTIVE);
+  const scanActive = truthy(process.env.MOCK_TALK_SCAN_ACTIVE);
+
+  res.json({
+    main: {
+      channel: (process.env.MOCK_TALK_MAIN_CHANNEL ?? "Green 1").trim(),
+      active: mainActive,
+      unit_id: process.env.MOCK_TALK_MAIN_UNIT?.trim() ?? null,
+      username: process.env.MOCK_TALK_MAIN_USER?.trim() ?? null,
+    },
+    scan: {
+      channel: (process.env.MOCK_TALK_SCAN_CHANNEL ?? "Green 2").trim(),
+      active: scanActive,
+      unit_id: process.env.MOCK_TALK_SCAN_UNIT?.trim() ?? null,
+      username: process.env.MOCK_TALK_SCAN_USER?.trim() ?? null,
+    },
+  });
+});
+
 const port = Number(process.env.PORT ?? 8080);
 
 async function main(): Promise<void> {

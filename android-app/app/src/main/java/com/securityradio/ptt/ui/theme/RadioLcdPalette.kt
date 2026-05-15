@@ -4,7 +4,6 @@ import androidx.compose.ui.graphics.Color
 
 /**
  * Day / night LCD palettes inspired by public-safety radio displays.
- * Values are generic recreations for Sunset Safety Agency branding only.
  */
 data class RadioLcdPalette(
     val lcdMain: Color,
@@ -13,7 +12,7 @@ data class RadioLcdPalette(
     val textPrimary: Color,
     val textSecondary: Color,
     val textMuted: Color,
-    /** Labels on #646464 (or other dark) control surfaces (soft keys, CH±, PTT idle). */
+    /** Labels on gray control surfaces (soft keys, CH±, PTT idle). */
     val textOnButton: Color,
     val statusGreen: Color,
     val statusAmber: Color,
@@ -29,6 +28,9 @@ data class RadioLcdPalette(
     val materialSurface: Color,
     val materialOnSurface: Color,
     val materialPrimary: Color,
+    /** Wash over main LCD while transmitting / busy */
+    val txOverlayClear: Color,
+    val txOverlayBusy: Color,
 ) {
     companion object {
         fun day(): RadioLcdPalette = RadioLcdPalette(
@@ -36,8 +38,8 @@ data class RadioLcdPalette(
             lcdAlt = Color(0xFFFFFFFF),
             lcdSection = Color(0xFFFFFFFF),
             textPrimary = Color(0xFF3F3F3F),
-            textSecondary = Color(0xFF3F3F3F),
-            textMuted = Color(0xFF6A6A6A),
+            textSecondary = Color(0xFF2962CC),
+            textMuted = Color(0xFF4478D9),
             textOnButton = Color(0xFFFFFFFF),
             statusGreen = Color(0xFF22B14C),
             statusAmber = Color(0xFFF4B400),
@@ -53,30 +55,35 @@ data class RadioLcdPalette(
             materialSurface = Color(0xFFFFFFFF),
             materialOnSurface = Color(0xFF3F3F3F),
             materialPrimary = Color(0xFF2B6DFF),
+            txOverlayClear = Color(0xFF22B14C),
+            txOverlayBusy = Color(0xFFF4B400),
         )
 
+        /** Black / grey / dark blue tactical night LCD (minimal green tint). */
         fun night(): RadioLcdPalette = RadioLcdPalette(
-            lcdMain = Color(0xFF0D1114),
-            lcdAlt = Color(0xFF151A1E),
-            lcdSection = Color(0xFF1B2126),
-            textPrimary = Color(0xFFD8F3D0),
-            textSecondary = Color(0xFFA8C7A2),
-            textMuted = Color(0xFF6E8A73),
-            textOnButton = Color(0xFFD8F3D0),
-            statusGreen = Color(0xFF3CFF6A),
-            statusAmber = Color(0xFFFFC940),
-            statusEmergency = Color(0xFFFF6430),
-            statusBlue = Color(0xFF58A6FF),
-            divider = Color(0xFF2E383F),
-            softKeyActiveFill = Color(0xFF232C33),
-            softKeyInactiveFill = Color(0xFF1B2126),
-            pttIdleFill = Color(0xFF151A1E),
-            pttTransmitFill = Color(0xFF3CFF6A),
-            pttBusyFill = Color(0xFFFFC940),
-            emergencyFill = Color(0xFFFF6430),
-            materialSurface = Color(0xFF1B2126),
-            materialOnSurface = Color(0xFFD8F3D0),
-            materialPrimary = Color(0xFF58A6FF),
+            lcdMain = Color(0xFF05070B),
+            lcdAlt = Color(0xFF0A1018),
+            lcdSection = Color(0xFF101722),
+            textPrimary = Color(0xFFC5D4E8),
+            textSecondary = Color(0xFF8FA9C4),
+            textMuted = Color(0xFF5C6F8A),
+            textOnButton = Color(0xFFE8EEF9),
+            statusGreen = Color(0xFF4ADE80),
+            statusAmber = Color(0xFFFFC048),
+            statusEmergency = Color(0xFFFF6B42),
+            statusBlue = Color(0xFF5B9FFF),
+            divider = Color(0xFF1E2A38),
+            softKeyActiveFill = Color(0xFF253044),
+            softKeyInactiveFill = Color(0xFF182230),
+            pttIdleFill = Color(0xFF161E2C),
+            pttTransmitFill = Color(0xFF3866D9),
+            pttBusyFill = Color(0xFFC98A26),
+            emergencyFill = Color(0xFFCC4A29),
+            materialSurface = Color(0xFF101722),
+            materialOnSurface = Color(0xFFC5D4E8),
+            materialPrimary = Color(0xFF5B9FFF),
+            txOverlayClear = Color(0xFF3866D9),
+            txOverlayBusy = Color(0xFFC98A26),
         )
     }
 }

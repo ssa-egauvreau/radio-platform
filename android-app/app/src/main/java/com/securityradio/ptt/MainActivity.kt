@@ -47,6 +47,7 @@ class MainActivity : ComponentActivity() {
                     state = state,
                     onEvent = viewModel::onEvent,
                     onRequestMicPermission = {
+                        viewModel.playUiMenuSound()
                         micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                     },
                 )

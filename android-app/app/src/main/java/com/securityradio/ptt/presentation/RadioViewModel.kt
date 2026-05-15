@@ -3,6 +3,9 @@ package com.securityradio.ptt.presentation
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.securityradio.ptt.data.remote.ChannelsApi
+import com.securityradio.ptt.data.remote.TalkActivityDto
+import com.securityradio.ptt.data.remote.TalkerSnapshotDto
+import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.domain.ChannelCatalogOrigin
 import com.securityradio.ptt.domain.ChannelRepository
 import com.securityradio.ptt.device.PttMicCapture
@@ -24,6 +27,7 @@ class RadioViewModel(
     private val soundPlayer: RadioUiSoundPlayer,
     private val pttMicCapture: PttMicCapture,
     private val channelsApi: ChannelsApi,
+    localUnitIdentifier: LocalUnitIdentifier,
 ) : ViewModel() {
 
     private var channelNames: List<String> = emptyList()
@@ -34,10 +38,13 @@ class RadioViewModel(
     private val timeFormatter: DateTimeFormatter =
         DateTimeFormatter.ofPattern("HH:mm", Locale.US)
 
+    private val unitIdUpper: String = localUnitIdentifier.shortUnitId()
+
     private val _uiState = MutableStateFlow(RadioUiState.initial())
     val uiState: StateFlow<RadioUiState> = _uiState.asStateFlow()
 
     init {
+        _uiState.update { it.copy(localShortUnitId = unitIdUpper) }
         viewModelScope.launch {
             while (isActive) {
                 refreshClock()
@@ -47,6 +54,14 @@ class RadioViewModel(
         viewModelScope.launch {
             syncCatalog(playConnectSoundIfNetwork = true)
         }
+        viewModelScope.launch {
+            pollTalkHints()
+        }
+    }
+
+    /** Menu / non-PTT control click sound (same as channel switch WAV). */
+    fun playUiMenuSound() {
+        soundPlayer.playChannelSwitch()
     }
 
     fun onMicPermissionResult(granted: Boolean) {
@@ -61,10 +76,12 @@ class RadioViewModel(
     fun onEvent(event: RadioUiEvent) {
         when (event) {
             RadioUiEvent.ToggleDayNight -> {
+                soundPlayer.playChannelSwitch()
                 _uiState.update { it.copy(displayNightMode = !it.displayNightMode) }
             }
             RadioUiEvent.RetryChannelSync -> {
-                viewModelScope.launch { syncCatalog(playConnectSoundIfNetwork = true) }
+                soundPlayer.playChannelSwitch()
+                viewModelScope.launch { syncCatalog(playConnectSoundIfNetwork = false) }
             }
             RadioUiEvent.PttPressed -> onPttPressed()
             RadioUiEvent.PttReleased -> onPttReleased()
@@ -82,29 +99,74 @@ class RadioViewModel(
             }
             RadioUiEvent.ChannelUp -> bumpChannel(+1)
             RadioUiEvent.ChannelDown -> bumpChannel(-1)
+            RadioUiEvent.OpenScanPicker -> {
+                soundPlayer.playChannelSwitch()
+                if (_uiState.value.channelCatalog.size > 1) {
+                    _uiState.update { it.copy(scanPickerVisible = true) }
+                }
+            }
+            RadioUiEvent.CloseScanPicker -> {
+                soundPlayer.playChannelSwitch()
+                _uiState.update { it.copy(scanPickerVisible = false) }
+            }
+            is RadioUiEvent.ToggleScanIncludeChannel -> toggleScanIncluded(event.catalogIndex)
             is RadioUiEvent.SoftKeyPressed -> {
                 require(event.index in 0 until RadioUiState.SOFT_KEY_COUNT) {
                     "Soft key index out of bounds: ${event.index}"
                 }
                 when (event.index) {
                     4 -> bumpChannel(+1)
-                    else -> _uiState.update { state ->
-                        when (event.index) {
-                            0 -> state.copy(statusMessage = "PTT: HOLD LCD BAR")
-                            1 -> state.copy(rssiExpanded = !state.rssiExpanded)
-                            2 -> state.copy(
-                                scanActive = !state.scanActive,
-                                statusMessage = if (!state.scanActive) "SCAN ON" else "SCAN OFF",
-                            )
-                            3 -> state.copy(
-                                gpsActive = !state.gpsActive,
-                                statusMessage = if (!state.gpsActive) "GPS ON" else "GPS OFF",
-                            )
-                            else -> state
+                    else -> {
+                        soundPlayer.playChannelSwitch()
+                        _uiState.update { state ->
+                            when (event.index) {
+                                0 -> state.copy(statusMessage = "PTT: HOLD LCD BAR")
+                                1 -> state.copy(rssiExpanded = !state.rssiExpanded)
+                                2 -> onScanSoftKeyToggle(state)
+                                3 -> state.copy(
+                                    gpsActive = !state.gpsActive,
+                                    statusMessage = if (!state.gpsActive) "GPS ON" else "GPS OFF",
+                                )
+                                else -> state
+                            }
                         }
                     }
                 }
             }
+        }
+    }
+
+    /** SCAN soft key toggles scan; first enable seeds selection to every channel except tuned home. */
+    private fun onScanSoftKeyToggle(state: RadioUiState): RadioUiState {
+        val turningOn = !state.scanActive
+        val nextScanOn = turningOn
+        val newIncludes = when {
+            !nextScanOn -> state.scanIncludedChannelIndices
+            channelNames.size <= 1 -> emptySet()
+            else -> {
+                val homeExcluded = channelIndex.coerceIn(0, channelNames.lastIndex)
+                channelNames.indices.filter { it != homeExcluded }.toSet()
+            }
+        }
+        return state.copy(
+            scanActive = nextScanOn,
+            scanIncludedChannelIndices = newIncludes,
+            statusMessage = if (nextScanOn) "SCAN ON" else "SCAN OFF",
+        )
+    }
+
+    private fun toggleScanIncluded(idx: Int) {
+        soundPlayer.playChannelSwitch()
+        if (idx !in channelNames.indices || idx == channelIndex.coerceIn(0, channelNames.lastIndex.coerceAtLeast(0))) {
+            return
+        }
+        _uiState.update { s ->
+            val next = if (idx in s.scanIncludedChannelIndices) {
+                s.scanIncludedChannelIndices - idx
+            } else {
+                s.scanIncludedChannelIndices + idx
+            }
+            s.copy(scanIncludedChannelIndices = next)
         }
     }
 
@@ -127,7 +189,6 @@ class RadioViewModel(
             var audioPrevSample: Boolean? = null
             var audioStableCount = 0
             var audioCommittedBusy: Boolean? = null
-            /** At most one talk-permit cue per PTT hold (prevents repeated restarts if air flaps). */
             var talkPermitCuePlayedThisHold = false
             while (isActive && _uiState.value.isPttPressed) {
                 val snapshot = _uiState.value
@@ -191,7 +252,7 @@ class RadioViewModel(
                 isPttPressed = false,
                 pttBusyTone = false,
                 statusMessage = "RX IDLE",
-                micHint = if (granted) "MIC: READY (NO MONITOR)" else "MIC: ALLOW MIC",
+                micHint = if (granted) "MIC: READY" else "MIC: ALLOW MIC",
             )
         }
     }
@@ -203,7 +264,7 @@ class RadioViewModel(
         channelIndex = (channelIndex + delta + channelNames.size) % channelNames.size
         soundPlayer.playChannelSwitch()
         _uiState.update {
-            it.withTuning(channelNames, channelIndex).copy(statusMessage = "CHANNEL ${if (delta > 0) "+" else "-"}")
+            it.withTuning(channelNames, channelIndex).pruneScanSets().copy(statusMessage = "CHANNEL ${if (delta > 0) "+" else "-"}")
         }
     }
 
@@ -244,7 +305,7 @@ class RadioViewModel(
         }
 
         _uiState.update { state ->
-            state.withTuning(channelNames, channelIndex).copy(
+            state.withTuning(channelNames, channelIndex).pruneScanSets().copy(
                 channelsLoading = false,
                 channelSyncError = catalog.errorMessage,
                 channelSourceLabel = sourceLabel,
@@ -271,6 +332,25 @@ class RadioViewModel(
         _uiState.update { it.copy(systemTime = label) }
     }
 
+    /** Remove scan picks that are invalid or duplicate the tuned home slot. */
+    private fun RadioUiState.pruneScanSets(): RadioUiState {
+        if (channelNames.isEmpty()) {
+            return copy(
+                scanIncludedChannelIndices = emptySet(),
+                channelCatalog = emptyList(),
+            )
+        }
+        val maxI = channelNames.lastIndex
+        val homeIdx = channelIndex.coerceIn(0, maxI)
+        val pruned = scanIncludedChannelIndices
+            .filter { it in 0..maxI && it != homeIdx }
+            .toSet()
+        return copy(
+            channelCatalog = channelNames,
+            scanIncludedChannelIndices = pruned,
+        )
+    }
+
     private fun RadioUiState.withTuning(names: List<String>, index: Int): RadioUiState {
         if (names.isEmpty()) {
             return copy(
@@ -278,6 +358,7 @@ class RadioViewModel(
                 channelPosition = "-- / --",
                 totalChannels = 0,
                 displayLine2 = "OPERATIONS",
+                channelCatalog = emptyList(),
             )
         }
         val safeIndex = index.coerceIn(0, names.lastIndex)
@@ -287,7 +368,71 @@ class RadioViewModel(
             channelPosition = "%02d / %02d".format(safeIndex + 1, names.size),
             totalChannels = names.size,
             displayLine2 = "OPS: ${label.uppercase(Locale.US)}",
+            channelCatalog = names,
         )
+    }
+
+    private suspend fun pollTalkHints() {
+        while (isActive) {
+            delay(TALK_ACTIVITY_POLL_MS)
+            if (_uiState.value.networkLabel == "OFFLINE") {
+                if (_uiState.value.rxAttributedLine.isNotEmpty()) {
+                    _uiState.update { it.copy(rxAttributedLine = "") }
+                }
+                continue
+            }
+            val dto = try {
+                channelsApi.talkActivity()
+            } catch (_: Exception) {
+                null
+            }
+            if (dto != null) {
+                _uiState.update { s -> s.copy(rxAttributedLine = mergedRxAttributedLine(dto, s)) }
+            } else if (_uiState.value.rxAttributedLine.isNotEmpty()) {
+                _uiState.update { it.copy(rxAttributedLine = "") }
+            }
+        }
+    }
+
+    /**
+     * Main channel keyed talk always wins when it matches tuned channel name.
+     * Otherwise, if scan is on and server's scan segment matches one of the scanned channels,
+     * show scan attribution (only when main is not active on tuned channel).
+     */
+    private fun mergedRxAttributedLine(dto: TalkActivityDto, s: RadioUiState): String {
+        val tuned = s.channelLabel.trim()
+        if (tuned.isEmpty() || tuned == "----") return ""
+
+        val main = dto.main
+        if (main != null && main.active && channelNamesMatch(main.channel, tuned)) {
+            return formatTalker(main, "RX")
+        }
+
+        val scanSeg = dto.scan ?: return ""
+
+        val includedNamesLower = s.scanIncludedChannelIndices
+            .mapNotNull { ix -> s.channelCatalog.getOrNull(ix)?.trim()?.lowercase(Locale.US) }
+            .toSet()
+
+        val scanCh = scanSeg.channel.trim().lowercase(Locale.US)
+        if (!scanSeg.active || scanCh.isEmpty() || !s.scanActive) return ""
+        if (channelNamesMatch(scanSeg.channel, tuned)) return ""
+
+        val scanIsOnSideChannel = scanCh in includedNamesLower
+        return if (scanIsOnSideChannel) {
+            formatTalker(scanSeg, "RX")
+        } else {
+            ""
+        }
+    }
+
+    private fun channelNamesMatch(a: String, b: String): Boolean =
+        a.trim().equals(b.trim(), ignoreCase = true)
+
+    private fun formatTalker(t: TalkerSnapshotDto, prefix: String): String {
+        val uid = t.unitId?.trim()?.takeIf { it.isNotEmpty() }?.uppercase(Locale.US) ?: "---"
+        val un = t.username?.trim()?.takeIf { it.isNotEmpty() }
+        return if (un != null) "$prefix: $uid • $un" else "$prefix: $uid"
     }
 
     override fun onCleared() {
@@ -300,7 +445,7 @@ class RadioViewModel(
     private companion object {
         const val CLOCK_TICK_MS = 1_000L
         const val AIR_POLL_MS = 400L
-        /** Require this many matching air samples before playing a new busy/permit cue (reduces rapid flip-flop). */
         const val AIR_AUDIO_STABLE_POLLS = 2
+        const val TALK_ACTIVITY_POLL_MS = 1200L
     }
 }

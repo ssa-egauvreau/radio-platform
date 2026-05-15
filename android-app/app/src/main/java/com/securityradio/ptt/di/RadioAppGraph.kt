@@ -8,6 +8,7 @@ import com.securityradio.ptt.data.remote.ChannelsApi
 import com.securityradio.ptt.data.remote.NetworkModule
 import com.securityradio.ptt.device.AssetRadioUiSoundPlayer
 import com.securityradio.ptt.device.AudioRecordPttCapture
+import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.device.PttMicCapture
 import com.securityradio.ptt.device.RadioUiSoundPlayer
 import com.securityradio.ptt.domain.ChannelRepository
@@ -15,6 +16,8 @@ import com.securityradio.ptt.domain.ChannelRepository
 class RadioAppGraph(application: Application) {
 
     val soundPlayer: RadioUiSoundPlayer = AssetRadioUiSoundPlayer(application)
+
+    val localUnitIdentifier: LocalUnitIdentifier = LocalUnitIdentifier(application)
 
     val pttMicCapture: PttMicCapture = AudioRecordPttCapture()
 

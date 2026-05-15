@@ -20,13 +20,20 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.remember
@@ -37,6 +44,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -152,6 +160,7 @@ fun RadioScreen(
             LcdEmergencyRow(state = state, onEvent = onEvent, styles = styles)
             LcdSoftKeyRow(labels = state.softKeyLabels, state = state, onEvent = onEvent, styles = styles)
         }
+        ScanChannelPickerDialog(state = state, onEvent = onEvent)
     }
 }
 
@@ -311,72 +320,129 @@ private fun LcdMainChannelBlock(
     modifier: Modifier = Modifier,
 ) {
     val p = RadioLcdTheme.palette
-    Column(
+    val txBorder = when {
+        state.isPttPressed && state.pttBusyTone -> p.txOverlayBusy
+        state.isPttPressed -> p.txOverlayClear
+        else -> p.divider
+    }
+    val borderW = if (state.isPttPressed) 3.dp else 1.dp
+    val txWash = when {
+        state.isPttPressed && state.pttBusyTone -> p.txOverlayBusy.copy(alpha = 0.18f)
+        state.isPttPressed -> p.txOverlayClear.copy(alpha = 0.16f)
+        else -> Color.Transparent
+    }
+    val talkLine = when {
+        state.isPttPressed -> {
+            val id = state.localShortUnitId.trim()
+            if (id.isNotEmpty()) "TX: UNIT $id • YOU" else "TX: LOCAL MIC"
+        }
+        else -> state.rxAttributedLine
+    }
+    val talkColor = when {
+        state.isPttPressed && state.pttBusyTone -> p.statusAmber
+        state.isPttPressed -> p.statusGreen
+        else -> p.statusBlue
+    }
+    Box(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(2.dp))
-            .background(p.lcdAlt)
-            .border(1.dp, p.divider, RoundedCornerShape(2.dp))
-            .padding(horizontal = 10.dp, vertical = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+            .border(borderW, txBorder, RoundedCornerShape(2.dp))
+            .background(p.lcdAlt),
     ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-        ) {
-            LcdSegmentButton(
-                label = "CH-",
-                enabled = tunerEnabled,
-                onClick = { onEvent(RadioUiEvent.ChannelDown) },
-                styles = styles,
+        if (txWash != Color.Transparent) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(txWash),
             )
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                LcdListChannelIcon(color = p.textMuted, modifier = Modifier.size(14.dp))
-                Text(
-                    text = state.zoneLabel.uppercase(Locale.US),
-                    style = styles.zone,
-                    color = p.textSecondary,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
+                LcdSegmentButton(
+                    label = "CH-",
+                    enabled = tunerEnabled,
+                    onClick = { onEvent(RadioUiEvent.ChannelDown) },
+                    styles = styles,
                 )
-                Text(
-                    text = state.channelPosition.uppercase(Locale.US),
-                    style = styles.status,
-                    color = p.textMuted,
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    LcdListChannelIcon(color = p.textMuted, modifier = Modifier.size(14.dp))
+                    Text(
+                        text = state.zoneLabel.uppercase(Locale.US),
+                        style = styles.zone,
+                        color = p.textSecondary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = state.channelPosition.uppercase(Locale.US),
+                        style = styles.status,
+                        color = p.textMuted,
+                    )
+                }
+                LcdSegmentButton(
+                    label = "CH+",
+                    enabled = tunerEnabled,
+                    onClick = { onEvent(RadioUiEvent.ChannelUp) },
+                    styles = styles,
                 )
             }
-            LcdSegmentButton(
-                label = "CH+",
-                enabled = tunerEnabled,
-                onClick = { onEvent(RadioUiEvent.ChannelUp) },
-                styles = styles,
+            Text(
+                text = state.channelLabel.uppercase(Locale.US),
+                style = styles.channel,
+                color = p.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.fillMaxWidth(),
+                textAlign = TextAlign.Center,
             )
+            if (talkLine.isNotBlank()) {
+                Text(
+                    text = talkLine.uppercase(Locale.US),
+                    style = styles.body.copy(fontWeight = FontWeight.Bold),
+                    color = talkColor,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                )
+            }
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                LcdBodyLine(text = state.displayLine1, styles = styles)
+                LcdBodyLine(text = state.displayLine2, styles = styles)
+                LcdBodyLine(text = state.displayLine3, styles = styles)
+            }
+            Text(
+                text = state.micHint.uppercase(Locale.US),
+                style = styles.status,
+                color = p.textMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (state.scanActive && state.channelCatalog.size > 1) {
+                Text(
+                    text = "CONFIGURE SCAN LIST",
+                    style = styles.body,
+                    color = p.statusBlue,
+                    modifier = Modifier
+                        .clickable { onEvent(RadioUiEvent.OpenScanPicker) }
+                        .fillMaxWidth(),
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
-        Text(
-            text = state.channelLabel.uppercase(Locale.US),
-            style = styles.channel,
-            color = p.textPrimary,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.fillMaxWidth(),
-            textAlign = TextAlign.Center,
-        )
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            LcdBodyLine(text = state.displayLine1, styles = styles)
-            LcdBodyLine(text = state.displayLine2, styles = styles)
-            LcdBodyLine(text = state.displayLine3, styles = styles)
-        }
-        Text(
-            text = state.micHint.uppercase(Locale.US),
-            style = styles.status,
-            color = p.textMuted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-        )
     }
 }
 
@@ -549,6 +615,7 @@ private fun LcdPttBar(
         LcdMicIcon(
             color = when {
                 state.isPttPressed && state.pttBusyTone -> p.textOnButton
+                state.isPttPressed && state.displayNightMode -> Color.White.copy(alpha = 0.92f)
                 state.isPttPressed -> Color.Black.copy(alpha = 0.85f)
                 else -> p.textOnButton
             },
@@ -561,6 +628,7 @@ private fun LcdPttBar(
                 style = styles.softKey.copy(fontSize = 14.sp),
                 color = when {
                     state.isPttPressed && state.pttBusyTone -> p.textOnButton
+                    state.isPttPressed && state.displayNightMode -> Color.White.copy(alpha = 0.95f)
                     state.isPttPressed -> Color.Black.copy(alpha = 0.9f)
                     else -> p.textOnButton
                 },
@@ -570,6 +638,7 @@ private fun LcdPttBar(
                 style = styles.status,
                 color = when {
                     state.isPttPressed && state.pttBusyTone -> p.textOnButton.copy(alpha = 0.85f)
+                    state.isPttPressed && state.displayNightMode -> Color.White.copy(alpha = 0.72f)
                     state.isPttPressed -> Color.Black.copy(alpha = 0.65f)
                     else -> p.textOnButton.copy(alpha = 0.9f)
                 },
@@ -677,4 +746,62 @@ private fun LcdSoftKeyRow(
             }
         }
     }
+}
+
+@Composable
+private fun ScanChannelPickerDialog(
+    state: RadioUiState,
+    onEvent: (RadioUiEvent) -> Unit,
+) {
+    if (!state.scanPickerVisible || state.channelCatalog.isEmpty()) return
+    val p = RadioLcdTheme.palette
+    val homeIdx = state.channelCatalog.indexOfFirst {
+        it.equals(state.channelLabel.trim(), ignoreCase = true)
+    }
+    AlertDialog(
+        onDismissRequest = { onEvent(RadioUiEvent.CloseScanPicker) },
+        title = {
+            Text(
+                text = "SCAN CHANNEL LIST",
+                color = p.textPrimary,
+            )
+        },
+        text = {
+            LazyColumn(
+                modifier = Modifier.heightIn(max = 380.dp),
+            ) {
+                itemsIndexed(state.channelCatalog) { index, label ->
+                    val isHome = index == homeIdx
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Checkbox(
+                            checked = index in state.scanIncludedChannelIndices,
+                            enabled = !isHome,
+                            onCheckedChange = { if (!isHome) onEvent(RadioUiEvent.ToggleScanIncludeChannel(index)) },
+                        )
+                        Column(Modifier.weight(1f)) {
+                            Text(
+                                text = label.uppercase(Locale.US),
+                                color = if (isHome) p.textMuted else p.textPrimary,
+                            )
+                            if (isHome) {
+                                Text(
+                                    text = "HOME — PRIORITY RX",
+                                    fontSize = 10.sp,
+                                    color = p.statusBlue,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onEvent(RadioUiEvent.CloseScanPicker) }) {
+                Text("DONE", color = p.statusBlue)
+            }
+        },
+    )
 }
