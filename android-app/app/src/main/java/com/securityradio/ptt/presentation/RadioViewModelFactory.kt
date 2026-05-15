@@ -18,6 +18,7 @@ class RadioViewModelFactory(
                 channelsApi = graph.channelsApi,
                 localUnitIdentifier = graph.localUnitIdentifier,
                 hardwareMappingRepository = graph.hardwareMappingRepository,
+                radioPreferences = graph.radioPreferences,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel type ${modelClass.name}")

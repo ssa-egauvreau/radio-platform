@@ -9,12 +9,15 @@ import com.securityradio.ptt.data.remote.NetworkModule
 import com.securityradio.ptt.device.AssetRadioUiSoundPlayer
 import com.securityradio.ptt.device.AudioRecordPttCapture
 import com.securityradio.ptt.device.HardwareMappingRepository
+import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.device.PttMicCapture
 import com.securityradio.ptt.device.RadioUiSoundPlayer
 import com.securityradio.ptt.domain.ChannelRepository
 
 class RadioAppGraph(application: Application) {
+
+    val radioPreferences = RadioPreferences(application)
 
     val hardwareMappingRepository = HardwareMappingRepository(application)
 

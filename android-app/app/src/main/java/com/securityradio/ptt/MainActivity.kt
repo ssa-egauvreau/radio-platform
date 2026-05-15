@@ -1,9 +1,12 @@
 package com.securityradio.ptt
 
 import android.Manifest
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.view.KeyEvent
@@ -21,6 +24,7 @@ import com.securityradio.ptt.device.HardwareButtonEvent
 import com.securityradio.ptt.device.HardwareButtonRelay
 import com.securityradio.ptt.device.HardwareMappingRepository
 import com.securityradio.ptt.device.InricoHardwareService
+import com.securityradio.ptt.device.RadioPresenceService
 import com.securityradio.ptt.presentation.RadioUiEvent
 import com.securityradio.ptt.presentation.RadioViewModel
 import com.securityradio.ptt.presentation.RadioViewModelFactory
@@ -36,6 +40,13 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         radioViewModel.onMicPermissionResult(granted)
+        checkAllPermissions()
+    }
+
+    private val notificationsPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission(),
+    ) {
+        RadioPresenceService.start(this)
         checkAllPermissions()
     }
 
@@ -55,6 +66,12 @@ class MainActivity : ComponentActivity() {
                     checkAllPermissions()
                 }
 
+                LaunchedEffect(radioViewModel) {
+                    radioViewModel.wakeUiSignals.collect {
+                        bringRadioToForeground()
+                    }
+                }
+
                 RadioShell(
                     state = state,
                     onEvent = { event ->
@@ -62,6 +79,7 @@ class MainActivity : ComponentActivity() {
                             RadioUiEvent.RequestAudioPermission -> {
                                 micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                             }
+                            RadioUiEvent.RequestIgnoreBatteryOptimizations -> requestIgnoreBatteryOptimizations()
                             RadioUiEvent.OpenAccessibilitySettings -> {
                                 val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                                 startActivity(intent)
@@ -76,6 +94,22 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+
+        RadioPresenceService.start(this)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (::radioViewModel.isInitialized) {
+            radioViewModel.setMainRadioScreenVisible(true)
+        }
+    }
+
+    override fun onStop() {
+        if (::radioViewModel.isInitialized) {
+            radioViewModel.setMainRadioScreenVisible(false)
+        }
+        super.onStop()
     }
 
     override fun onResume() {
@@ -83,27 +117,73 @@ class MainActivity : ComponentActivity() {
         checkAllPermissions()
     }
 
+    private fun bringRadioToForeground() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP,
+            )
+        }
+        startActivity(intent)
+    }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        try {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                data = Uri.parse("package:${packageName}")
+            }
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            try {
+                startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            } catch (_: ActivityNotFoundException) {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", packageName, null)
+                })
+            }
+        }
+    }
+
     private fun checkAllPermissions() {
         val audioGranted = ContextCompat.checkSelfPermission(
-            this, Manifest.permission.RECORD_AUDIO
+            this,
+            Manifest.permission.RECORD_AUDIO,
         ) == PackageManager.PERMISSION_GRANTED
-        
+
         val accessibilityEnabled = isAccessibilityServiceEnabled(this, InricoHardwareService::class.java)
-        
+
         radioViewModel.onMicPermissionResult(audioGranted)
         radioViewModel.onEvent(
             RadioUiEvent.UpdatePermissionState(
                 needsAudio = !audioGranted,
-                needsAccessibility = !accessibilityEnabled
-            )
+                needsAccessibility = !accessibilityEnabled,
+            ),
         )
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            val notifGranted = ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.POST_NOTIFICATIONS,
+            ) == PackageManager.PERMISSION_GRANTED
+            if (!notifGranted) {
+                val prefs = getSharedPreferences("radio_startup_prefs", MODE_PRIVATE)
+                val key = "requested_post_notifications_v1"
+                if (!prefs.getBoolean(key, false)) {
+                    prefs.edit().putBoolean(key, true).apply()
+                    notificationsPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+                }
+            }
+        }
+
+        RadioPresenceService.start(this)
     }
 
     private fun isAccessibilityServiceEnabled(context: Context, service: Class<*>): Boolean {
         val expectedComponentName = android.content.ComponentName(context, service)
         val enabledServices = Settings.Secure.getString(
             context.contentResolver,
-            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
         ) ?: return false
         val colonSplitter = android.text.TextUtils.SimpleStringSplitter(':')
         colonSplitter.setString(enabledServices)
@@ -118,7 +198,6 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
-        // Send to relay immediately for mapping logic
         HardwareButtonRelay.sendRawKeyCode(keyCode)
 
         val isPtt = repository.getMapping(HardwareAction.PTT).contains(keyCode)

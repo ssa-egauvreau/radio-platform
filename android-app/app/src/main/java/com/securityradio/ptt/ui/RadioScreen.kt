@@ -25,10 +25,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Surface
@@ -53,7 +55,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.securityradio.ptt.device.HardwareAction
 import com.securityradio.ptt.presentation.RadioUiEvent
-import com.securityradio.ptt.presentation.RadioUiState
+import com.securityradio.ptt.presentation.ThemeMode
+import com.securityradio.ptt.presentation.isLcdNight
 import com.securityradio.ptt.ui.lcd.LcdDayNightIcon
 import com.securityradio.ptt.ui.lcd.LcdEmergencyGlyphIcon
 import com.securityradio.ptt.ui.lcd.LcdGpsIcon
@@ -79,11 +82,7 @@ fun RadioShell(
     modifier: Modifier = Modifier,
 ) {
     val systemDark = isSystemInDarkTheme()
-    val isNight = when (state.themeMode) {
-        com.securityradio.ptt.presentation.ThemeMode.AUTO -> systemDark
-        com.securityradio.ptt.presentation.ThemeMode.DAY -> false
-        com.securityradio.ptt.presentation.ThemeMode.NIGHT -> true
-    }
+    val isNight = state.themeMode.isLcdNight(systemDark)
 
     Crossfade(
         targetState = isNight,
@@ -108,6 +107,7 @@ fun RadioShell(
                 ) {
                     RadioScreen(
                         state = state,
+                        lcdNightEffective = night,
                         onEvent = onEvent,
                         onRequestMicPermission = onRequestMicPermission,
                     )
@@ -123,6 +123,7 @@ fun RadioShell(
 @Composable
 fun RadioScreen(
     state: RadioUiState,
+    lcdNightEffective: Boolean,
     onEvent: (RadioUiEvent) -> Unit,
     onRequestMicPermission: () -> Unit,
     modifier: Modifier = Modifier,
@@ -142,6 +143,7 @@ fun RadioScreen(
         ) {
             LcdStatusBar(
                 state = state,
+                lcdNightEffective = lcdNightEffective,
                 onEvent = onEvent,
                 onRequestMicPermission = onRequestMicPermission,
                 styles = styles,
@@ -164,6 +166,7 @@ fun RadioScreen(
             LcdStateBanner(state = state, styles = styles)
             LcdPttBar(
                 state = state,
+                lcdNightEffective = lcdNightEffective,
                 onEvent = onEvent,
                 height = pttHeight,
                 styles = styles,
@@ -191,6 +194,7 @@ private fun LcdDivider() {
 @Composable
 private fun LcdStatusBar(
     state: RadioUiState,
+    lcdNightEffective: Boolean,
     onEvent: (RadioUiEvent) -> Unit,
     onRequestMicPermission: () -> Unit,
     styles: LcdTextStyles,
@@ -275,7 +279,7 @@ private fun LcdStatusBar(
                     contentAlignment = Alignment.Center,
                 ) {
                     LcdDayNightIcon(
-                        night = state.displayNightMode,
+                        night = lcdNightEffective,
                         color = p.textSecondary,
                         modifier = Modifier.size(18.dp),
                     )
@@ -596,6 +600,7 @@ private fun deriveBanner(state: RadioUiState, p: RadioLcdPalette): Triple<String
 @Composable
 private fun LcdPttBar(
     state: RadioUiState,
+    lcdNightEffective: Boolean,
     onEvent: (RadioUiEvent) -> Unit,
     height: Dp,
     styles: LcdTextStyles,
@@ -640,7 +645,7 @@ private fun LcdPttBar(
         LcdMicIcon(
             color = when {
                 state.isPttPressed && state.pttBusyTone -> p.textOnButton
-                state.isPttPressed && state.displayNightMode -> Color.White.copy(alpha = 0.92f)
+                state.isPttPressed && lcdNightEffective -> Color.White.copy(alpha = 0.92f)
                 state.isPttPressed -> Color.Black.copy(alpha = 0.85f)
                 else -> p.textOnButton
             },
@@ -653,7 +658,7 @@ private fun LcdPttBar(
                 style = styles.softKey.copy(fontSize = 14.sp),
                 color = when {
                     state.isPttPressed && state.pttBusyTone -> p.textOnButton
-                    state.isPttPressed && state.displayNightMode -> Color.White.copy(alpha = 0.95f)
+                    state.isPttPressed && lcdNightEffective -> Color.White.copy(alpha = 0.95f)
                     state.isPttPressed -> Color.Black.copy(alpha = 0.9f)
                     else -> p.textOnButton
                 },
@@ -663,7 +668,7 @@ private fun LcdPttBar(
                 style = styles.status,
                 color = when {
                     state.isPttPressed && state.pttBusyTone -> p.textOnButton.copy(alpha = 0.85f)
-                    state.isPttPressed && state.displayNightMode -> Color.White.copy(alpha = 0.72f)
+                    state.isPttPressed && lcdNightEffective -> Color.White.copy(alpha = 0.72f)
                     state.isPttPressed -> Color.Black.copy(alpha = 0.65f)
                     else -> p.textOnButton.copy(alpha = 0.9f)
                 },
@@ -863,9 +868,71 @@ fun HardwareMappingDialog(
         },
         text = {
             LazyColumn(
-                modifier = Modifier.heightIn(max = 450.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                modifier = Modifier.heightIn(max = 560.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                item {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Text(
+                            text = "DISPLAY — DAY / NIGHT",
+                            style = styles.body.copy(fontWeight = FontWeight.Bold),
+                            color = p.textPrimary,
+                        )
+                        Text(
+                            text = "CURRENT: ${state.themeMode.label.uppercase(Locale.US)} · TOP-RIGHT SUN ICON ALSO CYCLES OVERRIDE",
+                            style = styles.status,
+                            color = p.textMuted,
+                        )
+                        HorizontalDivider(color = p.divider)
+                        ThemeMode.entries.forEach { mode ->
+                            val selected = state.themeMode == mode
+                            TextButton(
+                                onClick = { onEvent(RadioUiEvent.SetThemeMode(mode)) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.textButtonColors(
+                                    containerColor = if (selected) {
+                                        p.statusBlue.copy(alpha = 0.16f)
+                                    } else {
+                                        p.softKeyInactiveFill
+                                    },
+                                    contentColor = if (selected) p.statusGreen else p.textPrimary,
+                                ),
+                            ) {
+                                Text(mode.label.uppercase(Locale.US))
+                            }
+                        }
+                        HorizontalDivider(color = p.divider)
+                        Text(
+                            text = "BACKGROUND POWER",
+                            style = styles.body.copy(fontWeight = FontWeight.Bold),
+                            color = p.textPrimary,
+                        )
+                        Text(
+                            text = "Open the battery screen and exempt this app if the manufacturer lets you. OEMs still may stop background work.",
+                            style = styles.status,
+                            color = p.textMuted,
+                        )
+                        TextButton(
+                            onClick = { onEvent(RadioUiEvent.RequestIgnoreBatteryOptimizations) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.textButtonColors(
+                                containerColor = p.softKeyInactiveFill,
+                                contentColor = p.textOnButton,
+                            ),
+                        ) {
+                            Text("IGNORE BATTERY SAVER PROMPT FOR THIS APP".uppercase(Locale.US))
+                        }
+                        HorizontalDivider(color = p.divider)
+                        Text(
+                            text = "HARDWARE KEYS",
+                            style = styles.body.copy(fontWeight = FontWeight.Bold),
+                            color = p.textPrimary,
+                        )
+                    }
+                }
                 itemsIndexed(HardwareAction.entries) { _, action ->
                     val codes = state.hardwareMappings[action] ?: emptySet()
                     val isListening = state.currentlyMappingAction == action

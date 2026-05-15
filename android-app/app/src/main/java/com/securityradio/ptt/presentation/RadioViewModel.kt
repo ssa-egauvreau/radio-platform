@@ -11,17 +11,23 @@ import com.securityradio.ptt.device.HardwareButtonRelay
 import com.securityradio.ptt.device.HardwareMappingRepository
 import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.device.PttMicCapture
+import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.RadioUiSoundPlayer
 import com.securityradio.ptt.domain.ChannelCatalogOrigin
 import com.securityradio.ptt.domain.ChannelRepository
+import android.os.SystemClock
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.BufferOverflow
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
@@ -34,7 +40,20 @@ class RadioViewModel(
     private val channelsApi: ChannelsApi,
     localUnitIdentifier: LocalUnitIdentifier,
     private val hardwareMappingRepository: HardwareMappingRepository,
+    private val radioPreferences: RadioPreferences,
 ) : ViewModel() {
+
+    private val _wakeUiRequests = MutableSharedFlow<String>(
+        extraBufferCapacity = 24,
+        onBufferOverflow = BufferOverflow.DROP_OLDEST,
+    )
+    /** Emits reasons why the tactical UI might need to reorder to the foreground while not visible. */
+    val wakeUiSignals: SharedFlow<String> = _wakeUiRequests.asSharedFlow()
+
+    @Volatile
+    private var mainRadioUiVisible: Boolean = false
+
+    private var lastWakeEmittedAtMs: Long = 0L
 
     private var channelNames: List<String> = emptyList()
     private var channelIndex: Int = 0
@@ -54,11 +73,12 @@ class RadioViewModel(
     val uiState: StateFlow<RadioUiState> = _uiState.asStateFlow()
 
     init {
-        _uiState.update { 
+        _uiState.update {
             it.copy(
                 localShortUnitId = unitIdUpper,
-                hardwareMappings = hardwareMappingRepository.getAllMappings()
-            ) 
+                hardwareMappings = hardwareMappingRepository.getAllMappings(),
+                themeMode = radioPreferences.getThemeMode(),
+            )
         }
         viewModelScope.launch {
             while (isActive) {
@@ -74,11 +94,13 @@ class RadioViewModel(
         }
         viewModelScope.launch {
             HardwareButtonRelay.rawKeyCodes.collect { keyCode ->
+                enqueueBackgroundWakeIfNeeded("hardware_raw")
                 _uiState.update { it.copy(lastDetectedKey = keyCode) }
             }
         }
         viewModelScope.launch {
             HardwareButtonRelay.events.collect { event ->
+                enqueueBackgroundWakeIfNeeded("hardware_action")
                 when (event) {
                     HardwareButtonEvent.PttPressed -> onPttPressed()
                     HardwareButtonEvent.PttReleased -> onPttReleased()
@@ -98,6 +120,31 @@ class RadioViewModel(
         soundPlayer.playChannelSwitch()
     }
 
+    /** Call from MainActivity onStart / onStop while this screen is tied to that activity. */
+    fun setMainRadioScreenVisible(visible: Boolean) {
+        mainRadioUiVisible = visible
+    }
+
+    private fun enqueueBackgroundWakeIfNeeded(reason: String) {
+        viewModelScope.launch {
+            emitWakeDebouncedIfBackground(reason)
+        }
+    }
+
+    private suspend fun emitWakeDebouncedIfBackground(reason: String) {
+        if (mainRadioUiVisible) return
+        val now = SystemClock.elapsedRealtime()
+        if (now - lastWakeEmittedAtMs < WAKE_DEBOUNCE_MS) return
+        lastWakeEmittedAtMs = now
+        _wakeUiRequests.emit(reason)
+    }
+
+    private fun cycleThemeMode(current: ThemeMode): ThemeMode = when (current) {
+        ThemeMode.AUTO -> ThemeMode.DAY
+        ThemeMode.DAY -> ThemeMode.NIGHT
+        ThemeMode.NIGHT -> ThemeMode.AUTO
+    }
+
     fun onMicPermissionResult(granted: Boolean) {
         _uiState.update {
             it.copy(
@@ -111,16 +158,14 @@ class RadioViewModel(
         when (event) {
             RadioUiEvent.ToggleDayNight -> {
                 soundPlayer.playChannelSwitch()
-                val nextMode = when (_uiState.value.themeMode) {
-                    ThemeMode.DAY -> ThemeMode.NIGHT
-                    ThemeMode.NIGHT -> ThemeMode.DAY
-                    ThemeMode.AUTO -> ThemeMode.NIGHT
-                }
-                _uiState.update { it.copy(themeMode = nextMode, displayNightMode = nextMode == ThemeMode.NIGHT) }
+                val nextMode = cycleThemeMode(_uiState.value.themeMode)
+                radioPreferences.setThemeMode(nextMode)
+                _uiState.update { it.copy(themeMode = nextMode) }
             }
             is RadioUiEvent.SetThemeMode -> {
                 soundPlayer.playChannelSwitch()
-                _uiState.update { it.copy(themeMode = event.mode, displayNightMode = event.mode == ThemeMode.NIGHT) }
+                radioPreferences.setThemeMode(event.mode)
+                _uiState.update { it.copy(themeMode = event.mode) }
             }
             RadioUiEvent.RetryChannelSync -> {
                 soundPlayer.playChannelSwitch()
@@ -557,7 +602,13 @@ class RadioViewModel(
                 null
             }
             if (dto != null) {
-                _uiState.update { s -> s.copy(rxAttributedLine = mergedRxAttributedLine(dto, s)) }
+                val snap = _uiState.value
+                val merged = mergedRxAttributedLine(dto, snap)
+                val wakingFromIdle = snap.rxAttributedLine.isEmpty() && merged.isNotEmpty()
+                if (wakingFromIdle) {
+                    enqueueBackgroundWakeIfNeeded("rx_talk_activity")
+                }
+                _uiState.update { it.copy(rxAttributedLine = merged) }
             } else if (_uiState.value.rxAttributedLine.isNotEmpty()) {
                 _uiState.update { it.copy(rxAttributedLine = "") }
             }
@@ -617,5 +668,6 @@ class RadioViewModel(
         const val AIR_POLL_MS = 400L
         const val AIR_AUDIO_STABLE_POLLS = 2
         const val TALK_ACTIVITY_POLL_MS = 1200L
+        const val WAKE_DEBOUNCE_MS = 700L
     }
 }

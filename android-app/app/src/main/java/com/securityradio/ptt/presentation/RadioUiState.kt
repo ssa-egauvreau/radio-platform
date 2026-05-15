@@ -36,15 +36,15 @@ data class RadioUiState(
     val localShortUnitId: String,
     /** Server hint: formatted RX attribution when someone else is keyed (main channel wins over scan). */
     val rxAttributedLine: String,
-    /** Reflective day LCD vs backlit night LCD (UI only). */
-    val displayNightMode: Boolean,
     /** UI toggles for scan / GPS rows (soft keys). */
     val scanActive: Boolean,
     val gpsActive: Boolean,
     /** Soft-key RSSI detail expansion (UI only). */
     val rssiExpanded: Boolean,
-    
-    /** Theme settings. */
+
+    /**
+     * Day / night **preference**: [ThemeMode.AUTO] follows the device light/dark setting in the Compose layer.
+     */
     val themeMode: ThemeMode,
     
     /** Hardware button mapping settings. */
@@ -96,11 +96,10 @@ data class RadioUiState(
             micHint = "MIC: ALLOW ACCESS",
             localShortUnitId = "",
             rxAttributedLine = "",
-            displayNightMode = true,
             scanActive = false,
             gpsActive = false,
             rssiExpanded = false,
-            themeMode = ThemeMode.NIGHT, // Default to Night for tactical look
+            themeMode = ThemeMode.AUTO,
             mappingSettingsVisible = false,
             hardwareMappings = emptyMap(),
             currentlyMappingAction = null,

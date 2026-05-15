@@ -2,4 +2,7 @@
 <resources>
     <string name="app_name">Security Radio</string>
     <string name="accessibility_service_description">Handles physical Push-to-Talk and Emergency buttons for Inrico devices.</string>
+    <string name="presence_channel_name">Radio runtime</string>
+    <string name="presence_notification_title">Security Radio</string>
+    <string name="presence_notification_text">PTT routing active in background. Tap to open.</string>
 </resources>
