@@ -684,18 +684,79 @@ code.mono {
 .tx-log {
   margin-top: 24px;
 }
+.tx-log-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
 .tx-filters {
   display: flex;
-  gap: 8px;
-  margin-bottom: 10px;
+  flex-direction: column;
+  gap: 7px;
+  margin: 8px 0 10px;
 }
-.tx-filters .tx-search {
+.tx-filter-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.tx-filter-row .tx-search {
   flex: 1 1 auto;
   min-width: 0;
 }
-.tx-filters select {
-  flex: 0 0 auto;
-  max-width: 45%;
+.tx-filter-row select {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.tx-date-row label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.tx-date-row input[type="date"] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.tx-list {
+  max-height: 440px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+.tx-viewcap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+.viewcap-btn {
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-raised);
+  color: var(--text-dim);
+}
+.viewcap-btn:hover {
+  border-color: var(--accent-2);
+  color: var(--text);
+}
+.viewcap-btn.active {
+  border-color: var(--accent);
+  background: var(--channel-active-bg);
+  color: var(--accent);
 }
 .tx-card {
   border: 1px solid var(--border);
@@ -1057,6 +1118,27 @@ code.mono {
   font-size: 11px;
   color: var(--text-muted);
   text-align: center;
+}
+.kbd-keys {
+  margin-top: 6px;
+}
+.kbd-toggle {
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  padding: 2px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--text-muted);
+}
+.kbd-toggle:hover {
+  border-color: var(--accent-2);
+  color: var(--text);
+}
+.kbd-toggle.on {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 .key-rebind {
   font: inherit;
