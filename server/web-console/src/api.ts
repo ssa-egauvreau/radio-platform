@@ -105,6 +105,12 @@ export interface ChannelMember {
   connected_ms: number;
 }
 
+export interface UnitAlias {
+  unit_id: string;
+  label: string;
+  updated_at: string;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(code: string, status: number) {
@@ -202,6 +208,12 @@ export const api = {
 
   channelRoster: (channel: string) =>
     request<{ members: ChannelMember[] }>("GET", `/v1/channels/roster?channel=${encodeURIComponent(channel)}`),
+
+  unitAliases: () => request<{ aliases: UnitAlias[] }>("GET", "/v1/unit-aliases"),
+  setUnitAlias: (unitId: string, label: string) =>
+    request<{ alias: UnitAlias }>("PUT", "/v1/admin/unit-aliases", { unitId, label }),
+  deleteUnitAlias: (unitId: string) =>
+    request<{ ok: boolean }>("DELETE", `/v1/admin/unit-aliases/${encodeURIComponent(unitId)}`),
 };
 
 /** Fetches a transmission's WAV audio as a Blob (a bearer header cannot ride on <audio src>). */

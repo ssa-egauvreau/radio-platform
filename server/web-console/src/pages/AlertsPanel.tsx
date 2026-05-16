@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, describeError, type Alert, type UserChannel } from "../api";
 import { sounds } from "../sounds";
+import { useUnitAliasResolver } from "../unitAliases";
 import { IconAlertTriangle, IconBell } from "../icons";
 
 type AlertKind = "page" | "emergency";
@@ -44,6 +45,7 @@ export function AlertsPanel() {
   const [sending, setSending] = useState(false);
   const seenEmergencies = useRef<Set<number>>(new Set());
   const primed = useRef(false);
+  const aliasFor = useUnitAliasResolver();
 
   async function refresh() {
     try {
@@ -118,7 +120,7 @@ export function AlertsPanel() {
             <strong className="alert-title">
               <IconAlertTriangle size={14} /> EMERGENCY
             </strong>{" "}
-            · {alert.from_unit || alert.from_name || "Unknown"}
+            · {aliasFor(alert.from_unit) || alert.from_name || "Unknown"}
             <div className="alert-sub">
               {alert.channel_name ?? "All channels"} · {formatTime(alert.created_at)}
             </div>
@@ -166,9 +168,9 @@ export function AlertsPanel() {
                 {alert.kind === "emergency" ? <IconAlertTriangle size={13} /> : <IconBell size={13} />}
                 {alert.kind === "emergency" ? "Emergency" : "Page"}
               </strong>{" "}
-              · {alert.channel_name ?? alert.target_unit ?? "All channels"}
+              · {(alert.channel_name ?? aliasFor(alert.target_unit)) || "All channels"}
               <div className="alert-sub">
-                {alert.from_name || alert.from_unit || "—"} · {formatTime(alert.created_at)}
+                {alert.from_name || aliasFor(alert.from_unit) || "—"} · {formatTime(alert.created_at)}
                 {!alert.active && alert.cleared_by ? ` · cleared by ${alert.cleared_by}` : ""}
               </div>
               {alert.message && <div className="alert-msg">{alert.message}</div>}

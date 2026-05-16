@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type ChannelMember } from "../api";
+import { useUnitAliasResolver } from "../unitAliases";
 import { IconUser } from "../icons";
 
 function formatConnected(ms: number): string {
@@ -29,6 +30,7 @@ function tier(ms: number): string {
 /** Live list of radios/operators connected to a channel's voice stream. */
 export function ChannelRoster({ channelName }: { channelName: string }) {
   const [members, setMembers] = useState<ChannelMember[]>([]);
+  const aliasFor = useUnitAliasResolver();
 
   useEffect(() => {
     let cancelled = false;
@@ -63,7 +65,7 @@ export function ChannelRoster({ channelName }: { channelName: string }) {
         members.map((member, index) => (
           <div className="roster-row" key={`${member.unit_id}-${index}`}>
             <span className={`roster-dot ${tier(member.connected_ms)}`} title="Connected" />
-            <span className="roster-name">{member.display_name || member.unit_id}</span>
+            <span className="roster-name">{member.display_name || aliasFor(member.unit_id)}</span>
             {member.kind === "legacy" && <span className="roster-tag">radio</span>}
             <span className="roster-time">{formatConnected(member.connected_ms)}</span>
           </div>

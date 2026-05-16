@@ -138,6 +138,15 @@ export async function ensureSchema(): Promise<void> {
     );
   `);
 
+  // Friendly labels for radio unit IDs, shown across the console in place of raw ids.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS unit_aliases (
+      unit_id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
   await p.query(`CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log (ts DESC);`);
   await p.query(`CREATE INDEX IF NOT EXISTS idx_tx_started ON transmissions (started_at DESC);`);
   await p.query(`CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts (created_at DESC);`);

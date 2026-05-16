@@ -23,12 +23,15 @@ import {
   listChannels,
   listChannelsForUser,
   listMemberships,
+  listUnitAliases,
   listUsers,
   PERMISSIONS,
   ROLES,
   removeMembership,
   updateChannel,
   setMembership,
+  setUnitAlias,
+  deleteUnitAlias,
   updateUser,
   writeAudit,
   type Permission,
@@ -326,6 +329,60 @@ export function createApiRouter(): Router {
         actorName: req.authUser!.username,
         action: "channel_delete",
         target: String(id),
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- unit aliases (friendly labels for radio unit IDs) -----------------
+
+  router.get("/unit-aliases", requireAuth, async (_req, res) => {
+    try {
+      res.json({ aliases: await listUnitAliases() });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.put("/admin/unit-aliases", requireAdmin, async (req, res) => {
+    try {
+      const unitId = String(req.body?.unitId ?? "").trim();
+      const label = String(req.body?.label ?? "").trim();
+      if (!unitId || !label) {
+        res.status(400).json({ error: "missing_fields" });
+        return;
+      }
+      const alias = await setUnitAlias(unitId, label);
+      await writeAudit({
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "unit_alias_set",
+        target: unitId,
+        detail: { label },
+        ip: clientIp(req),
+      });
+      res.json({ alias });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.delete("/admin/unit-aliases/:unitId", requireAdmin, async (req, res) => {
+    try {
+      const unitId = String(req.params.unitId ?? "").trim();
+      const ok = await deleteUnitAlias(unitId);
+      if (!ok) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await writeAudit({
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "unit_alias_delete",
+        target: unitId,
         ip: clientIp(req),
       });
       res.json({ ok: true });

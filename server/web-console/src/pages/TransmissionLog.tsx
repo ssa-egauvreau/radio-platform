@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, describeError, fetchTransmissionAudio, type Transmission, type UserChannel } from "../api";
+import { useUnitAliasResolver } from "../unitAliases";
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.round(ms / 1000));
@@ -41,6 +42,7 @@ export function TransmissionLog() {
   const [search, setSearch] = useState("");
   const [channelFilter, setChannelFilter] = useState("");
   const [channels, setChannels] = useState<UserChannel[]>([]);
+  const aliasFor = useUnitAliasResolver();
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const urlCache = useRef<Map<number, string>>(new Map());
@@ -171,7 +173,7 @@ export function TransmissionLog() {
       )}
       {items.map((tx) => {
         const transcript = transcriptOf(tx);
-        const speaker = tx.display_name || tx.unit_id || "Unknown";
+        const speaker = tx.display_name || aliasFor(tx.unit_id) || "Unknown";
         return (
           <div className="tx-card" key={tx.id}>
             <div className="tx-card-head">
@@ -180,7 +182,7 @@ export function TransmissionLog() {
             </div>
             <div className="tx-card-sub">
               {formatTime(tx.started_at)} · {formatDuration(tx.duration_ms)}
-              {tx.display_name && tx.unit_id ? ` · ${tx.unit_id}` : ""}
+              {tx.display_name && tx.unit_id ? ` · ${aliasFor(tx.unit_id)}` : ""}
             </div>
             <div className={transcript.muted ? "tx-transcript muted" : "tx-transcript"}>
               {transcript.text}

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { api } from "../api";
+import { useUnitAliasResolver } from "../unitAliases";
 
 const OSM_TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
 const OSM_ATTRIBUTION = "&copy; OpenStreetMap contributors";
@@ -43,6 +44,11 @@ export function MapPanel() {
   const [count, setCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
 
+  // The poll effect runs once; a ref keeps it reading the latest alias resolver.
+  const aliasFor = useUnitAliasResolver();
+  const aliasRef = useRef(aliasFor);
+  aliasRef.current = aliasFor;
+
   useEffect(() => {
     if (!mapElRef.current || mapRef.current) {
       return;
@@ -75,11 +81,11 @@ export function MapPanel() {
         for (const p of res.positions) {
           seen.add(p.unit_id);
           const latlng: L.LatLngExpression = [p.lat, p.lon];
-          const label = p.display_name || p.unit_id;
+          const label = p.display_name || aliasRef.current(p.unit_id);
           const popup =
             `<b>${escapeHtml(label)}</b><br/>` +
             `Channel: ${escapeHtml(p.channel_name ?? "—")}<br/>` +
-            `Unit: ${escapeHtml(p.unit_id)}<br/>` +
+            `Unit: ${escapeHtml(aliasRef.current(p.unit_id))}<br/>` +
             `Updated ${escapeHtml(ageText(p.updated_at))}`;
           let marker = markersRef.current.get(p.unit_id);
           if (!marker) {

@@ -286,6 +286,37 @@ export async function listAudit(limit = 200): Promise<AuditRow[]> {
   return res.rows;
 }
 
+// --- unit aliases --------------------------------------------------------
+
+export interface UnitAliasRow {
+  unit_id: string;
+  label: string;
+  updated_at: string;
+}
+
+export async function listUnitAliases(): Promise<UnitAliasRow[]> {
+  const res = await requirePool().query<UnitAliasRow>(
+    `SELECT unit_id, label, updated_at FROM unit_aliases ORDER BY unit_id ASC;`,
+  );
+  return res.rows;
+}
+
+export async function setUnitAlias(unitId: string, label: string): Promise<UnitAliasRow> {
+  const res = await requirePool().query<UnitAliasRow>(
+    `INSERT INTO unit_aliases (unit_id, label, updated_at)
+     VALUES ($1, $2, now())
+     ON CONFLICT (unit_id) DO UPDATE SET label = EXCLUDED.label, updated_at = now()
+     RETURNING unit_id, label, updated_at;`,
+    [unitId.trim(), label.trim()],
+  );
+  return res.rows[0]!;
+}
+
+export async function deleteUnitAlias(unitId: string): Promise<boolean> {
+  const res = await requirePool().query(`DELETE FROM unit_aliases WHERE unit_id = $1;`, [unitId.trim()]);
+  return (res.rowCount ?? 0) > 0;
+}
+
 // --- transmissions -------------------------------------------------------
 
 export interface TransmissionRow {
