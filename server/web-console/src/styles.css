@@ -562,6 +562,19 @@ code.mono {
 .tx-log {
   margin-top: 24px;
 }
+.tx-filters {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.tx-filters .tx-search {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.tx-filters select {
+  flex: 0 0 auto;
+  max-width: 45%;
+}
 .tx-card {
   border: 1px solid var(--border);
   border-radius: 6px;

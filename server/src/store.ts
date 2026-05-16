@@ -342,24 +342,44 @@ export async function insertTransmission(input: {
   return res.rows[0]!.id;
 }
 
-/** Recent transmissions (metadata only — never selects the audio bytes). */
-export async function listTransmissions(opts: { channelNames?: string[]; limit?: number }): Promise<TransmissionRow[]> {
+/**
+ * Recent transmissions (metadata only — never selects the audio bytes).
+ * `channelNames` scopes the result to a role's accessible channels; `channel`
+ * narrows to one channel by name; `search` matches transcript text.
+ */
+export async function listTransmissions(opts: {
+  channelNames?: string[];
+  channel?: string;
+  search?: string;
+  limit?: number;
+}): Promise<TransmissionRow[]> {
   const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 100) || 100, 1), 500);
-  if (opts.channelNames) {
-    if (opts.channelNames.length === 0) {
-      return [];
-    }
-    const res = await requirePool().query<TransmissionRow>(
-      `SELECT ${TX_META_COLS} FROM transmissions
-       WHERE lower(channel_name) = ANY($1)
-       ORDER BY started_at DESC LIMIT $2;`,
-      [opts.channelNames.map((n) => n.trim().toLowerCase()), limit],
-    );
-    return res.rows;
+  if (opts.channelNames && opts.channelNames.length === 0) {
+    return [];
   }
+  const where: string[] = [];
+  const vals: unknown[] = [];
+  let i = 1;
+  if (opts.channelNames) {
+    where.push(`lower(channel_name) = ANY($${i++})`);
+    vals.push(opts.channelNames.map((n) => n.trim().toLowerCase()));
+  }
+  const channel = opts.channel?.trim();
+  if (channel) {
+    where.push(`lower(channel_name) = lower($${i++})`);
+    vals.push(channel);
+  }
+  const search = opts.search?.trim();
+  if (search) {
+    where.push(`transcript ILIKE $${i++}`);
+    vals.push(`%${search.replace(/[\\%_]/g, (m) => "\\" + m)}%`);
+  }
+  vals.push(limit);
   const res = await requirePool().query<TransmissionRow>(
-    `SELECT ${TX_META_COLS} FROM transmissions ORDER BY started_at DESC LIMIT $1;`,
-    [limit],
+    `SELECT ${TX_META_COLS} FROM transmissions
+     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+     ORDER BY started_at DESC LIMIT $${i};`,
+    vals,
   );
   return res.rows;
 }

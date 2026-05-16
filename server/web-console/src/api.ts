@@ -183,8 +183,16 @@ export const api = {
 
   listAudit: (limit = 200) => request<{ entries: AuditEntry[] }>("GET", `/v1/admin/audit?limit=${limit}`),
 
-  transmissions: (limit = 100) =>
-    request<{ transmissions: Transmission[] }>("GET", `/v1/transmissions?limit=${limit}`),
+  transmissions: (opts: { limit?: number; search?: string; channel?: string } = {}) => {
+    const params = new URLSearchParams({ limit: String(opts.limit ?? 100) });
+    if (opts.search?.trim()) {
+      params.set("search", opts.search.trim());
+    }
+    if (opts.channel?.trim()) {
+      params.set("channel", opts.channel.trim());
+    }
+    return request<{ transmissions: Transmission[] }>("GET", `/v1/transmissions?${params}`);
+  },
 
   locations: () => request<{ positions: RadioPosition[] }>("GET", "/v1/locations"),
   alerts: () => request<{ alerts: Alert[] }>("GET", "/v1/alerts"),

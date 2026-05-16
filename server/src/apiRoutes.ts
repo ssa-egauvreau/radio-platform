@@ -407,13 +407,20 @@ export function createApiRouter(): Router {
     try {
       const me = req.authUser!;
       const limit = Number(req.query.limit ?? 100);
+      const search = typeof req.query.search === "string" ? req.query.search : undefined;
+      const channel = typeof req.query.channel === "string" ? req.query.channel : undefined;
       if (me.role === "admin" || me.role === "dispatcher") {
-        res.json({ transmissions: await listTransmissions({ limit }) });
+        res.json({ transmissions: await listTransmissions({ limit, search, channel }) });
         return;
       }
       const channels = await listChannelsForUser(me.id);
       res.json({
-        transmissions: await listTransmissions({ channelNames: channels.map((c) => c.name), limit }),
+        transmissions: await listTransmissions({
+          channelNames: channels.map((c) => c.name),
+          limit,
+          search,
+          channel,
+        }),
       });
     } catch (error) {
       fail(res, error);
