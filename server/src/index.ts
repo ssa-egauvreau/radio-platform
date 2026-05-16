@@ -134,8 +134,9 @@ app.get("/v1/talk-activity", (_req, res) => {
 });
 
 // Serve the built web console (and let it own client-side routing) when present.
-// web-console builds into server/web-public so it ships with this service.
-const webDist = resolve(dirname(fileURLToPath(import.meta.url)), "../web-public");
+// web-console builds into server/dist/web-public, beside the compiled server,
+// so Railway includes it in the deployed image.
+const webDist = resolve(dirname(fileURLToPath(import.meta.url)), "web-public");
 if (existsSync(webDist)) {
   app.use(express.static(webDist));
   app.use((req, res, next) => {
