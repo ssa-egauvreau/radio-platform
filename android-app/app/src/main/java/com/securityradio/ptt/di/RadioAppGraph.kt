@@ -41,7 +41,6 @@ class RadioAppGraph(application: Application) {
         httpApiBaseUrl = BuildConfig.API_BASE_URL,
         apiKey = BuildConfig.RADIO_API_KEY,
         inbound = inboundVoicePlayer,
-        radioPreferences = radioPreferences,
     )
 
     /** Sidetone off; PCM also flows to [voiceRelay]. */

@@ -5,6 +5,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import java.io.IOException
@@ -30,21 +31,29 @@ class AssetRadioUiSoundPlayer(
     private var busyTonePlayer: MediaPlayer? = null
     private var busyFocusRequest: AudioFocusRequest? = null
 
+    @Suppress("DEPRECATION")
+    private var busySpeakerphoneRestore: Boolean? = null
+    private var busyAudioModeRestore: Int? = null
+
     private val uiAudioAttrs: AudioAttributes =
         AudioAttributes.Builder()
             .setUsage(AudioAttributes.USAGE_MEDIA)
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
 
-    /**
-     * Busy must share the communications audio path — rugged handsets often duck [USAGE_MEDIA]
-     * to silence when VOIP/inbound PCM is routed to the tactical speaker/emulator behaves loosely.
-     */
-    private val busyAudioAttrs: AudioAttributes =
-        AudioAttributes.Builder()
-            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
-            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
-            .build()
+    /** Rugged LTE handsets often leave [USAGE_VOICE_COMMUNICATION] inaudible on the loudspeaker. */
+    private val busyAlarmAttrs: AudioAttributes = busyAlarmAudioAttributes()
+
+    private fun busyAlarmAudioAttributes(): AudioAttributes {
+        val b =
+            AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            b.setFlags(AudioAttributes.FLAG_AUDIBILITY_ENFORCED)
+        }
+        return b.build()
+    }
 
     private fun MediaPlayer.applyUiAudio(): MediaPlayer {
         setAudioAttributes(uiAudioAttrs)
@@ -52,15 +61,38 @@ class AssetRadioUiSoundPlayer(
         return this
     }
 
+    @Suppress("DEPRECATION")
+    private fun activateBusySpeakerRouting() {
+        runCatching {
+            if (busyAudioModeRestore != null || busySpeakerphoneRestore != null) return
+            busyAudioModeRestore = audioManager.mode
+            busySpeakerphoneRestore = audioManager.isSpeakerphoneOn
+            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
+            audioManager.isSpeakerphoneOn = true
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun deactivateBusySpeakerRouting() {
+        runCatching {
+            busySpeakerphoneRestore?.let { audioManager.isSpeakerphoneOn = it }
+        }
+        busySpeakerphoneRestore = null
+        runCatching {
+            busyAudioModeRestore?.let { audioManager.mode = it }
+        }
+        busyAudioModeRestore = null
+    }
+
     private fun acquireBusyToneFocus() {
         abandonBusyToneFocusInternal()
-        /** Non-exclusive so some OEM stacks still route the loop while voice RX holds the comm stack. */
-        val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-            .setAudioAttributes(busyAudioAttrs)
-            .setWillPauseWhenDucked(false)
-            .setAcceptsDelayedFocusGain(false)
-            .setOnAudioFocusChangeListener { /* hold until busy loop stops */ }
-            .build()
+        val req =
+            AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                .setAudioAttributes(busyAlarmAttrs)
+                .setWillPauseWhenDucked(false)
+                .setAcceptsDelayedFocusGain(false)
+                .setOnAudioFocusChangeListener { /* hold until busy loop stops */ }
+                .build()
         busyFocusRequest = req
         audioManager.requestAudioFocus(req)
     }
@@ -96,9 +128,11 @@ class AssetRadioUiSoundPlayer(
         main.post {
             stopTalkPermitLoopInternal()
             stopBusyLoopInternal()
+            activateBusySpeakerRouting()
             acquireBusyToneFocus()
             val player = createBusyLoopMediaPlayer(FILE_BUSY) ?: run {
                 abandonBusyToneFocusInternal()
+                deactivateBusySpeakerRouting()
                 return@post
             }
             busyTonePlayer = player
@@ -137,15 +171,17 @@ class AssetRadioUiSoundPlayer(
             release()
         }
         busyTonePlayer = null
+        deactivateBusySpeakerRouting()
     }
 
     private fun playOneShot(fileName: String) {
         main.post {
-            val afd = try {
-                app.assets.openFd("$SOUNDS_DIR/$fileName")
-            } catch (_: IOException) {
-                return@post
-            }
+            val afd =
+                try {
+                    app.assets.openFd("$SOUNDS_DIR/$fileName")
+                } catch (_: IOException) {
+                    return@post
+                }
             afd.use {
                 val player = MediaPlayer().applyUiAudio()
                 try {
@@ -169,11 +205,12 @@ class AssetRadioUiSoundPlayer(
     }
 
     private fun createTalkPermitOneShot(onFinished: () -> Unit): MediaPlayer? {
-        val afd = try {
-            app.assets.openFd("$SOUNDS_DIR/$FILE_TALK_PERMIT")
-        } catch (_: IOException) {
-            return null
-        }
+        val afd =
+            try {
+                app.assets.openFd("$SOUNDS_DIR/$FILE_TALK_PERMIT")
+            } catch (_: IOException) {
+                return null
+            }
         return try {
             MediaPlayer().applyUiAudio().apply {
                 setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
@@ -204,18 +241,19 @@ class AssetRadioUiSoundPlayer(
     }
 
     /**
-     * Busy loop uses the voice path + manual restart: some handset builds ignore or fail [isLooping]
-     * for certain WAV PCM assets while emulators behave.
+     * Busy loop uses the alarm/sonification path + manual restart: some handset builds ignore
+     * [isLooping] for certain WAV PCM assets while emulators behave.
      */
     private fun createBusyLoopMediaPlayer(fileName: String): MediaPlayer? {
-        val afd = try {
-            app.assets.openFd("$SOUNDS_DIR/$fileName")
-        } catch (_: IOException) {
-            return null
-        }
+        val afd =
+            try {
+                app.assets.openFd("$SOUNDS_DIR/$fileName")
+            } catch (_: IOException) {
+                return null
+            }
         return try {
             MediaPlayer().apply {
-                setAudioAttributes(busyAudioAttrs)
+                setAudioAttributes(busyAlarmAttrs)
                 setVolume(1f, 1f)
                 setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
                 afd.close()

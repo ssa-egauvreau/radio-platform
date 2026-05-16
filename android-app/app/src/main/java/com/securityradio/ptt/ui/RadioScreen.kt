@@ -947,32 +947,26 @@ fun HardwareMappingDialog(
                             }
                         }
                         HorizontalDivider(color = p.divider)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 4.dp),
                         ) {
-                            Checkbox(
-                                checked = state.p25ImbeDigitalVoiceEnabled,
-                                onCheckedChange = { onEvent(RadioUiEvent.ToggleP25ImbeDigitalVoice) },
+                            Text(
+                                text = "P25-STYLE DIGITAL VOICE (IMBE)",
+                                style = styles.body.copy(fontWeight = FontWeight.Bold),
+                                color = p.textPrimary,
                             )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "P25-STYLE DIGITAL VOICE (IMBE)",
-                                    style = styles.body.copy(fontWeight = FontWeight.Bold),
-                                    color = p.textPrimary,
-                                )
-                                Text(
-                                    text = if (P25ImbeNative.isAvailable) {
-                                        "Transmit 88-bit IMBE codewords; all radios on this voice channel must use the same mode. " +
-                                            "GPL-2.0 vocoder (dvmvocoder) is bundled in the app binary."
-                                    } else {
-                                        "Native codec did not load (check build ABI or reinstall); uplink stays clear PCM."
-                                    },
-                                    style = styles.status,
-                                    color = p.textMuted,
-                                )
-                            }
+                            Text(
+                                text = if (P25ImbeNative.isAvailable) {
+                                    "Always on when the native vocoder is loaded: transmit uses 88-bit IMBE codewords. " +
+                                        "GPL-2.0 codec (dvmvocoder) is bundled in the app binary."
+                                } else {
+                                    "Native codec did not load (check build ABI or reinstall); voice stays clear PCM until it loads."
+                                },
+                                style = styles.status,
+                                color = p.textMuted,
+                            )
                         }
                         HorizontalDivider(color = p.divider)
                         TextButton(

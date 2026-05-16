@@ -31,9 +31,9 @@ fun httpApiBaseUrlToVoiceWebSocketUrl(httpBaseUrl: String): String {
  * Half-duplex voice path over the relay WebSocket.
  *
  * - Default transport: PCM 16-bit signed LE mono @ 16000 Hz (Android capture).
- * - Optional uplink path: encode with P25-style 88-bit IMBE only when enabled in prefs (MENU toggle).
- * - Downlink auto-detects IMBE (13-byte magic frame) whenever the JNI codec can load, even if
- *   uplink stays on PCM — so mates who enable digital voice remain audible without matching TX prefs.
+ * - Uplink path: encode with P25-style 88-bit IMBE whenever [P25ImbeNative.isAvailable].
+ * - Downlink auto-detects IMBE (13-byte magic frame) whenever the JNI codec can load — peers stay
+ *   audible on mixed builds; uplink stays clear PCM until the codec loads after startup.
  *
  * Codec: see [VoiceAudioSpecs] (PCM); IMBE via bundled dvmvocoder (GPL — see cpp/dvmvocoder).
  */
@@ -41,7 +41,6 @@ class VoiceRelayTransport(
     httpApiBaseUrl: String,
     private val apiKey: String,
     private val inbound: InboundVoicePlayer,
-    private val radioPreferences: RadioPreferences,
 ) : StreamingPcmSink {
 
     private val wsUrl = httpApiBaseUrlToVoiceWebSocketUrl(httpApiBaseUrl)
@@ -124,8 +123,7 @@ class VoiceRelayTransport(
     private fun ensureImbeNativeLoadedForRx(): Boolean =
         P25ImbeNative.isAvailable || P25ImbeNative.tryLoadLibrary()
 
-    private fun p25UplinkEligible(): Boolean =
-        radioPreferences.isP25ImbeDigitalVoiceEnabled() && P25ImbeNative.isAvailable
+    private fun p25UplinkEligible(): Boolean = P25ImbeNative.isAvailable
 
     private fun reconcileAccumulatorForModeToggle() {
         val cur = p25UplinkEligible()
