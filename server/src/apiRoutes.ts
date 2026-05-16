@@ -27,7 +27,7 @@ import {
   PERMISSIONS,
   ROLES,
   removeMembership,
-  renameChannel,
+  updateChannel,
   setMembership,
   updateUser,
   writeAudit,
@@ -112,7 +112,15 @@ export function createApiRouter(): Router {
       const me = req.authUser!;
       if (me.role === "admin" || me.role === "dispatcher") {
         const all = await listChannels();
-        res.json({ channels: all.map((c) => ({ id: c.id, name: c.name, permission: "talk_priority" })) });
+        res.json({
+          channels: all.map((c) => ({
+            id: c.id,
+            name: c.name,
+            color: c.color,
+            zone: c.zone,
+            permission: "talk_priority",
+          })),
+        });
         return;
       }
       res.json({ channels: await listChannelsForUser(me.id) });
@@ -271,12 +279,22 @@ export function createApiRouter(): Router {
   router.patch("/admin/channels/:id", requireAdmin, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const name = String(req.body?.name ?? "").trim();
-      if (!name) {
-        res.status(400).json({ error: "missing_name" });
-        return;
+      const patch: { name?: string; color?: string | null; zone?: string | null } = {};
+      if (req.body?.name !== undefined) {
+        const name = String(req.body.name).trim();
+        if (!name) {
+          res.status(400).json({ error: "missing_name" });
+          return;
+        }
+        patch.name = name;
       }
-      const channel = await renameChannel(id, name);
+      if (req.body?.color !== undefined) {
+        patch.color = req.body.color ? String(req.body.color) : null;
+      }
+      if (req.body?.zone !== undefined) {
+        patch.zone = req.body.zone ? String(req.body.zone).trim() : null;
+      }
+      const channel = await updateChannel(id, patch);
       if (!channel) {
         res.status(404).json({ error: "not_found" });
         return;
@@ -284,9 +302,9 @@ export function createApiRouter(): Router {
       await writeAudit({
         actorUserId: req.authUser!.id,
         actorName: req.authUser!.username,
-        action: "channel_rename",
-        target: name,
-        detail: { id },
+        action: "channel_update",
+        target: channel.name,
+        detail: { id, fields: Object.keys(patch) },
         ip: clientIp(req),
       });
       res.json({ channel });

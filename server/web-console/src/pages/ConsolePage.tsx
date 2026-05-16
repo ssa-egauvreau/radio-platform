@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type PointerEvent } from "react";
+import { Fragment, useEffect, useRef, useState, type PointerEvent } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth";
 import { api, describeError, type Permission, type UserChannel } from "../api";
@@ -252,21 +252,25 @@ export function ConsolePage() {
           )}
           {channels.map((channel, index) => {
             const active = activeChannel?.id === channel.id;
+            const showZone = !!channel.zone && channel.zone !== (channels[index - 1]?.zone ?? null);
             return (
-              <button
-                key={channel.id}
-                className={active ? "chan-item active" : "chan-item"}
-                onClick={() => selectChannel(channel)}
-              >
-                <span className="chan-name">
-                  <IconRadio size={14} />
-                  {channel.name}
-                </span>
-                <span className="perm">
-                  {index < 9 && <span className="chan-key">{index + 1}</span>}
-                  {PERMISSION_LABEL[channel.permission]}
-                </span>
-              </button>
+              <Fragment key={channel.id}>
+                {showZone && <div className="zone-header">{channel.zone}</div>}
+                <button
+                  className={active ? "chan-item active" : "chan-item"}
+                  onClick={() => selectChannel(channel)}
+                  style={channel.color ? { boxShadow: `inset 4px 0 0 ${channel.color}` } : undefined}
+                >
+                  <span className="chan-name">
+                    <IconRadio size={14} />
+                    {channel.name}
+                  </span>
+                  <span className="perm">
+                    {index < 9 && <span className="chan-key">{index + 1}</span>}
+                    {PERMISSION_LABEL[channel.permission]}
+                  </span>
+                </button>
+              </Fragment>
             );
           })}
           {channels.length > 0 && (

@@ -44,6 +44,8 @@ export async function ensureSchema(): Promise<void> {
       name TEXT NOT NULL UNIQUE
     );
   `);
+  await p.query(`ALTER TABLE radio_channels ADD COLUMN IF NOT EXISTS color TEXT;`);
+  await p.query(`ALTER TABLE radio_channels ADD COLUMN IF NOT EXISTS zone TEXT;`);
 
   await p.query(`
     CREATE TABLE IF NOT EXISTS users (

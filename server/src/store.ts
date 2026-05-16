@@ -24,6 +24,8 @@ export interface ChannelRow {
   id: number;
   name: string;
   sort_order: number;
+  color: string | null;
+  zone: string | null;
 }
 
 export interface MembershipRow {
@@ -36,6 +38,8 @@ export interface UserChannelRow {
   id: number;
   name: string;
   permission: Permission;
+  color: string | null;
+  zone: string | null;
 }
 
 export interface AuditRow {
@@ -128,7 +132,8 @@ export async function countActiveAdmins(): Promise<number> {
 
 export async function listChannels(): Promise<ChannelRow[]> {
   const res = await requirePool().query<ChannelRow>(
-    `SELECT id, name, sort_order FROM radio_channels ORDER BY sort_order ASC, id ASC;`,
+    `SELECT id, name, sort_order, color, zone FROM radio_channels
+     ORDER BY zone NULLS FIRST, sort_order ASC, id ASC;`,
   );
   return res.rows;
 }
@@ -137,16 +142,43 @@ export async function createChannel(name: string): Promise<ChannelRow> {
   const res = await requirePool().query<ChannelRow>(
     `INSERT INTO radio_channels (name, sort_order)
      VALUES ($1, COALESCE((SELECT MAX(sort_order) + 1 FROM radio_channels), 1))
-     RETURNING id, name, sort_order;`,
+     RETURNING id, name, sort_order, color, zone;`,
     [name.trim()],
   );
   return res.rows[0]!;
 }
 
-export async function renameChannel(id: number, name: string): Promise<ChannelRow | null> {
+export async function updateChannel(
+  id: number,
+  patch: { name?: string; color?: string | null; zone?: string | null },
+): Promise<ChannelRow | null> {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  let i = 1;
+  if (patch.name !== undefined) {
+    sets.push(`name = $${i++}`);
+    vals.push(patch.name.trim());
+  }
+  if (patch.color !== undefined) {
+    sets.push(`color = $${i++}`);
+    vals.push(patch.color);
+  }
+  if (patch.zone !== undefined) {
+    sets.push(`zone = $${i++}`);
+    vals.push(patch.zone);
+  }
+  if (sets.length === 0) {
+    const res = await requirePool().query<ChannelRow>(
+      `SELECT id, name, sort_order, color, zone FROM radio_channels WHERE id = $1;`,
+      [id],
+    );
+    return res.rows[0] ?? null;
+  }
+  vals.push(id);
   const res = await requirePool().query<ChannelRow>(
-    `UPDATE radio_channels SET name = $1 WHERE id = $2 RETURNING id, name, sort_order;`,
-    [name.trim(), id],
+    `UPDATE radio_channels SET ${sets.join(", ")} WHERE id = $${i}
+     RETURNING id, name, sort_order, color, zone;`,
+    vals,
   );
   return res.rows[0] ?? null;
 }
@@ -159,7 +191,7 @@ export async function deleteChannel(id: number): Promise<boolean> {
 /** Case-insensitive channel lookup by display name (used by the voice relay on join). */
 export async function getChannelByName(name: string): Promise<ChannelRow | null> {
   const res = await requirePool().query<ChannelRow>(
-    `SELECT id, name, sort_order FROM radio_channels WHERE lower(name) = lower($1);`,
+    `SELECT id, name, sort_order, color, zone FROM radio_channels WHERE lower(name) = lower($1);`,
     [name.trim()],
   );
   return res.rows[0] ?? null;
@@ -176,11 +208,11 @@ export async function listMemberships(): Promise<MembershipRow[]> {
 
 export async function listChannelsForUser(userId: number): Promise<UserChannelRow[]> {
   const res = await requirePool().query<UserChannelRow>(
-    `SELECT c.id, c.name, m.permission
+    `SELECT c.id, c.name, c.color, c.zone, m.permission
      FROM channel_members m
      JOIN radio_channels c ON c.id = m.channel_id
      WHERE m.user_id = $1
-     ORDER BY c.sort_order ASC, c.id ASC;`,
+     ORDER BY c.zone NULLS FIRST, c.sort_order ASC, c.id ASC;`,
     [userId],
   );
   return res.rows;

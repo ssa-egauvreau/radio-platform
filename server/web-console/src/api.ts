@@ -25,6 +25,8 @@ export interface Channel {
   id: number;
   name: string;
   sort_order: number;
+  color: string | null;
+  zone: string | null;
 }
 
 export interface Membership {
@@ -37,6 +39,8 @@ export interface UserChannel {
   id: number;
   name: string;
   permission: Permission;
+  color: string | null;
+  zone: string | null;
 }
 
 export interface AuditEntry {
@@ -167,7 +171,8 @@ export const api = {
 
   listChannels: () => request<{ channels: Channel[] }>("GET", "/v1/admin/channels"),
   createChannel: (name: string) => request<{ channel: Channel }>("POST", "/v1/admin/channels", { name }),
-  renameChannel: (id: number, name: string) => request<{ channel: Channel }>("PATCH", `/v1/admin/channels/${id}`, { name }),
+  updateChannel: (id: number, patch: { name?: string; color?: string | null; zone?: string | null }) =>
+    request<{ channel: Channel }>("PATCH", `/v1/admin/channels/${id}`, patch),
   deleteChannel: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/admin/channels/${id}`),
 
   listMemberships: () => request<{ memberships: Membership[] }>("GET", "/v1/admin/memberships"),

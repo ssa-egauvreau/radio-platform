@@ -42,17 +42,20 @@ export function ChannelsPanel() {
     }
   }
 
-  async function rename(channel: Channel) {
-    const next = window.prompt("Channel name", channel.name);
-    if (next == null || !next.trim() || next.trim() === channel.name) {
-      return;
-    }
+  async function patch(channel: Channel, change: Parameters<typeof api.updateChannel>[1]) {
     setError(null);
     try {
-      await api.renameChannel(channel.id, next.trim());
+      await api.updateChannel(channel.id, change);
       await reload();
     } catch (err) {
       setError(describeError(err));
+    }
+  }
+
+  function rename(channel: Channel) {
+    const next = window.prompt("Channel name", channel.name);
+    if (next != null && next.trim() && next.trim() !== channel.name) {
+      void patch(channel, { name: next.trim() });
     }
   }
 
@@ -76,7 +79,8 @@ export function ChannelsPanel() {
         <span className="count">{channels.length} total</span>
       </div>
       <p className="panel-desc">
-        Channels radios and the console can tune. Handsets read this list from <code className="mono">/v1/channels</code>.
+        Channels radios and the console can tune. A color and zone are shown on the console; handsets
+        read the channel list from <code className="mono">/v1/channels</code>.
       </p>
 
       {error && <div className="banner error">{error}</div>}
@@ -104,6 +108,8 @@ export function ChannelsPanel() {
             <tr>
               <th>ID</th>
               <th>Name</th>
+              <th>Color</th>
+              <th>Zone</th>
               <th />
             </tr>
           </thead>
@@ -114,6 +120,34 @@ export function ChannelsPanel() {
                   <code className="mono">{channel.id}</code>
                 </td>
                 <td>{channel.name}</td>
+                <td>
+                  <div className="cell-actions" style={{ justifyContent: "flex-start" }}>
+                    <input
+                      type="color"
+                      className="color-input"
+                      value={channel.color ?? "#888888"}
+                      onChange={(e) => patch(channel, { color: e.target.value })}
+                    />
+                    {channel.color && (
+                      <button className="btn sm" onClick={() => patch(channel, { color: null })}>
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </td>
+                <td>
+                  <input
+                    key={`zone-${channel.id}-${channel.zone ?? ""}`}
+                    defaultValue={channel.zone ?? ""}
+                    placeholder="—"
+                    onBlur={(e) => {
+                      const zone = e.target.value.trim();
+                      if (zone !== (channel.zone ?? "")) {
+                        void patch(channel, { zone: zone || null });
+                      }
+                    }}
+                  />
+                </td>
                 <td>
                   <div className="cell-actions">
                     <button className="btn sm" onClick={() => rename(channel)}>
