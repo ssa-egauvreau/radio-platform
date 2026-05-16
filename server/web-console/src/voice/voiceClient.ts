@@ -160,6 +160,7 @@ export class VoiceChannelClient {
   private transmitting = false;
   private markerTimer: number | null = null;
   private readonly localTones = new Set<AudioBufferSourceNode>();
+  private digitalTx = true;
 
   constructor(channelName: string, callbacks: VoiceCallbacks) {
     this.channelName = channelName;
@@ -172,6 +173,11 @@ export class VoiceChannelClient {
 
   get canTransmit(): boolean {
     return this.permission !== "listen_only";
+  }
+
+  /** Chooses P25 IMBE (true) or clear PCM (false) for outgoing audio. */
+  setDigitalTx(on: boolean): void {
+    this.digitalTx = on;
   }
 
   private setState(state: VoiceState, detail?: string): void {
@@ -321,7 +327,7 @@ export class VoiceChannelClient {
       if (!this.transmitting || !ws || ws.readyState !== WebSocket.OPEN || !(event.data instanceof ArrayBuffer)) {
         return;
       }
-      if (imbeReady()) {
+      if (this.digitalTx && imbeReady()) {
         // Encode to P25 IMBE so transmissions carry the digital-voice character.
         for (const frame of encodeImbeFrames(new Int16Array(event.data))) {
           ws.send(frame);

@@ -36,6 +36,9 @@ const STATE_LABEL: Record<VoiceState, string> = {
   closed: "Disconnected",
 };
 
+const LAST_CHANNEL_KEY = "securityradio.lastChannel";
+const TX_DIGITAL_KEY = "securityradio.txDigital";
+
 export function ConsolePage() {
   const { user, logout } = useAuth();
   const [channels, setChannels] = useState<UserChannel[]>([]);
@@ -47,20 +50,9 @@ export function ConsolePage() {
   const [voiceDetail, setVoiceDetail] = useState<string | null>(null);
   const [permission, setPermission] = useState<Permission | null>(null);
   const [marker33, setMarker33] = useState(false);
-  const clientRef = useRef<VoiceChannelClient | null>(null);
+  const [txDigital, setTxDigital] = useState(() => localStorage.getItem(TX_DIGITAL_KEY) !== "0");
 
-  useEffect(() => {
-    sounds.preload();
-    api
-      .myChannels()
-      .then((res) => setChannels(res.channels))
-      .catch((err) => setListError(describeError(err)))
-      .finally(() => setLoading(false));
-    return () => {
-      clientRef.current?.close();
-      clientRef.current = null;
-    };
-  }, []);
+  const clientRef = useRef<VoiceChannelClient | null>(null);
 
   function selectChannel(channel: UserChannel) {
     const busy = voiceState === "connecting" || voiceState === "listening" || voiceState === "transmitting";
@@ -69,6 +61,7 @@ export function ConsolePage() {
     }
     clientRef.current?.close();
     sounds.channelSwitch();
+    localStorage.setItem(LAST_CHANNEL_KEY, String(channel.id));
     setActiveChannel(channel);
     setVoiceDetail(null);
     setPermission(channel.permission);
@@ -80,6 +73,7 @@ export function ConsolePage() {
       },
       onPermission: (perm) => setPermission(perm),
     });
+    client.setDigitalTx(txDigital);
     clientRef.current = client;
     client.connect();
   }
@@ -114,12 +108,11 @@ export function ConsolePage() {
     setMarker33(false);
   }
 
-  async function beginTransmit(event: PointerEvent<HTMLButtonElement>) {
+  async function startTx() {
     const client = clientRef.current;
     if (!client) {
       return;
     }
-    event.currentTarget.setPointerCapture(event.pointerId);
     try {
       await client.startTransmit();
       sounds.permit();
@@ -132,9 +125,95 @@ export function ConsolePage() {
     }
   }
 
-  function endTransmit() {
+  function stopTx() {
     clientRef.current?.stopTransmit();
   }
+
+  function beginTransmit(event: PointerEvent<HTMLButtonElement>) {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    void startTx();
+  }
+
+  function toggleTxMode() {
+    const next = !txDigital;
+    setTxDigital(next);
+    localStorage.setItem(TX_DIGITAL_KEY, next ? "1" : "0");
+    clientRef.current?.setDigitalTx(next);
+  }
+
+  // Latest handlers/data reachable from the once-mounted keyboard listener.
+  const opsRef = useRef({ channels, selectChannel, startTx, stopTx });
+  opsRef.current = { channels, selectChannel, startTx, stopTx };
+
+  useEffect(() => {
+    sounds.preload();
+    let autoSelected = false;
+    api
+      .myChannels()
+      .then((res) => {
+        setChannels(res.channels);
+        const lastId = Number(localStorage.getItem(LAST_CHANNEL_KEY));
+        const last = res.channels.find((c) => c.id === lastId);
+        if (last && !autoSelected) {
+          autoSelected = true;
+          opsRef.current.selectChannel(last);
+        }
+      })
+      .catch((err) => setListError(describeError(err)))
+      .finally(() => setLoading(false));
+    return () => {
+      clientRef.current?.close();
+      clientRef.current = null;
+    };
+  }, []);
+
+  // Keyboard: Space = hold-to-talk PTT, digit keys = select that channel.
+  useEffect(() => {
+    let spaceHeld = false;
+    function inField(): boolean {
+      const el = document.activeElement;
+      return !!el && ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
+    }
+    function onKeyDown(e: KeyboardEvent) {
+      if (inField() || e.metaKey || e.ctrlKey || e.altKey || e.repeat) {
+        return;
+      }
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (!spaceHeld) {
+          spaceHeld = true;
+          void opsRef.current.startTx();
+        }
+        return;
+      }
+      if (e.code.startsWith("Digit")) {
+        const channel = opsRef.current.channels[Number(e.code.slice(5)) - 1];
+        if (channel) {
+          e.preventDefault();
+          opsRef.current.selectChannel(channel);
+        }
+      }
+    }
+    function release() {
+      if (spaceHeld) {
+        spaceHeld = false;
+        opsRef.current.stopTx();
+      }
+    }
+    function onKeyUp(e: KeyboardEvent) {
+      if (e.code === "Space") {
+        release();
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", release);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", release);
+    };
+  }, []);
 
   const connected = voiceState === "listening" || voiceState === "transmitting";
   const canTransmit = permission !== null && permission !== "listen_only";
@@ -171,7 +250,7 @@ export function ConsolePage() {
           {!loading && !listError && channels.length === 0 && (
             <div className="empty">No channels assigned to this account.</div>
           )}
-          {channels.map((channel) => {
+          {channels.map((channel, index) => {
             const active = activeChannel?.id === channel.id;
             return (
               <button
@@ -183,10 +262,16 @@ export function ConsolePage() {
                   <IconRadio size={14} />
                   {channel.name}
                 </span>
-                <span className="perm">{PERMISSION_LABEL[channel.permission]}</span>
+                <span className="perm">
+                  {index < 9 && <span className="chan-key">{index + 1}</span>}
+                  {PERMISSION_LABEL[channel.permission]}
+                </span>
               </button>
             );
           })}
+          {channels.length > 0 && (
+            <div className="kbd-hint">Keys 1–9 select · Space = PTT</div>
+          )}
         </div>
 
         <div className="console-col">
@@ -213,8 +298,8 @@ export function ConsolePage() {
                 className={transmitting ? "tx-button active" : "tx-button"}
                 disabled={!connected || !canTransmit}
                 onPointerDown={beginTransmit}
-                onPointerUp={endTransmit}
-                onPointerCancel={endTransmit}
+                onPointerUp={stopTx}
+                onPointerCancel={stopTx}
               >
                 <span className="tx-main">
                   <IconBolt size={26} />
@@ -226,9 +311,13 @@ export function ConsolePage() {
                     : !canTransmit
                       ? "no transmit permission"
                       : connected
-                        ? "hold to talk"
+                        ? "hold to talk · space"
                         : "connecting…"}
                 </span>
+              </button>
+
+              <button className="txmode-btn" onClick={toggleTxMode}>
+                TX MODE: <strong>{txDigital ? "DIGITAL · P25" : "ANALOG"}</strong>
               </button>
 
               <button
