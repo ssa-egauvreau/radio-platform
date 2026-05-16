@@ -41,8 +41,20 @@ const STATE_LABEL: Record<VoiceState, string> = {
 
 const LAST_CHANNEL_KEY = "securityradio.lastChannel";
 const TX_DIGITAL_KEY = "securityradio.txDigital";
+const PTT_CODE_KEY = "securityradio.pttKey";
+const DEFAULT_PTT_CODE = "Space";
 const volumeKey = (id: number) => `securityradio.vol.${id}`;
 const muteKey = (id: number) => `securityradio.mute.${id}`;
+
+/** Friendly label for a KeyboardEvent.code (e.g. "KeyT" -> "T", "F12" -> "F12"). */
+function keyLabel(code: string): string {
+  if (code === "Space") return "Space";
+  if (code.startsWith("Key")) return code.slice(3);
+  if (code.startsWith("Digit")) return code.slice(5);
+  if (code.startsWith("Numpad")) return `Num ${code.slice(6)}`;
+  if (code.startsWith("Arrow")) return `${code.slice(5)} Arrow`;
+  return code;
+}
 
 /** Per-channel listen volume (0–1), defaulting to full when unset or invalid. */
 function loadVolume(id: number): number {
@@ -74,6 +86,8 @@ export function ConsolePage() {
   const [permission, setPermission] = useState<Permission | null>(null);
   const [marker33, setMarker33] = useState(false);
   const [txDigital, setTxDigital] = useState(() => localStorage.getItem(TX_DIGITAL_KEY) !== "0");
+  const [pttCode, setPttCode] = useState(() => localStorage.getItem(PTT_CODE_KEY) || DEFAULT_PTT_CODE);
+  const [rebindingPtt, setRebindingPtt] = useState(false);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [monitors, setMonitors] = useState<MonitorView[]>([]);
@@ -252,8 +266,8 @@ export function ConsolePage() {
   }
 
   // Latest handlers/data reachable from the once-mounted keyboard listener.
-  const opsRef = useRef({ channels, selectChannel, startTx, stopTx });
-  opsRef.current = { channels, selectChannel, startTx, stopTx };
+  const opsRef = useRef({ channels, selectChannel, startTx, stopTx, pttCode });
+  opsRef.current = { channels, selectChannel, startTx, stopTx, pttCode };
 
   useEffect(() => {
     sounds.preload();
@@ -280,9 +294,9 @@ export function ConsolePage() {
     };
   }, []);
 
-  // Keyboard: Space = hold-to-talk PTT, digit keys = select that channel.
+  // Keyboard: the configured PTT key = hold-to-talk, digit keys = select channel.
   useEffect(() => {
-    let spaceHeld = false;
+    let pttHeld = false;
     function inField(): boolean {
       const el = document.activeElement;
       return !!el && ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
@@ -291,10 +305,10 @@ export function ConsolePage() {
       if (inField() || e.metaKey || e.ctrlKey || e.altKey || e.repeat) {
         return;
       }
-      if (e.code === "Space") {
+      if (e.code === opsRef.current.pttCode) {
         e.preventDefault();
-        if (!spaceHeld) {
-          spaceHeld = true;
+        if (!pttHeld) {
+          pttHeld = true;
           void opsRef.current.startTx();
         }
         return;
@@ -308,13 +322,13 @@ export function ConsolePage() {
       }
     }
     function release() {
-      if (spaceHeld) {
-        spaceHeld = false;
+      if (pttHeld) {
+        pttHeld = false;
         opsRef.current.stopTx();
       }
     }
     function onKeyUp(e: KeyboardEvent) {
-      if (e.code === "Space") {
+      if (e.code === opsRef.current.pttCode) {
         release();
       }
     }
@@ -327,6 +341,25 @@ export function ConsolePage() {
       window.removeEventListener("blur", release);
     };
   }, []);
+
+  // PTT-key rebinding: capture the next keypress (Escape cancels). The capture
+  // phase + stopPropagation keeps that keypress from also triggering transmit.
+  useEffect(() => {
+    if (!rebindingPtt) {
+      return;
+    }
+    function capture(e: KeyboardEvent) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.code !== "Escape") {
+        setPttCode(e.code);
+        localStorage.setItem(PTT_CODE_KEY, e.code);
+      }
+      setRebindingPtt(false);
+    }
+    window.addEventListener("keydown", capture, { capture: true });
+    return () => window.removeEventListener("keydown", capture, { capture: true });
+  }, [rebindingPtt]);
 
   const connected = voiceState === "listening" || voiceState === "transmitting";
   const canTransmit = permission !== null && permission !== "listen_only";
@@ -404,7 +437,16 @@ export function ConsolePage() {
             );
           })}
           {channels.length > 0 && (
-            <div className="kbd-hint">Keys 1–9 select · Space = PTT</div>
+            <div className="kbd-hint">
+              Keys 1–9 select · PTT{" "}
+              <button
+                className={rebindingPtt ? "key-rebind active" : "key-rebind"}
+                onClick={() => setRebindingPtt((v) => !v)}
+                title="Click, then press a key to rebind push-to-talk"
+              >
+                {rebindingPtt ? "press a key…" : keyLabel(pttCode)}
+              </button>
+            </div>
           )}
 
           {monitors.length > 0 && (
@@ -510,7 +552,7 @@ export function ConsolePage() {
                     : !canTransmit
                       ? "no transmit permission"
                       : connected
-                        ? "hold to talk · space"
+                        ? `hold to talk · ${keyLabel(pttCode)}`
                         : "connecting…"}
                 </span>
               </button>
