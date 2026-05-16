@@ -897,3 +897,58 @@ code.mono {
   border-color: var(--red);
   background: var(--danger-bg);
 }
+
+/* --- mobile / narrow screens --- */
+@media (max-width: 880px) {
+  .app-shell {
+    height: auto;
+    min-height: 100%;
+  }
+  .topbar {
+    height: auto;
+    min-height: 52px;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    padding: 8px 12px;
+  }
+  .who {
+    margin-left: 0;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  /* Stack the three console columns; the 1px grid gap keeps separators. */
+  .console-grid {
+    display: flex;
+    flex-direction: column;
+  }
+  .console-col {
+    overflow: visible;
+  }
+  .admin-body {
+    flex-direction: column;
+  }
+  .tabs {
+    width: auto;
+    flex-direction: row;
+    overflow-x: auto;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+  .panel {
+    padding: 16px 14px;
+  }
+  /* Wide admin tables scroll horizontally instead of overflowing the page. */
+  .panel table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+  }
+  .login-card {
+    width: 100%;
+    max-width: 360px;
+  }
+  .login-wrap {
+    padding: 16px;
+  }
+}
