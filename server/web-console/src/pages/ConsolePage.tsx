@@ -6,6 +6,8 @@ import { VoiceChannelClient, type VoiceState } from "../voice/voiceClient";
 import { TransmissionLog } from "./TransmissionLog";
 import { MapPanel } from "./MapPanel";
 import { AlertsPanel } from "./AlertsPanel";
+import { sounds } from "../sounds";
+import { IconBolt, IconBeacon, IconRadio, IconLogOut, IconShield } from "../icons";
 
 const PERMISSION_LABEL: Record<Permission, string> = {
   talk_priority: "Talk priority",
@@ -32,9 +34,11 @@ export function ConsolePage() {
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [voiceDetail, setVoiceDetail] = useState<string | null>(null);
   const [permission, setPermission] = useState<Permission | null>(null);
+  const [marker33, setMarker33] = useState(false);
   const clientRef = useRef<VoiceChannelClient | null>(null);
 
   useEffect(() => {
+    sounds.preload();
     api
       .myChannels()
       .then((res) => setChannels(res.channels))
@@ -52,9 +56,11 @@ export function ConsolePage() {
       return;
     }
     clientRef.current?.close();
+    sounds.channelSwitch();
     setActiveChannel(channel);
     setVoiceDetail(null);
     setPermission(channel.permission);
+    setMarker33(false);
     const client = new VoiceChannelClient(channel.name, {
       onState: (state, detail) => {
         setVoiceState(state);
@@ -73,6 +79,17 @@ export function ConsolePage() {
     setVoiceState("idle");
     setVoiceDetail(null);
     setPermission(null);
+    setMarker33(false);
+  }
+
+  function toggleMarker() {
+    const client = clientRef.current;
+    if (!client) {
+      return;
+    }
+    const next = !marker33;
+    client.setChannelMarker(next);
+    setMarker33(next);
   }
 
   async function beginTransmit(event: PointerEvent<HTMLButtonElement>) {
@@ -83,6 +100,7 @@ export function ConsolePage() {
     event.currentTarget.setPointerCapture(event.pointerId);
     try {
       await client.startTransmit();
+      sounds.permit();
     } catch (err) {
       setVoiceDetail(
         err instanceof Error && err.message === "listen_only"
@@ -106,12 +124,18 @@ export function ConsolePage() {
         <div className="brand">
           SECURITY RADIO <span>· Console</span>
         </div>
-        <nav className="topnav">{user?.role === "admin" && <Link to="/admin">Admin Portal</Link>}</nav>
+        <nav className="topnav">
+          {user?.role === "admin" && (
+            <Link to="/admin" className="icon-link">
+              <IconShield size={15} /> Admin Portal
+            </Link>
+          )}
+        </nav>
         <div className="who">
           <span className="role-chip">{user?.role}</span>
           <span>{user?.displayName}</span>
-          <button className="btn sm" onClick={logout}>
-            Sign out
+          <button className="btn sm icon-btn" onClick={logout}>
+            <IconLogOut size={14} /> Sign out
           </button>
         </div>
       </header>
@@ -132,7 +156,10 @@ export function ConsolePage() {
                 className={active ? "chan-item active" : "chan-item"}
                 onClick={() => selectChannel(channel)}
               >
-                <span>{channel.name}</span>
+                <span className="chan-name">
+                  <IconRadio size={14} />
+                  {channel.name}
+                </span>
                 <span className="perm">{PERMISSION_LABEL[channel.permission]}</span>
               </button>
             );
@@ -166,14 +193,30 @@ export function ConsolePage() {
                 onPointerUp={endTransmit}
                 onPointerCancel={endTransmit}
               >
-                {transmitting
-                  ? "ON AIR — RELEASE TO STOP"
-                  : !canTransmit
-                    ? "LISTEN ONLY"
-                    : connected
-                      ? "HOLD TO TALK"
-                      : "CONNECTING…"}
+                <span className="tx-main">
+                  <IconBolt size={26} />
+                  {transmitting ? "ON AIR" : canTransmit ? "XMIT" : "LISTEN ONLY"}
+                </span>
+                <span className="tx-sub">
+                  {transmitting
+                    ? "release to stop"
+                    : !canTransmit
+                      ? "no transmit permission"
+                      : connected
+                        ? "hold to talk"
+                        : "connecting…"}
+                </span>
               </button>
+
+              <button
+                className={marker33 ? "marker-button active" : "marker-button"}
+                disabled={!connected || !canTransmit}
+                onClick={toggleMarker}
+              >
+                <IconBeacon size={18} />
+                <span>{marker33 ? "10-33 MARKER ON" : "10-33 CHANNEL MARKER"}</span>
+              </button>
+              {marker33 && <div className="marker-note">Emergency traffic — marker tone every 12s</div>}
 
               <div className="live-actions">
                 {(voiceState === "error" || voiceState === "closed") && (

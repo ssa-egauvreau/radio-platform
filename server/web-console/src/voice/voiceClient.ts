@@ -29,6 +29,27 @@ const JOIN_ERRORS: Record<string, string> = {
   channel_lookup_failed: "The server could not verify channel access.",
 };
 
+const MARKER_INTERVAL_MS = 12000;
+const MARKER_BEEP_MS = 200;
+const MARKER_BEEP_HZ = 950;
+
+/** Generates the 10-33 channel-marker tone as 16 kHz mono PCM-16. */
+function markerBeepPcm(): Int16Array {
+  const total = Math.round((TARGET_RATE * MARKER_BEEP_MS) / 1000);
+  const fade = Math.round(TARGET_RATE * 0.01);
+  const out = new Int16Array(total);
+  for (let i = 0; i < total; i++) {
+    let gain = 0.5;
+    if (i < fade) {
+      gain *= i / fade;
+    } else if (i > total - fade) {
+      gain *= (total - i) / fade;
+    }
+    out[i] = Math.round(Math.sin((2 * Math.PI * MARKER_BEEP_HZ * i) / TARGET_RATE) * gain * 32767);
+  }
+  return out;
+}
+
 export class VoiceChannelClient {
   private readonly channelName: string;
   private readonly callbacks: VoiceCallbacks;
@@ -45,6 +66,7 @@ export class VoiceChannelClient {
   private capSource: MediaStreamAudioSourceNode | null = null;
   private capNode: AudioWorkletNode | null = null;
   private transmitting = false;
+  private markerTimer: number | null = null;
 
   constructor(channelName: string, callbacks: VoiceCallbacks) {
     this.channelName = channelName;
@@ -122,8 +144,7 @@ export class VoiceChannelClient {
   }
 
   private handleAudio(buffer: ArrayBuffer): void {
-    const ctx = this.playCtx;
-    if (!ctx || buffer.byteLength < 2) {
+    if (buffer.byteLength < 2) {
       return;
     }
     const bytes = new Uint8Array(buffer);
@@ -131,11 +152,18 @@ export class VoiceChannelClient {
     if (bytes.byteLength === 13 && bytes[0] === IMBE_MAGIC_0 && bytes[1] === IMBE_MAGIC_1) {
       return;
     }
+    this.schedulePcm(new Int16Array(buffer, 0, Math.floor(buffer.byteLength / 2)));
+  }
+
+  /** Queues one PCM-16 chunk for gapless playback on the listen context. */
+  private schedulePcm(pcm: Int16Array): void {
+    const ctx = this.playCtx;
+    if (!ctx || pcm.length === 0) {
+      return;
+    }
     if (ctx.state === "suspended") {
       void ctx.resume();
     }
-
-    const pcm = new Int16Array(buffer, 0, Math.floor(buffer.byteLength / 2));
     const frame = ctx.createBuffer(1, pcm.length, TARGET_RATE);
     const out = frame.getChannelData(0);
     for (let i = 0; i < pcm.length; i++) {
@@ -216,8 +244,37 @@ export class VoiceChannelClient {
     }
   }
 
+  get markerActive(): boolean {
+    return this.markerTimer !== null;
+  }
+
+  /** Toggles the 10-33 channel marker — a short tone keyed onto the channel every 12s. */
+  setChannelMarker(active: boolean): void {
+    if (active) {
+      if (this.markerTimer !== null) {
+        return;
+      }
+      this.sendMarkerBeep();
+      this.markerTimer = window.setInterval(() => this.sendMarkerBeep(), MARKER_INTERVAL_MS);
+    } else if (this.markerTimer !== null) {
+      window.clearInterval(this.markerTimer);
+      this.markerTimer = null;
+    }
+  }
+
+  private sendMarkerBeep(): void {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    const beep = markerBeepPcm();
+    ws.send(beep.buffer); // keyed onto the channel for every listener
+    this.schedulePcm(beep); // and played locally so the dispatcher hears it
+  }
+
   /** Tears everything down; the client cannot be reused afterward. */
   close(): void {
+    this.setChannelMarker(false);
     this.transmitting = false;
     if (this.capNode) {
       this.capNode.port.onmessage = null;

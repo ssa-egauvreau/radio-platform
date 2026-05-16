@@ -478,16 +478,31 @@ code.mono {
 
 .tx-button {
   width: 100%;
-  padding: 22px;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.1em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 16px;
   border-radius: 8px;
   border: 1px solid var(--border);
   background: var(--bg-input);
   color: var(--text);
   touch-action: none;
   user-select: none;
+}
+.tx-main {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 21px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+.tx-sub {
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.7;
 }
 .tx-button:not(:disabled):hover {
   border-color: var(--green);
@@ -639,4 +654,78 @@ code.mono {
 }
 .alert-history {
   margin-top: 4px;
+}
+
+/* --- icons, XMIT, 10-33 marker --- */
+.icon-btn,
+.icon-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.chan-name {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.chan-name svg {
+  color: var(--text-muted);
+  flex: none;
+}
+.chan-item.active .chan-name svg {
+  color: var(--accent);
+}
+.alert-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  vertical-align: middle;
+}
+
+.marker-button {
+  width: 100%;
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 11px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-dim);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.09em;
+}
+.marker-button:not(:disabled):hover {
+  border-color: var(--amber);
+  color: var(--text);
+}
+.marker-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.marker-button.active {
+  border-color: var(--amber);
+  background: #2a2208;
+  color: var(--amber);
+  animation: marker-pulse 12s linear infinite;
+}
+@keyframes marker-pulse {
+  0%,
+  8%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.55);
+  }
+  4% {
+    box-shadow: 0 0 0 6px rgba(251, 191, 36, 0);
+  }
+}
+.marker-note {
+  margin-top: 6px;
+  text-align: center;
+  font-size: 11px;
+  color: var(--amber);
+  letter-spacing: 0.04em;
 }
