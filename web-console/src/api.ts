@@ -65,6 +65,11 @@ export function setToken(token: string | null): void {
   authToken = token;
 }
 
+/** Current bearer token, for transports that cannot send headers (the voice WebSocket). */
+export function getToken(): string | null {
+  return authToken;
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   if (body !== undefined) {

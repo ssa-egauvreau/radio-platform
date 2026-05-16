@@ -156,6 +156,15 @@ export async function deleteChannel(id: number): Promise<boolean> {
   return (res.rowCount ?? 0) > 0;
 }
 
+/** Case-insensitive channel lookup by display name (used by the voice relay on join). */
+export async function getChannelByName(name: string): Promise<ChannelRow | null> {
+  const res = await requirePool().query<ChannelRow>(
+    `SELECT id, name, sort_order FROM radio_channels WHERE lower(name) = lower($1);`,
+    [name.trim()],
+  );
+  return res.rows[0] ?? null;
+}
+
 // --- memberships ---------------------------------------------------------
 
 export async function listMemberships(): Promise<MembershipRow[]> {
@@ -192,6 +201,15 @@ export async function removeMembership(userId: number, channelId: number): Promi
     [userId, channelId],
   );
   return (res.rowCount ?? 0) > 0;
+}
+
+/** A single account's permission on one channel, or null when not assigned. */
+export async function getMembership(userId: number, channelId: number): Promise<Permission | null> {
+  const res = await requirePool().query<{ permission: Permission }>(
+    `SELECT permission FROM channel_members WHERE user_id = $1 AND channel_id = $2;`,
+    [userId, channelId],
+  );
+  return res.rows[0]?.permission ?? null;
 }
 
 // --- audit ---------------------------------------------------------------

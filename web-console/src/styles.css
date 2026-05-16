@@ -406,3 +406,103 @@ code.mono {
   margin-bottom: 6px;
   letter-spacing: 0.05em;
 }
+
+/* --- console: live audio (phase 2) --- */
+.chan-item {
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  cursor: pointer;
+}
+.chan-item.active {
+  border-color: var(--accent);
+  background: #221a0d;
+}
+.chan-item:hover {
+  border-color: var(--accent-2);
+}
+
+.live-panel {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  padding: 16px;
+}
+.live-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.live-channel {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.live-meta {
+  color: var(--text-dim);
+  font-size: 12.5px;
+  margin-bottom: 12px;
+}
+.live-meta strong {
+  color: var(--text);
+}
+.state-chip {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+.state-chip.listening {
+  color: var(--green);
+  border-color: #235437;
+}
+.state-chip.transmitting {
+  color: #1a1205;
+  background: var(--red);
+  border-color: var(--red);
+}
+.state-chip.connecting {
+  color: var(--amber);
+  border-color: #5b4a23;
+}
+.state-chip.error,
+.state-chip.closed {
+  color: #ff9b9b;
+  border-color: #5b2330;
+}
+
+.tx-button {
+  width: 100%;
+  padding: 22px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+  touch-action: none;
+  user-select: none;
+}
+.tx-button:not(:disabled):hover {
+  border-color: var(--green);
+}
+.tx-button.active {
+  background: var(--red);
+  border-color: var(--red);
+  color: #1a1205;
+}
+.tx-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.live-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
