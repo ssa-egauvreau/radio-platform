@@ -25,6 +25,8 @@ export interface Channel {
   id: number;
   name: string;
   sort_order: number;
+  color: string | null;
+  zone: string | null;
 }
 
 export interface Membership {
@@ -37,6 +39,8 @@ export interface UserChannel {
   id: number;
   name: string;
   permission: Permission;
+  color: string | null;
+  zone: string | null;
 }
 
 export interface AuditEntry {
@@ -99,6 +103,12 @@ export interface ChannelMember {
   display_name: string | null;
   kind: string;
   connected_ms: number;
+}
+
+export interface UnitAlias {
+  unit_id: string;
+  label: string;
+  updated_at: string;
 }
 
 export class ApiError extends Error {
@@ -167,7 +177,8 @@ export const api = {
 
   listChannels: () => request<{ channels: Channel[] }>("GET", "/v1/admin/channels"),
   createChannel: (name: string) => request<{ channel: Channel }>("POST", "/v1/admin/channels", { name }),
-  renameChannel: (id: number, name: string) => request<{ channel: Channel }>("PATCH", `/v1/admin/channels/${id}`, { name }),
+  updateChannel: (id: number, patch: { name?: string; color?: string | null; zone?: string | null }) =>
+    request<{ channel: Channel }>("PATCH", `/v1/admin/channels/${id}`, patch),
   deleteChannel: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/admin/channels/${id}`),
 
   listMemberships: () => request<{ memberships: Membership[] }>("GET", "/v1/admin/memberships"),
@@ -178,8 +189,16 @@ export const api = {
 
   listAudit: (limit = 200) => request<{ entries: AuditEntry[] }>("GET", `/v1/admin/audit?limit=${limit}`),
 
-  transmissions: (limit = 100) =>
-    request<{ transmissions: Transmission[] }>("GET", `/v1/transmissions?limit=${limit}`),
+  transmissions: (opts: { limit?: number; search?: string; channel?: string } = {}) => {
+    const params = new URLSearchParams({ limit: String(opts.limit ?? 100) });
+    if (opts.search?.trim()) {
+      params.set("search", opts.search.trim());
+    }
+    if (opts.channel?.trim()) {
+      params.set("channel", opts.channel.trim());
+    }
+    return request<{ transmissions: Transmission[] }>("GET", `/v1/transmissions?${params}`);
+  },
 
   locations: () => request<{ positions: RadioPosition[] }>("GET", "/v1/locations"),
   alerts: () => request<{ alerts: Alert[] }>("GET", "/v1/alerts"),
@@ -189,6 +208,12 @@ export const api = {
 
   channelRoster: (channel: string) =>
     request<{ members: ChannelMember[] }>("GET", `/v1/channels/roster?channel=${encodeURIComponent(channel)}`),
+
+  unitAliases: () => request<{ aliases: UnitAlias[] }>("GET", "/v1/unit-aliases"),
+  setUnitAlias: (unitId: string, label: string) =>
+    request<{ alias: UnitAlias }>("PUT", "/v1/admin/unit-aliases", { unitId, label }),
+  deleteUnitAlias: (unitId: string) =>
+    request<{ ok: boolean }>("DELETE", `/v1/admin/unit-aliases/${encodeURIComponent(unitId)}`),
 };
 
 /** Fetches a transmission's WAV audio as a Blob (a bearer header cannot ride on <audio src>). */

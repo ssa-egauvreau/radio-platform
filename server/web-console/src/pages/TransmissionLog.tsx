@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, describeError, fetchTransmissionAudio, type Transmission } from "../api";
+import { api, describeError, fetchTransmissionAudio, type Transmission, type UserChannel } from "../api";
+import { useUnitAliasResolver } from "../unitAliases";
 
 function formatDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.round(ms / 1000));
@@ -38,13 +39,22 @@ export function TransmissionLog() {
   const [loading, setLoading] = useState(true);
   const [playingId, setPlayingId] = useState<number | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+  const [channelFilter, setChannelFilter] = useState("");
+  const [channels, setChannels] = useState<UserChannel[]>([]);
+  const aliasFor = useUnitAliasResolver();
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const urlCache = useRef<Map<number, string>>(new Map());
 
+  // Latest filters reachable from the polling timer without re-arming it.
+  const filtersRef = useRef({ search, channelFilter });
+  filtersRef.current = { search, channelFilter };
+
   const refresh = useCallback(async () => {
     try {
-      const res = await api.transmissions(100);
+      const { search, channelFilter } = filtersRef.current;
+      const res = await api.transmissions({ search, channel: channelFilter });
       setItems(res.transmissions);
       setError(null);
     } catch (err) {
@@ -52,6 +62,13 @@ export function TransmissionLog() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  useEffect(() => {
+    api
+      .myChannels()
+      .then((res) => setChannels(res.channels))
+      .catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -65,6 +82,12 @@ export function TransmissionLog() {
       cache.clear();
     };
   }, [refresh]);
+
+  // Re-query (debounced) whenever the search text or channel filter changes.
+  useEffect(() => {
+    const timer = window.setTimeout(() => void refresh(), 250);
+    return () => window.clearTimeout(timer);
+  }, [search, channelFilter, refresh]);
 
   const objectUrlFor = useCallback(async (id: number): Promise<string> => {
     const cached = urlCache.current.get(id);
@@ -119,15 +142,38 @@ export function TransmissionLog() {
     }
   }
 
+  const filtered = search.trim() !== "" || channelFilter !== "";
+
   return (
     <div className="tx-log">
       <h3>Transmission Log</h3>
+      <div className="tx-filters">
+        <input
+          className="tx-search"
+          type="search"
+          placeholder="Search transcripts…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+        />
+        <select value={channelFilter} onChange={(e) => setChannelFilter(e.target.value)}>
+          <option value="">All channels</option>
+          {channels.map((channel) => (
+            <option key={channel.id} value={channel.name}>
+              {channel.name}
+            </option>
+          ))}
+        </select>
+      </div>
       {error && <div className="banner error">{error}</div>}
       {loading && <div className="empty">Loading…</div>}
-      {!loading && items.length === 0 && <div className="empty">No recorded transmissions yet.</div>}
+      {!loading && items.length === 0 && (
+        <div className="empty">
+          {filtered ? "No transmissions match those filters." : "No recorded transmissions yet."}
+        </div>
+      )}
       {items.map((tx) => {
         const transcript = transcriptOf(tx);
-        const speaker = tx.display_name || tx.unit_id || "Unknown";
+        const speaker = tx.display_name || aliasFor(tx.unit_id) || "Unknown";
         return (
           <div className="tx-card" key={tx.id}>
             <div className="tx-card-head">
@@ -136,7 +182,7 @@ export function TransmissionLog() {
             </div>
             <div className="tx-card-sub">
               {formatTime(tx.started_at)} · {formatDuration(tx.duration_ms)}
-              {tx.display_name && tx.unit_id ? ` · ${tx.unit_id}` : ""}
+              {tx.display_name && tx.unit_id ? ` · ${aliasFor(tx.unit_id)}` : ""}
             </div>
             <div className={transcript.muted ? "tx-transcript muted" : "tx-transcript"}>
               {transcript.text}

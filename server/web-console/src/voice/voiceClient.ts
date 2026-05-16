@@ -2,7 +2,7 @@
 // PCM, and (when permitted) captures the microphone and transmits.
 
 import { getToken, type Permission } from "../api";
-import { imbeDecode, initImbe } from "./imbeVocoder";
+import { imbeDecode, imbeEncode, imbeReady, initImbe } from "./imbeVocoder";
 
 export type VoiceState = "idle" | "connecting" | "listening" | "transmitting" | "error" | "closed";
 
@@ -120,6 +120,28 @@ function upsample8kTo16k(pcm8k: Int16Array): Int16Array {
   return out;
 }
 
+/** Encodes 16 kHz mic PCM to P25 IMBE frames (2-byte marker + 11-byte codeword). */
+function encodeImbeFrames(pcm16k: Int16Array): ArrayBuffer[] {
+  // 16 kHz -> 8 kHz by averaging sample pairs (the IMBE engine runs at 8 kHz).
+  const pcm8k = new Int16Array(pcm16k.length >> 1);
+  for (let i = 0; i < pcm8k.length; i++) {
+    pcm8k[i] = (pcm16k[2 * i] + pcm16k[2 * i + 1]) >> 1;
+  }
+  const frames: ArrayBuffer[] = [];
+  for (let offset = 0; offset + 160 <= pcm8k.length; offset += 160) {
+    const codeword = imbeEncode(pcm8k.subarray(offset, offset + 160));
+    if (!codeword) {
+      continue;
+    }
+    const frame = new Uint8Array(13);
+    frame[0] = IMBE_MAGIC_0;
+    frame[1] = IMBE_MAGIC_1;
+    frame.set(codeword, 2);
+    frames.push(frame.buffer);
+  }
+  return frames;
+}
+
 export class VoiceChannelClient {
   private readonly channelName: string;
   private readonly callbacks: VoiceCallbacks;
@@ -129,7 +151,10 @@ export class VoiceChannelClient {
   private permission: Permission = "listen_only";
 
   private playCtx: AudioContext | null = null;
+  private playGain: GainNode | null = null;
   private playHead = 0;
+  private volume = 1;
+  private muted = false;
 
   private micStream: MediaStream | null = null;
   private capCtx: AudioContext | null = null;
@@ -138,6 +163,7 @@ export class VoiceChannelClient {
   private transmitting = false;
   private markerTimer: number | null = null;
   private readonly localTones = new Set<AudioBufferSourceNode>();
+  private digitalTx = true;
 
   constructor(channelName: string, callbacks: VoiceCallbacks) {
     this.channelName = channelName;
@@ -152,6 +178,35 @@ export class VoiceChannelClient {
     return this.permission !== "listen_only";
   }
 
+  /** Chooses P25 IMBE (true) or clear PCM (false) for outgoing audio. */
+  setDigitalTx(on: boolean): void {
+    this.digitalTx = on;
+  }
+
+  /** Sets channel listen volume (0–1). Takes effect immediately and on next connect. */
+  setVolume(volume: number): void {
+    this.volume = Math.min(Math.max(volume, 0), 1);
+    if (this.playGain && !this.muted) {
+      this.playGain.gain.value = this.volume;
+    }
+  }
+
+  /** Mutes/unmutes channel listen audio without losing the volume setting. */
+  setMuted(muted: boolean): void {
+    this.muted = muted;
+    if (this.playGain) {
+      this.playGain.gain.value = muted ? 0 : this.volume;
+    }
+  }
+
+  get isMuted(): boolean {
+    return this.muted;
+  }
+
+  get currentVolume(): number {
+    return this.volume;
+  }
+
   private setState(state: VoiceState, detail?: string): void {
     this.state = state;
     this.callbacks.onState(state, detail);
@@ -163,6 +218,9 @@ export class VoiceChannelClient {
     void initImbe(); // load the IMBE vocoder in the background for digital RX
     // Created inside the triggering click so the browser lets audio play.
     this.playCtx = new AudioContext({ sampleRate: TARGET_RATE });
+    this.playGain = this.playCtx.createGain();
+    this.playGain.gain.value = this.muted ? 0 : this.volume;
+    this.playGain.connect(this.playCtx.destination);
     this.playHead = 0;
     void this.playCtx.resume();
 
@@ -247,7 +305,7 @@ export class VoiceChannelClient {
     }
     const source = ctx.createBufferSource();
     source.buffer = frame;
-    source.connect(ctx.destination);
+    source.connect(this.playGain ?? ctx.destination);
 
     const now = ctx.currentTime;
     if (this.playHead < now + 0.04) {
@@ -296,7 +354,15 @@ export class VoiceChannelClient {
     this.capNode = new AudioWorkletNode(this.capCtx, "pcm-capture");
     this.capNode.port.onmessage = (event: MessageEvent) => {
       const ws = this.ws;
-      if (this.transmitting && ws && ws.readyState === WebSocket.OPEN && event.data instanceof ArrayBuffer) {
+      if (!this.transmitting || !ws || ws.readyState !== WebSocket.OPEN || !(event.data instanceof ArrayBuffer)) {
+        return;
+      }
+      if (this.digitalTx && imbeReady()) {
+        // Encode to P25 IMBE so transmissions carry the digital-voice character.
+        for (const frame of encodeImbeFrames(new Int16Array(event.data))) {
+          ws.send(frame);
+        }
+      } else {
         ws.send(event.data);
       }
     };
@@ -413,6 +479,7 @@ export class VoiceChannelClient {
       void this.playCtx.close();
       this.playCtx = null;
     }
+    this.playGain = null;
     const ws = this.ws;
     this.ws = null;
     if (ws) {

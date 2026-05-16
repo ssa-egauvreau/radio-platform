@@ -23,12 +23,15 @@ import {
   listChannels,
   listChannelsForUser,
   listMemberships,
+  listUnitAliases,
   listUsers,
   PERMISSIONS,
   ROLES,
   removeMembership,
-  renameChannel,
+  updateChannel,
   setMembership,
+  setUnitAlias,
+  deleteUnitAlias,
   updateUser,
   writeAudit,
   type Permission,
@@ -112,7 +115,15 @@ export function createApiRouter(): Router {
       const me = req.authUser!;
       if (me.role === "admin" || me.role === "dispatcher") {
         const all = await listChannels();
-        res.json({ channels: all.map((c) => ({ id: c.id, name: c.name, permission: "talk_priority" })) });
+        res.json({
+          channels: all.map((c) => ({
+            id: c.id,
+            name: c.name,
+            color: c.color,
+            zone: c.zone,
+            permission: "talk_priority",
+          })),
+        });
         return;
       }
       res.json({ channels: await listChannelsForUser(me.id) });
@@ -271,12 +282,22 @@ export function createApiRouter(): Router {
   router.patch("/admin/channels/:id", requireAdmin, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const name = String(req.body?.name ?? "").trim();
-      if (!name) {
-        res.status(400).json({ error: "missing_name" });
-        return;
+      const patch: { name?: string; color?: string | null; zone?: string | null } = {};
+      if (req.body?.name !== undefined) {
+        const name = String(req.body.name).trim();
+        if (!name) {
+          res.status(400).json({ error: "missing_name" });
+          return;
+        }
+        patch.name = name;
       }
-      const channel = await renameChannel(id, name);
+      if (req.body?.color !== undefined) {
+        patch.color = req.body.color ? String(req.body.color) : null;
+      }
+      if (req.body?.zone !== undefined) {
+        patch.zone = req.body.zone ? String(req.body.zone).trim() : null;
+      }
+      const channel = await updateChannel(id, patch);
       if (!channel) {
         res.status(404).json({ error: "not_found" });
         return;
@@ -284,9 +305,9 @@ export function createApiRouter(): Router {
       await writeAudit({
         actorUserId: req.authUser!.id,
         actorName: req.authUser!.username,
-        action: "channel_rename",
-        target: name,
-        detail: { id },
+        action: "channel_update",
+        target: channel.name,
+        detail: { id, fields: Object.keys(patch) },
         ip: clientIp(req),
       });
       res.json({ channel });
@@ -308,6 +329,60 @@ export function createApiRouter(): Router {
         actorName: req.authUser!.username,
         action: "channel_delete",
         target: String(id),
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- unit aliases (friendly labels for radio unit IDs) -----------------
+
+  router.get("/unit-aliases", requireAuth, async (_req, res) => {
+    try {
+      res.json({ aliases: await listUnitAliases() });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.put("/admin/unit-aliases", requireAdmin, async (req, res) => {
+    try {
+      const unitId = String(req.body?.unitId ?? "").trim();
+      const label = String(req.body?.label ?? "").trim();
+      if (!unitId || !label) {
+        res.status(400).json({ error: "missing_fields" });
+        return;
+      }
+      const alias = await setUnitAlias(unitId, label);
+      await writeAudit({
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "unit_alias_set",
+        target: unitId,
+        detail: { label },
+        ip: clientIp(req),
+      });
+      res.json({ alias });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.delete("/admin/unit-aliases/:unitId", requireAdmin, async (req, res) => {
+    try {
+      const unitId = String(req.params.unitId ?? "").trim();
+      const ok = await deleteUnitAlias(unitId);
+      if (!ok) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await writeAudit({
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "unit_alias_delete",
+        target: unitId,
         ip: clientIp(req),
       });
       res.json({ ok: true });
@@ -389,13 +464,20 @@ export function createApiRouter(): Router {
     try {
       const me = req.authUser!;
       const limit = Number(req.query.limit ?? 100);
+      const search = typeof req.query.search === "string" ? req.query.search : undefined;
+      const channel = typeof req.query.channel === "string" ? req.query.channel : undefined;
       if (me.role === "admin" || me.role === "dispatcher") {
-        res.json({ transmissions: await listTransmissions({ limit }) });
+        res.json({ transmissions: await listTransmissions({ limit, search, channel }) });
         return;
       }
       const channels = await listChannelsForUser(me.id);
       res.json({
-        transmissions: await listTransmissions({ channelNames: channels.map((c) => c.name), limit }),
+        transmissions: await listTransmissions({
+          channelNames: channels.map((c) => c.name),
+          limit,
+          search,
+          channel,
+        }),
       });
     } catch (error) {
       fail(res, error);

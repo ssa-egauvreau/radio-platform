@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, describeError, type Alert, type UserChannel } from "../api";
 import { sounds } from "../sounds";
+import { useUnitAliasResolver } from "../unitAliases";
 import { IconAlertTriangle, IconBell } from "../icons";
 
 type AlertKind = "page" | "emergency";
@@ -10,6 +11,28 @@ function formatTime(iso: string): string {
   return Number.isNaN(date.getTime())
     ? iso
     : date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+/** Raises an OS-level notification for a new emergency, when the user has granted permission. */
+function notifyEmergency(alert: Alert): void {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") {
+    return;
+  }
+  const from = alert.from_unit || alert.from_name || "Unknown unit";
+  const where = alert.channel_name ?? "All channels";
+  try {
+    const note = new Notification("EMERGENCY", {
+      body: `${from} · ${where}${alert.message ? `\n${alert.message}` : ""}`,
+      tag: `emergency-${alert.id}`,
+      requireInteraction: true,
+    });
+    note.onclick = () => {
+      window.focus();
+      note.close();
+    };
+  } catch {
+    /* notification construction can throw on some platforms — non-fatal */
+  }
 }
 
 export function AlertsPanel() {
@@ -22,17 +45,20 @@ export function AlertsPanel() {
   const [sending, setSending] = useState(false);
   const seenEmergencies = useRef<Set<number>>(new Set());
   const primed = useRef(false);
+  const aliasFor = useUnitAliasResolver();
 
   async function refresh() {
     try {
       const res = await api.alerts();
       setAlerts(res.alerts);
       const active = res.alerts.filter((a) => a.kind === "emergency" && a.active);
-      const isNew = primed.current && active.some((a) => !seenEmergencies.current.has(a.id));
+      const fresh = active.filter((a) => !seenEmergencies.current.has(a.id));
       active.forEach((a) => seenEmergencies.current.add(a.id));
+      const isNew = primed.current && fresh.length > 0;
       primed.current = true;
       if (isNew) {
         sounds.emergency();
+        fresh.forEach(notifyEmergency);
       }
     } catch {
       /* keep last snapshot */
@@ -40,6 +66,9 @@ export function AlertsPanel() {
   }
 
   useEffect(() => {
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      void Notification.requestPermission();
+    }
     api
       .myChannels()
       .then((res) => setChannels(res.channels))
@@ -91,7 +120,7 @@ export function AlertsPanel() {
             <strong className="alert-title">
               <IconAlertTriangle size={14} /> EMERGENCY
             </strong>{" "}
-            · {alert.from_unit || alert.from_name || "Unknown"}
+            · {aliasFor(alert.from_unit) || alert.from_name || "Unknown"}
             <div className="alert-sub">
               {alert.channel_name ?? "All channels"} · {formatTime(alert.created_at)}
             </div>
@@ -139,9 +168,9 @@ export function AlertsPanel() {
                 {alert.kind === "emergency" ? <IconAlertTriangle size={13} /> : <IconBell size={13} />}
                 {alert.kind === "emergency" ? "Emergency" : "Page"}
               </strong>{" "}
-              · {alert.channel_name ?? alert.target_unit ?? "All channels"}
+              · {(alert.channel_name ?? aliasFor(alert.target_unit)) || "All channels"}
               <div className="alert-sub">
-                {alert.from_name || alert.from_unit || "—"} · {formatTime(alert.created_at)}
+                {alert.from_name || aliasFor(alert.from_unit) || "—"} · {formatTime(alert.created_at)}
                 {!alert.active && alert.cleared_by ? ` · cleared by ${alert.cleared_by}` : ""}
               </div>
               {alert.message && <div className="alert-msg">{alert.message}</div>}

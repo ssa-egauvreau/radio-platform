@@ -24,6 +24,8 @@ export interface ChannelRow {
   id: number;
   name: string;
   sort_order: number;
+  color: string | null;
+  zone: string | null;
 }
 
 export interface MembershipRow {
@@ -36,6 +38,8 @@ export interface UserChannelRow {
   id: number;
   name: string;
   permission: Permission;
+  color: string | null;
+  zone: string | null;
 }
 
 export interface AuditRow {
@@ -128,7 +132,8 @@ export async function countActiveAdmins(): Promise<number> {
 
 export async function listChannels(): Promise<ChannelRow[]> {
   const res = await requirePool().query<ChannelRow>(
-    `SELECT id, name, sort_order FROM radio_channels ORDER BY sort_order ASC, id ASC;`,
+    `SELECT id, name, sort_order, color, zone FROM radio_channels
+     ORDER BY zone NULLS FIRST, sort_order ASC, id ASC;`,
   );
   return res.rows;
 }
@@ -137,16 +142,43 @@ export async function createChannel(name: string): Promise<ChannelRow> {
   const res = await requirePool().query<ChannelRow>(
     `INSERT INTO radio_channels (name, sort_order)
      VALUES ($1, COALESCE((SELECT MAX(sort_order) + 1 FROM radio_channels), 1))
-     RETURNING id, name, sort_order;`,
+     RETURNING id, name, sort_order, color, zone;`,
     [name.trim()],
   );
   return res.rows[0]!;
 }
 
-export async function renameChannel(id: number, name: string): Promise<ChannelRow | null> {
+export async function updateChannel(
+  id: number,
+  patch: { name?: string; color?: string | null; zone?: string | null },
+): Promise<ChannelRow | null> {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  let i = 1;
+  if (patch.name !== undefined) {
+    sets.push(`name = $${i++}`);
+    vals.push(patch.name.trim());
+  }
+  if (patch.color !== undefined) {
+    sets.push(`color = $${i++}`);
+    vals.push(patch.color);
+  }
+  if (patch.zone !== undefined) {
+    sets.push(`zone = $${i++}`);
+    vals.push(patch.zone);
+  }
+  if (sets.length === 0) {
+    const res = await requirePool().query<ChannelRow>(
+      `SELECT id, name, sort_order, color, zone FROM radio_channels WHERE id = $1;`,
+      [id],
+    );
+    return res.rows[0] ?? null;
+  }
+  vals.push(id);
   const res = await requirePool().query<ChannelRow>(
-    `UPDATE radio_channels SET name = $1 WHERE id = $2 RETURNING id, name, sort_order;`,
-    [name.trim(), id],
+    `UPDATE radio_channels SET ${sets.join(", ")} WHERE id = $${i}
+     RETURNING id, name, sort_order, color, zone;`,
+    vals,
   );
   return res.rows[0] ?? null;
 }
@@ -159,7 +191,7 @@ export async function deleteChannel(id: number): Promise<boolean> {
 /** Case-insensitive channel lookup by display name (used by the voice relay on join). */
 export async function getChannelByName(name: string): Promise<ChannelRow | null> {
   const res = await requirePool().query<ChannelRow>(
-    `SELECT id, name, sort_order FROM radio_channels WHERE lower(name) = lower($1);`,
+    `SELECT id, name, sort_order, color, zone FROM radio_channels WHERE lower(name) = lower($1);`,
     [name.trim()],
   );
   return res.rows[0] ?? null;
@@ -176,11 +208,11 @@ export async function listMemberships(): Promise<MembershipRow[]> {
 
 export async function listChannelsForUser(userId: number): Promise<UserChannelRow[]> {
   const res = await requirePool().query<UserChannelRow>(
-    `SELECT c.id, c.name, m.permission
+    `SELECT c.id, c.name, c.color, c.zone, m.permission
      FROM channel_members m
      JOIN radio_channels c ON c.id = m.channel_id
      WHERE m.user_id = $1
-     ORDER BY c.sort_order ASC, c.id ASC;`,
+     ORDER BY c.zone NULLS FIRST, c.sort_order ASC, c.id ASC;`,
     [userId],
   );
   return res.rows;
@@ -254,6 +286,37 @@ export async function listAudit(limit = 200): Promise<AuditRow[]> {
   return res.rows;
 }
 
+// --- unit aliases --------------------------------------------------------
+
+export interface UnitAliasRow {
+  unit_id: string;
+  label: string;
+  updated_at: string;
+}
+
+export async function listUnitAliases(): Promise<UnitAliasRow[]> {
+  const res = await requirePool().query<UnitAliasRow>(
+    `SELECT unit_id, label, updated_at FROM unit_aliases ORDER BY unit_id ASC;`,
+  );
+  return res.rows;
+}
+
+export async function setUnitAlias(unitId: string, label: string): Promise<UnitAliasRow> {
+  const res = await requirePool().query<UnitAliasRow>(
+    `INSERT INTO unit_aliases (unit_id, label, updated_at)
+     VALUES ($1, $2, now())
+     ON CONFLICT (unit_id) DO UPDATE SET label = EXCLUDED.label, updated_at = now()
+     RETURNING unit_id, label, updated_at;`,
+    [unitId.trim(), label.trim()],
+  );
+  return res.rows[0]!;
+}
+
+export async function deleteUnitAlias(unitId: string): Promise<boolean> {
+  const res = await requirePool().query(`DELETE FROM unit_aliases WHERE unit_id = $1;`, [unitId.trim()]);
+  return (res.rowCount ?? 0) > 0;
+}
+
 // --- transmissions -------------------------------------------------------
 
 export interface TransmissionRow {
@@ -310,24 +373,44 @@ export async function insertTransmission(input: {
   return res.rows[0]!.id;
 }
 
-/** Recent transmissions (metadata only — never selects the audio bytes). */
-export async function listTransmissions(opts: { channelNames?: string[]; limit?: number }): Promise<TransmissionRow[]> {
+/**
+ * Recent transmissions (metadata only — never selects the audio bytes).
+ * `channelNames` scopes the result to a role's accessible channels; `channel`
+ * narrows to one channel by name; `search` matches transcript text.
+ */
+export async function listTransmissions(opts: {
+  channelNames?: string[];
+  channel?: string;
+  search?: string;
+  limit?: number;
+}): Promise<TransmissionRow[]> {
   const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 100) || 100, 1), 500);
-  if (opts.channelNames) {
-    if (opts.channelNames.length === 0) {
-      return [];
-    }
-    const res = await requirePool().query<TransmissionRow>(
-      `SELECT ${TX_META_COLS} FROM transmissions
-       WHERE lower(channel_name) = ANY($1)
-       ORDER BY started_at DESC LIMIT $2;`,
-      [opts.channelNames.map((n) => n.trim().toLowerCase()), limit],
-    );
-    return res.rows;
+  if (opts.channelNames && opts.channelNames.length === 0) {
+    return [];
   }
+  const where: string[] = [];
+  const vals: unknown[] = [];
+  let i = 1;
+  if (opts.channelNames) {
+    where.push(`lower(channel_name) = ANY($${i++})`);
+    vals.push(opts.channelNames.map((n) => n.trim().toLowerCase()));
+  }
+  const channel = opts.channel?.trim();
+  if (channel) {
+    where.push(`lower(channel_name) = lower($${i++})`);
+    vals.push(channel);
+  }
+  const search = opts.search?.trim();
+  if (search) {
+    where.push(`transcript ILIKE $${i++}`);
+    vals.push(`%${search.replace(/[\\%_]/g, (m) => "\\" + m)}%`);
+  }
+  vals.push(limit);
   const res = await requirePool().query<TransmissionRow>(
-    `SELECT ${TX_META_COLS} FROM transmissions ORDER BY started_at DESC LIMIT $1;`,
-    [limit],
+    `SELECT ${TX_META_COLS} FROM transmissions
+     ${where.length ? `WHERE ${where.join(" AND ")}` : ""}
+     ORDER BY started_at DESC LIMIT $${i};`,
+    vals,
   );
   return res.rows;
 }

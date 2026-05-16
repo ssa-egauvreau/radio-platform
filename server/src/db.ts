@@ -44,6 +44,8 @@ export async function ensureSchema(): Promise<void> {
       name TEXT NOT NULL UNIQUE
     );
   `);
+  await p.query(`ALTER TABLE radio_channels ADD COLUMN IF NOT EXISTS color TEXT;`);
+  await p.query(`ALTER TABLE radio_channels ADD COLUMN IF NOT EXISTS zone TEXT;`);
 
   await p.query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -133,6 +135,15 @@ export async function ensureSchema(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       cleared_by TEXT,
       cleared_at TIMESTAMPTZ
+    );
+  `);
+
+  // Friendly labels for radio unit IDs, shown across the console in place of raw ids.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS unit_aliases (
+      unit_id TEXT PRIMARY KEY,
+      label TEXT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
 
