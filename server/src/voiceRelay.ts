@@ -1,0 +1,113 @@
+/**
+ * FM-style half-duplex voice relay per logical channel over WebSockets.
+ *
+ * Protocol:
+ * - First control message MUST be UTF-8 JSON: { type: "join", unit_id, channel }
+ * - Subsequent binary frames: raw PCM mono 16-bit LE, 16000 Hz (matches Android capture).
+ */
+
+import type { IncomingMessage } from "node:http";
+import type { Server as HttpServer } from "node:http";
+import type { Duplex } from "node:stream";
+import { WebSocket, WebSocketServer } from "ws";
+import { normalizedChannel } from "./presence.js";
+
+export const VOICE_WS_PATH = "/v1/voice/stream";
+
+type ClientMeta = { unitId: string; channelNorm: string | null };
+
+export function attachVoiceRelay(
+  server: HttpServer,
+  options: { radioApiKey?: string },
+): WebSocketServer {
+  const requiredKey = options.radioApiKey?.trim();
+
+  const wss = new WebSocketServer({ noServer: true });
+  const clientMeta = new Map<WebSocket, ClientMeta>();
+
+  server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+    try {
+      const host = req.headers.host ?? "localhost";
+      const url = new URL(req.url ?? "/", `http://${host}`);
+      if (url.pathname !== VOICE_WS_PATH) {
+        socket.destroy();
+        return;
+      }
+      if (requiredKey) {
+        const provided = req.headers["x-radio-key"];
+        const headerVal = Array.isArray(provided) ? provided[0] : provided;
+        if (headerVal !== requiredKey) {
+          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+          socket.destroy();
+          return;
+        }
+      }
+      wss.handleUpgrade(req, socket, head, (ws) => {
+        wss.emit("connection", ws, req);
+      });
+    } catch {
+      socket.destroy();
+    }
+  });
+
+  function broadcastExcept(from: WebSocket, channelNorm: string, payload: Buffer): void {
+    for (const [peer, meta] of clientMeta) {
+      if (peer === from) continue;
+      if (!meta.channelNorm || meta.channelNorm !== channelNorm) continue;
+      if (peer.readyState !== WebSocket.OPEN) continue;
+      try {
+        peer.send(payload);
+      } catch {
+        /* ignore stale peer */
+      }
+    }
+  }
+
+  wss.on("connection", (ws: WebSocket) => {
+    clientMeta.set(ws, { unitId: "", channelNorm: null });
+
+    ws.on("message", (raw: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
+      try {
+        if (!isBinary) {
+          const text = Buffer.isBuffer(raw) ? raw.toString("utf8") : Buffer.from(raw as ArrayBuffer).toString("utf8");
+          const json = JSON.parse(text) as { type?: string; channel?: string; unit_id?: string };
+          if (json.type !== "join") {
+            return;
+          }
+          const unitId = String(json.unit_id ?? "")
+            .trim()
+            .toUpperCase();
+          const chNorm = normalizedChannel(json.channel);
+          if (!unitId || !chNorm || chNorm === "----") {
+            ws.send(JSON.stringify({ type: "error", code: "bad_join" }));
+            return;
+          }
+          clientMeta.set(ws, { unitId, channelNorm: chNorm });
+          return;
+        }
+
+        const meta = clientMeta.get(ws);
+        if (!meta?.channelNorm) {
+          return;
+        }
+        let payload: Buffer;
+        if (Buffer.isBuffer(raw)) {
+          payload = raw;
+        } else if (Array.isArray(raw)) {
+          payload = Buffer.concat(raw);
+        } else {
+          payload = Buffer.from(raw);
+        }
+        broadcastExcept(ws, meta.channelNorm, payload);
+      } catch (e) {
+        console.warn("voiceRelay message handling error", e);
+      }
+    });
+
+    ws.on("close", () => {
+      clientMeta.delete(ws);
+    });
+  });
+
+  return wss;
+}

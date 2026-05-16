@@ -98,6 +98,22 @@ If you enabled `RADIO_API_KEY`, use a REST client (or `curl`) to add the header 
 
 ---
 
+## A9 — Voice relay (WebSocket PCM)
+
+The API also exposes a **voice bridge** used by Android for live half-duplex audio on the tuned channel:
+
+- Path: **`/v1/voice/stream`**
+- URL example: **`wss://your-service.up.railway.app/v1/voice/stream`** (HTTPS base → **`wss://`**)
+- Upgrade uses the **same optional** header **`X-Radio-Key`** as REST when `RADIO_API_KEY` is set.
+
+Protocol:
+
+1. First **text** frame: UTF-8 JSON **`{"type":"join","unit_id":"<ID>","channel":"<exact channel label>"}`** (must match your `/v1/channels` catalog names so all clients land in the same room).
+2. Then **binary** frames: raw **PCM mono, 16-bit signed little-endian**, **16000 Hz** (mic capture chunk size varies; server forwards verbatim).
+
+Railway counts this as traffic on your HTTP service — no extra addon. If audio fails silently, verify the deployment completed and that nothing blocks WebSockets (corporate proxies, etc.).
+---
+
 ## Part B — Point the Android app at Railway
 
 ### B1. Locate `local.properties`

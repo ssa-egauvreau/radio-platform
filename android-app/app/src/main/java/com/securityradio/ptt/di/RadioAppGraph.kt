@@ -10,10 +10,12 @@ import com.securityradio.ptt.device.AssetRadioUiSoundPlayer
 import com.securityradio.ptt.device.AudioRecordPttCapture
 import com.securityradio.ptt.device.ChannelSpeechHelper
 import com.securityradio.ptt.device.HardwareMappingRepository
-import com.securityradio.ptt.device.RadioPreferences
+import com.securityradio.ptt.device.InboundVoicePlayer
 import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.device.PttMicCapture
+import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.RadioUiSoundPlayer
+import com.securityradio.ptt.device.VoiceRelayTransport
 import com.securityradio.ptt.domain.ChannelRepository
 
 class RadioAppGraph(application: Application) {
@@ -28,8 +30,19 @@ class RadioAppGraph(application: Application) {
 
     val localUnitIdentifier: LocalUnitIdentifier = LocalUnitIdentifier(application)
 
-    /** Sidetone off — mic is captured only (Step B will stream to peers); avoids hearing yourself like a speakerphone. */
-    val pttMicCapture: PttMicCapture = AudioRecordPttCapture(enableSidetone = false)
+    private val inboundVoicePlayer = InboundVoicePlayer()
+
+    val voiceRelay: VoiceRelayTransport = VoiceRelayTransport(
+        httpApiBaseUrl = BuildConfig.API_BASE_URL,
+        apiKey = BuildConfig.RADIO_API_KEY,
+        inbound = inboundVoicePlayer,
+    )
+
+    /** Sidetone off; PCM also flows to [voiceRelay]. */
+    val pttMicCapture: PttMicCapture = AudioRecordPttCapture(
+        enableSidetone = false,
+        streamingSink = voiceRelay,
+    )
 
     private val stubChannelRepository = StubChannelRepository()
 

@@ -13,11 +13,12 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Step A — local sidetone: while PTT is held, mic PCM is played back on this device so you can
- * verify capture. Audio is still not sent to the server (Step B will add transport).
+ * Capture mic PCM during PTT. Optional sidetone (local playback) and optional
+ * upstream sink (e.g. [VoiceRelayTransport]) for relayed VoIP toward peers.
  */
 class AudioRecordPttCapture(
     private val enableSidetone: Boolean = true,
+    private val streamingSink: StreamingPcmSink? = null,
 ) : PttMicCapture {
 
     private val supervisor = SupervisorJob()
@@ -33,10 +34,10 @@ class AudioRecordPttCapture(
     override fun startCapture() {
         synchronized(this) {
             stopCaptureInternal()
-            val sampleRate = SAMPLE_RATE_HZ
+            val sampleRate = VoiceAudioSpecs.SAMPLE_RATE_HZ
             val channelConfigIn = AudioFormat.CHANNEL_IN_MONO
             val channelConfigOut = AudioFormat.CHANNEL_OUT_MONO
-            val audioFormat = AudioFormat.ENCODING_PCM_16BIT
+            val audioFormat = VoiceAudioSpecs.PCM_ENCODING
             val minBuffer = AudioRecord.getMinBufferSize(sampleRate, channelConfigIn, audioFormat)
             if (minBuffer <= 0) {
                 return
@@ -94,8 +95,12 @@ class AudioRecordPttCapture(
             job = scope.launch {
                 while (isActive && captureActive && record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     val read = record.read(buffer, 0, buffer.size)
-                    if (read > 0 && track != null && track.playState == AudioTrack.PLAYSTATE_PLAYING) {
-                        track.write(buffer, 0, read)
+                    if (read > 0) {
+                        streamingSink?.consumePcm(buffer, read)
+                        val t = audioTrack
+                        if (t != null && t.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                            t.write(buffer, 0, read)
+                        }
                     }
                 }
             }
@@ -131,9 +136,5 @@ class AudioRecordPttCapture(
     override fun release() {
         stopCapture()
         supervisor.cancel()
-    }
-
-    companion object {
-        const val SAMPLE_RATE_HZ = 16_000
     }
 }

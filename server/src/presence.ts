@@ -5,7 +5,7 @@
 const TTL_MS = 45_000;
 const presence = new Map<string, Map<string, number>>(); // normalized channel → unit → lastHeartbeatMs
 
-function normalizedChannel(raw: unknown): string {
+export function normalizedChannel(raw: unknown): string {
   return String(raw ?? "")
     .trim()
     .toLowerCase()

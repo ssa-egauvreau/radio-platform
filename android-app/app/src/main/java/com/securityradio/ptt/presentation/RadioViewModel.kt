@@ -15,6 +15,7 @@ import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.device.PttMicCapture
 import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.RadioUiSoundPlayer
+import com.securityradio.ptt.device.VoiceRelayTransport
 import com.securityradio.ptt.domain.ChannelCatalogOrigin
 import com.securityradio.ptt.domain.ChannelRepository
 import android.os.SystemClock
@@ -43,6 +44,7 @@ class RadioViewModel(
     private val hardwareMappingRepository: HardwareMappingRepository,
     private val radioPreferences: RadioPreferences,
     private val speechHelper: ChannelSpeechHelper,
+    private val voiceRelay: VoiceRelayTransport,
 ) : ViewModel() {
 
     private val _wakeUiRequests = MutableSharedFlow<String>(extraBufferCapacity = 24)
@@ -118,6 +120,7 @@ class RadioViewModel(
             while (isActive) {
                 delay(PRESENCE_POLL_MS)
                 pulsePresenceFromCurrentState(clearWhenOffline = true)
+                reconcileVoiceTransport()
             }
         }
     }
@@ -520,6 +523,7 @@ class RadioViewModel(
         }
         speechHelper.speakChannelTuneIfEnabled(tunedLabel)
         viewModelScope.launch { pulsePresenceHeartbeatAndCount(expectOnline = true) }
+        reconcileVoiceTransport()
     }
 
     private suspend fun syncCatalog(playConnectSoundIfNetwork: Boolean) {
@@ -583,6 +587,7 @@ class RadioViewModel(
         if (networkLabel == "ONLINE") {
             pulsePresenceFromCurrentState(clearWhenOffline = false)
         }
+        reconcileVoiceTransport()
     }
 
     /** Fire-and-forget presence refresh aligned with catalog / link changes. */
@@ -593,6 +598,16 @@ class RadioViewModel(
                 expectOnline = false,
             )
         }
+    }
+
+    /** Align Voice WebSocket relay with tuned channel / link state (half-duplex PCM). */
+    private fun reconcileVoiceTransport() {
+        val s = _uiState.value
+        voiceRelay.updateVoiceTarget(
+            unitIdUpper = unitIdUpper,
+            channelLabel = s.channelLabel,
+            networkOnline = s.networkLabel == "ONLINE",
+        )
     }
 
     /**
@@ -764,6 +779,7 @@ class RadioViewModel(
     }
 
     override fun onCleared() {
+        voiceRelay.disconnect()
         pttToneJob?.cancel()
         pttMicCapture.release()
         soundPlayer.release()

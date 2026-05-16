@@ -1,7 +1,9 @@
+import { createServer } from "node:http";
 import express from "express";
 import { DEFAULT_GREEN_CHANNELS } from "./defaultChannels.js";
 import { ensureChannelSchema, listChannelsFromDb } from "./db.js";
 import { countPresence, heartbeatPresence } from "./presence.js";
+import { VOICE_WS_PATH, attachVoiceRelay } from "./voiceRelay.js";
 
 const app = express();
 app.use(express.json());
@@ -53,7 +55,7 @@ app.get("/v1/air", (_req, res) => {
   res.json({ occupied });
 });
 
-/** Registers (or refreshes TTL for) this unit on a channel via periodic Android heartbeats. */
+/** Registers (or refreshes TTL for) this unit on its tuned channel via periodic Android heartbeats. */
 app.post("/v1/presence/heartbeat", (req, res) => {
   const hb = heartbeatPresence(req.body?.unit_id, req.body?.channel);
   if (!hb.ok) {
@@ -111,9 +113,13 @@ async function main(): Promise<void> {
     console.error("Database bootstrap failed (continuing without DB)", error);
   });
 
-  app.listen(port, () => {
+  const server = createServer(app);
+  attachVoiceRelay(server, { radioApiKey });
+
+  server.listen(port, () => {
     console.log(`Security Radio API listening on ${port}`);
     console.log(`RADIO_API_KEY ${radioApiKey ? "enabled" : "disabled"}`);
+    console.log(`Voice relay WebSocket path ${VOICE_WS_PATH}`);
     console.log(`DATABASE_URL ${process.env.DATABASE_URL ? "configured" : "not set (in-memory defaults)"}`);
   });
 }
