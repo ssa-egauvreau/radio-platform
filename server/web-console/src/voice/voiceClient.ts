@@ -2,6 +2,7 @@
 // PCM, and (when permitted) captures the microphone and transmits.
 
 import { getToken, type Permission } from "../api";
+import { imbeDecode, initImbe } from "./imbeVocoder";
 
 export type VoiceState = "idle" | "connecting" | "listening" | "transmitting" | "error" | "closed";
 
@@ -50,6 +51,75 @@ function markerBeepPcm(): Int16Array {
   return out;
 }
 
+export type ToneOutKind = "routine" | "priority" | "status";
+
+interface ToneSegment {
+  hz: number; // 0 = silence
+  ms: number;
+}
+
+/** Renders a tone/silence sequence to 16 kHz mono PCM-16 with click-free edges. */
+function synthTone(segments: ToneSegment[]): Int16Array {
+  const fade = Math.round(TARGET_RATE * 0.006);
+  const total = segments.reduce((sum, s) => sum + Math.round((TARGET_RATE * s.ms) / 1000), 0);
+  const out = new Int16Array(total);
+  let pos = 0;
+  for (const segment of segments) {
+    const n = Math.round((TARGET_RATE * segment.ms) / 1000);
+    for (let i = 0; i < n; i++) {
+      let gain = 0.5;
+      if (i < fade) {
+        gain *= i / fade;
+      } else if (i > n - fade) {
+        gain *= (n - i) / fade;
+      }
+      out[pos + i] =
+        segment.hz > 0
+          ? Math.round(Math.sin((2 * Math.PI * segment.hz * i) / TARGET_RATE) * gain * 32767)
+          : 0;
+    }
+    pos += n;
+  }
+  return out;
+}
+
+function warbleSegments(loHz: number, hiHz: number, segMs: number, totalMs: number): ToneSegment[] {
+  const segments: ToneSegment[] = [];
+  let high = true;
+  for (let elapsed = 0; elapsed < totalMs; elapsed += segMs) {
+    segments.push({ hz: high ? hiHz : loHz, ms: segMs });
+    high = !high;
+  }
+  return segments;
+}
+
+/** Police-style dispatch alert tones: steady attention / urgent warble / status query. */
+function toneOutPcm(kind: ToneOutKind): Int16Array {
+  if (kind === "priority") {
+    return synthTone(warbleSegments(720, 1180, 150, 2400));
+  }
+  if (kind === "status") {
+    return synthTone([
+      { hz: 1240, ms: 130 },
+      { hz: 0, ms: 90 },
+      { hz: 1240, ms: 130 },
+      { hz: 0, ms: 90 },
+      { hz: 1240, ms: 130 },
+    ]);
+  }
+  return synthTone([{ hz: 1000, ms: 1000 }]);
+}
+
+/** Doubles 8 kHz PCM up to 16 kHz by sample duplication (IMBE decodes at 8 kHz). */
+function upsample8kTo16k(pcm8k: Int16Array): Int16Array {
+  const out = new Int16Array(pcm8k.length * 2);
+  for (let i = 0; i < pcm8k.length; i++) {
+    out[i * 2] = pcm8k[i];
+    out[i * 2 + 1] = pcm8k[i];
+  }
+  return out;
+}
+
 export class VoiceChannelClient {
   private readonly channelName: string;
   private readonly callbacks: VoiceCallbacks;
@@ -67,6 +137,7 @@ export class VoiceChannelClient {
   private capNode: AudioWorkletNode | null = null;
   private transmitting = false;
   private markerTimer: number | null = null;
+  private readonly localTones = new Set<AudioBufferSourceNode>();
 
   constructor(channelName: string, callbacks: VoiceCallbacks) {
     this.channelName = channelName;
@@ -89,6 +160,7 @@ export class VoiceChannelClient {
   /** Opens the relay socket and starts listening. Call from a user gesture. */
   connect(): void {
     this.setState("connecting");
+    void initImbe(); // load the IMBE vocoder in the background for digital RX
     // Created inside the triggering click so the browser lets audio play.
     this.playCtx = new AudioContext({ sampleRate: TARGET_RATE });
     this.playHead = 0;
@@ -148,15 +220,19 @@ export class VoiceChannelClient {
       return;
     }
     const bytes = new Uint8Array(buffer);
-    // Digital-voice (IMBE) frames cannot be decoded here — skip rather than play noise.
+    // P25 IMBE digital-voice frame: 2-byte marker + 11-byte codeword.
     if (bytes.byteLength === 13 && bytes[0] === IMBE_MAGIC_0 && bytes[1] === IMBE_MAGIC_1) {
+      const pcm8k = imbeDecode(bytes.subarray(2));
+      if (pcm8k) {
+        this.schedulePcm(upsample8kTo16k(pcm8k));
+      }
       return;
     }
     this.schedulePcm(new Int16Array(buffer, 0, Math.floor(buffer.byteLength / 2)));
   }
 
   /** Queues one PCM-16 chunk for gapless playback on the listen context. */
-  private schedulePcm(pcm: Int16Array): void {
+  private schedulePcm(pcm: Int16Array, track = false): void {
     const ctx = this.playCtx;
     if (!ctx || pcm.length === 0) {
       return;
@@ -179,6 +255,16 @@ export class VoiceChannelClient {
     }
     source.start(this.playHead);
     this.playHead += frame.duration;
+
+    if (track) {
+      this.localTones.add(source);
+      source.onended = () => this.localTones.delete(source);
+    }
+  }
+
+  /** Plays a locally-generated tone (marker / tone-out) that Stop All Sounds can cut. */
+  private playLocalTone(pcm: Int16Array): void {
+    this.schedulePcm(pcm, true);
   }
 
   /** Begins microphone capture and transmission. Throws on permission/mic failure. */
@@ -269,12 +355,42 @@ export class VoiceChannelClient {
     }
     const beep = markerBeepPcm();
     ws.send(beep.buffer); // keyed onto the channel for every listener
-    this.schedulePcm(beep); // and played locally so the dispatcher hears it
+    this.playLocalTone(beep); // and played locally so the dispatcher hears it
+  }
+
+  /** Keys a police-style alert tone onto the channel and plays it locally. */
+  sendToneOut(kind: ToneOutKind): void {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    const tone = toneOutPcm(kind);
+    ws.send(tone.buffer);
+    this.playLocalTone(tone);
+  }
+
+  private stopLocalTones(): void {
+    for (const source of this.localTones) {
+      try {
+        source.onended = null;
+        source.stop();
+      } catch {
+        /* already finished */
+      }
+    }
+    this.localTones.clear();
+  }
+
+  /** Stop All Sounds — silences the channel marker and any tone-out / page tones locally. */
+  stopAllTones(): void {
+    this.setChannelMarker(false);
+    this.stopLocalTones();
   }
 
   /** Tears everything down; the client cannot be reused afterward. */
   close(): void {
     this.setChannelMarker(false);
+    this.stopLocalTones();
     this.transmitting = false;
     if (this.capNode) {
       this.capNode.port.onmessage = null;

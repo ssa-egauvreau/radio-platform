@@ -131,3 +131,45 @@ export function IconUser(props: IconProps) {
     </StrokeIcon>
   );
 }
+
+/** Speaker with one wave — routine tone-out. */
+export function IconToneRoutine(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M4 9.5v5h3.2l4.3 3.5V6L7.2 9.5H4Z" />
+      <path d="M15 9.8a4 4 0 0 1 0 4.4" />
+    </StrokeIcon>
+  );
+}
+
+/** Speaker with two waves — priority tone-out. */
+export function IconTonePriority(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M4 9.5v5h3.2l4.3 3.5V6L7.2 9.5H4Z" />
+      <path d="M14.5 10a3.4 3.4 0 0 1 0 4" />
+      <path d="M17.6 7.6a7.6 7.6 0 0 1 0 8.8" />
+    </StrokeIcon>
+  );
+}
+
+/** Circled question mark — status-check tone-out. */
+export function IconToneStatus(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M9.6 9.6a2.5 2.5 0 0 1 4.7 1.2c0 1.7-2.3 2-2.3 3.6" />
+      <circle cx="12" cy="17.2" r="0.6" fill="currentColor" stroke="none" />
+    </StrokeIcon>
+  );
+}
+
+/** Octagon — stop all sounds. */
+export function IconStop(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M8.6 3h6.8L21 8.6v6.8L15.4 21H8.6L3 15.4V8.6L8.6 3Z" />
+      <line x1="9" y1="12" x2="15" y2="12" />
+    </StrokeIcon>
+  );
+}
