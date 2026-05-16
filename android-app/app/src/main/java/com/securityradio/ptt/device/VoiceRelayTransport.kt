@@ -6,6 +6,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
+import okio.toByteString
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -124,7 +125,7 @@ class VoiceRelayTransport(
         val active = ws ?: return
         try {
             val copy = buffer.copyOfRange(0, length)
-            active.send(ByteString.of(copy, 0, copy.size))
+            active.send(copy.toByteString())
         } catch (_: Exception) {
         }
     }
