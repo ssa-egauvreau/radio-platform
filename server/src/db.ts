@@ -100,11 +100,15 @@ export async function ensureSchema(): Promise<void> {
     );
   `);
 
-  // Used by phase 4 (GPS map).
+  // Used by phase 4 (GPS map). Keyed by radio unit id so handsets without an
+  // account can still report position.
+  await p.query(`DROP TABLE IF EXISTS radio_locations;`);
   await p.query(`
-    CREATE TABLE IF NOT EXISTS radio_locations (
-      user_id INT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-      unit_id TEXT,
+    CREATE TABLE IF NOT EXISTS radio_positions (
+      unit_id TEXT PRIMARY KEY,
+      user_id INT REFERENCES users(id) ON DELETE SET NULL,
+      display_name TEXT,
+      channel_name TEXT,
       lat DOUBLE PRECISION NOT NULL,
       lon DOUBLE PRECISION NOT NULL,
       accuracy_m DOUBLE PRECISION,
@@ -114,8 +118,27 @@ export async function ensureSchema(): Promise<void> {
     );
   `);
 
+  // Emergency alerts and pages.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS alerts (
+      id SERIAL PRIMARY KEY,
+      kind TEXT NOT NULL,
+      channel_name TEXT,
+      target_unit TEXT,
+      from_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+      from_name TEXT,
+      from_unit TEXT,
+      message TEXT,
+      active BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      cleared_by TEXT,
+      cleared_at TIMESTAMPTZ
+    );
+  `);
+
   await p.query(`CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log (ts DESC);`);
   await p.query(`CREATE INDEX IF NOT EXISTS idx_tx_started ON transmissions (started_at DESC);`);
+  await p.query(`CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts (created_at DESC);`);
 
   const countRes = await p.query<{ count: string }>("SELECT COUNT(*)::text AS count FROM radio_channels;");
   if (Number(countRes.rows[0]?.count ?? "0") === 0) {

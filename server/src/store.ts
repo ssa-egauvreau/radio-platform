@@ -366,6 +366,161 @@ export async function listPendingTranscriptionIds(): Promise<number[]> {
   return res.rows.map((r) => r.id);
 }
 
+// --- radio positions (GPS) ----------------------------------------------
+
+export interface RadioPosition {
+  unit_id: string;
+  user_id: number | null;
+  display_name: string | null;
+  channel_name: string | null;
+  lat: number;
+  lon: number;
+  accuracy_m: number | null;
+  heading: number | null;
+  speed_mps: number | null;
+  updated_at: string;
+}
+
+export async function upsertPosition(input: {
+  unitId: string;
+  userId: number | null;
+  displayName: string | null;
+  channelName: string | null;
+  lat: number;
+  lon: number;
+  accuracyM: number | null;
+  heading: number | null;
+  speedMps: number | null;
+}): Promise<void> {
+  await requirePool().query(
+    `INSERT INTO radio_positions
+       (unit_id, user_id, display_name, channel_name, lat, lon, accuracy_m, heading, speed_mps, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now())
+     ON CONFLICT (unit_id) DO UPDATE SET
+       user_id = EXCLUDED.user_id,
+       display_name = COALESCE(EXCLUDED.display_name, radio_positions.display_name),
+       channel_name = EXCLUDED.channel_name,
+       lat = EXCLUDED.lat,
+       lon = EXCLUDED.lon,
+       accuracy_m = EXCLUDED.accuracy_m,
+       heading = EXCLUDED.heading,
+       speed_mps = EXCLUDED.speed_mps,
+       updated_at = now();`,
+    [
+      input.unitId,
+      input.userId,
+      input.displayName,
+      input.channelName,
+      input.lat,
+      input.lon,
+      input.accuracyM,
+      input.heading,
+      input.speedMps,
+    ],
+  );
+}
+
+export async function listPositions(): Promise<RadioPosition[]> {
+  const res = await requirePool().query<RadioPosition>(
+    `SELECT unit_id, user_id, display_name, channel_name, lat, lon, accuracy_m, heading, speed_mps, updated_at
+     FROM radio_positions ORDER BY updated_at DESC;`,
+  );
+  return res.rows;
+}
+
+// --- alerts (emergencies + pages) ---------------------------------------
+
+export type AlertKind = "emergency" | "page";
+
+export interface AlertRow {
+  id: number;
+  kind: string;
+  channel_name: string | null;
+  target_unit: string | null;
+  from_user_id: number | null;
+  from_name: string | null;
+  from_unit: string | null;
+  message: string | null;
+  active: boolean;
+  created_at: string;
+  cleared_by: string | null;
+  cleared_at: string | null;
+}
+
+const ALERT_COLS =
+  "id, kind, channel_name, target_unit, from_user_id, from_name, from_unit, message, " +
+  "active, created_at, cleared_by, cleared_at";
+
+export async function createAlert(input: {
+  kind: AlertKind;
+  channelName: string | null;
+  targetUnit: string | null;
+  fromUserId: number | null;
+  fromName: string | null;
+  fromUnit: string | null;
+  message: string | null;
+}): Promise<AlertRow> {
+  const res = await requirePool().query<AlertRow>(
+    `INSERT INTO alerts (kind, channel_name, target_unit, from_user_id, from_name, from_unit, message)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING ${ALERT_COLS};`,
+    [
+      input.kind,
+      input.channelName,
+      input.targetUnit,
+      input.fromUserId,
+      input.fromName,
+      input.fromUnit,
+      input.message,
+    ],
+  );
+  return res.rows[0]!;
+}
+
+/** Active alerts plus anything from the last 24h, newest first. */
+export async function listAlerts(limit = 100): Promise<AlertRow[]> {
+  const capped = Math.min(Math.max(Math.trunc(limit) || 100, 1), 200);
+  const res = await requirePool().query<AlertRow>(
+    `SELECT ${ALERT_COLS} FROM alerts
+     WHERE active = TRUE OR created_at > now() - interval '24 hours'
+     ORDER BY created_at DESC LIMIT $1;`,
+    [capped],
+  );
+  return res.rows;
+}
+
+export async function clearAlert(id: number, clearedBy: string): Promise<AlertRow | null> {
+  const res = await requirePool().query<AlertRow>(
+    `UPDATE alerts SET active = FALSE, cleared_by = $2, cleared_at = now()
+     WHERE id = $1 RETURNING ${ALERT_COLS};`,
+    [id, clearedBy],
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function clearEmergenciesFromUnit(unit: string, clearedBy: string): Promise<number> {
+  const res = await requirePool().query(
+    `UPDATE alerts SET active = FALSE, cleared_by = $2, cleared_at = now()
+     WHERE kind = 'emergency' AND active = TRUE AND from_unit = $1;`,
+    [unit, clearedBy],
+  );
+  return res.rowCount ?? 0;
+}
+
+/** Alerts addressed to a radio (direct, its channel, or broadcast) newer than `sinceId`. */
+export async function listInboxAlerts(unit: string, channel: string | null, sinceId: number): Promise<AlertRow[]> {
+  const res = await requirePool().query<AlertRow>(
+    `SELECT ${ALERT_COLS} FROM alerts
+     WHERE id > $1
+       AND ( target_unit = $2
+             OR ( target_unit IS NULL
+                  AND ( channel_name IS NULL OR lower(channel_name) = lower($3) ) ) )
+     ORDER BY id ASC LIMIT 50;`,
+    [sinceId, unit, channel ?? ""],
+  );
+  return res.rows;
+}
+
 /** Creates the first administrator on a fresh database so the admin portal is reachable. */
 export async function seedInitialAdmin(): Promise<void> {
   const p = getPool();

@@ -4,6 +4,8 @@ import { useAuth } from "../auth";
 import { api, describeError, type Permission, type UserChannel } from "../api";
 import { VoiceChannelClient, type VoiceState } from "../voice/voiceClient";
 import { TransmissionLog } from "./TransmissionLog";
+import { MapPanel } from "./MapPanel";
+import { AlertsPanel } from "./AlertsPanel";
 
 const PERMISSION_LABEL: Record<Permission, string> = {
   talk_priority: "Talk priority",
@@ -190,11 +192,8 @@ export function ConsolePage() {
         </div>
 
         <div className="console-col">
-          <h3>Map &amp; Alerts</h3>
-          <div className="placeholder-box">
-            <strong>Phase 4</strong>
-            Live GPS positions for every radio, plus emergency-alert and paging controls.
-          </div>
+          <MapPanel />
+          <AlertsPanel />
         </div>
       </div>
     </div>

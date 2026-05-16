@@ -29,6 +29,9 @@ const LEGACY_KEYED_PATHS = new Set([
   "/v1/presence/heartbeat",
   "/v1/presence/count",
   "/v1/talk-activity",
+  "/v1/radio/location",
+  "/v1/radio/inbox",
+  "/v1/radio/emergency",
 ]);
 
 app.use((req, res, next) => {

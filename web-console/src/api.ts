@@ -66,6 +66,34 @@ export interface Transmission {
   transcript_status: string;
 }
 
+export interface RadioPosition {
+  unit_id: string;
+  user_id: number | null;
+  display_name: string | null;
+  channel_name: string | null;
+  lat: number;
+  lon: number;
+  accuracy_m: number | null;
+  heading: number | null;
+  speed_mps: number | null;
+  updated_at: string;
+}
+
+export interface Alert {
+  id: number;
+  kind: string;
+  channel_name: string | null;
+  target_unit: string | null;
+  from_user_id: number | null;
+  from_name: string | null;
+  from_unit: string | null;
+  message: string | null;
+  active: boolean;
+  created_at: string;
+  cleared_by: string | null;
+  cleared_at: string | null;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(code: string, status: number) {
@@ -145,6 +173,12 @@ export const api = {
 
   transmissions: (limit = 100) =>
     request<{ transmissions: Transmission[] }>("GET", `/v1/transmissions?limit=${limit}`),
+
+  locations: () => request<{ positions: RadioPosition[] }>("GET", "/v1/locations"),
+  alerts: () => request<{ alerts: Alert[] }>("GET", "/v1/alerts"),
+  sendAlert: (input: { kind: string; channelName: string | null; targetUnit?: string | null; message: string | null }) =>
+    request<{ alert: Alert }>("POST", "/v1/alerts", input),
+  clearAlert: (id: number) => request<{ alert: Alert }>("POST", `/v1/alerts/${id}/clear`),
 };
 
 /** Fetches a transmission's WAV audio as a Blob (a bearer header cannot ride on <audio src>). */
