@@ -1,5 +1,7 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { api, describeError, type Alert, type UserChannel } from "../api";
+import { sounds } from "../sounds";
+import { IconAlertTriangle, IconBell } from "../icons";
 
 type AlertKind = "page" | "emergency";
 
@@ -18,11 +20,20 @@ export function AlertsPanel() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const seenEmergencies = useRef<Set<number>>(new Set());
+  const primed = useRef(false);
 
   async function refresh() {
     try {
       const res = await api.alerts();
       setAlerts(res.alerts);
+      const active = res.alerts.filter((a) => a.kind === "emergency" && a.active);
+      const isNew = primed.current && active.some((a) => !seenEmergencies.current.has(a.id));
+      active.forEach((a) => seenEmergencies.current.add(a.id));
+      primed.current = true;
+      if (isNew) {
+        sounds.emergency();
+      }
     } catch {
       /* keep last snapshot */
     }
@@ -77,7 +88,10 @@ export function AlertsPanel() {
       {activeEmergencies.map((alert) => (
         <div className="alert-row emergency" key={alert.id}>
           <div className="alert-body">
-            <strong>EMERGENCY</strong> · {alert.from_unit || alert.from_name || "Unknown"}
+            <strong className="alert-title">
+              <IconAlertTriangle size={14} /> EMERGENCY
+            </strong>{" "}
+            · {alert.from_unit || alert.from_name || "Unknown"}
             <div className="alert-sub">
               {alert.channel_name ?? "All channels"} · {formatTime(alert.created_at)}
             </div>
@@ -110,7 +124,8 @@ export function AlertsPanel() {
           value={message}
           onChange={(e) => setMessage(e.target.value)}
         />
-        <button className="btn primary" type="submit" disabled={sending}>
+        <button className="btn primary icon-btn" type="submit" disabled={sending}>
+          {kind === "emergency" ? <IconAlertTriangle size={15} /> : <IconBell size={15} />}
           {sending ? "Sending…" : kind === "emergency" ? "Broadcast emergency" : "Send page"}
         </button>
       </form>
@@ -120,8 +135,11 @@ export function AlertsPanel() {
         {history.map((alert) => (
           <div className={alert.active ? "alert-row" : "alert-row done"} key={alert.id}>
             <div className="alert-body">
-              <strong>{alert.kind === "emergency" ? "Emergency" : "Page"}</strong> ·{" "}
-              {alert.channel_name ?? alert.target_unit ?? "All channels"}
+              <strong className="alert-title">
+                {alert.kind === "emergency" ? <IconAlertTriangle size={13} /> : <IconBell size={13} />}
+                {alert.kind === "emergency" ? "Emergency" : "Page"}
+              </strong>{" "}
+              · {alert.channel_name ?? alert.target_unit ?? "All channels"}
               <div className="alert-sub">
                 {alert.from_name || alert.from_unit || "—"} · {formatTime(alert.created_at)}
                 {!alert.active && alert.cleared_by ? ` · cleared by ${alert.cleared_by}` : ""}
