@@ -2,6 +2,7 @@
 // PCM, and (when permitted) captures the microphone and transmits.
 
 import { getToken, type Permission } from "../api";
+import { imbeDecode, initImbe } from "./imbeVocoder";
 
 export type VoiceState = "idle" | "connecting" | "listening" | "transmitting" | "error" | "closed";
 
@@ -109,6 +110,16 @@ function toneOutPcm(kind: ToneOutKind): Int16Array {
   return synthTone([{ hz: 1000, ms: 1000 }]);
 }
 
+/** Doubles 8 kHz PCM up to 16 kHz by sample duplication (IMBE decodes at 8 kHz). */
+function upsample8kTo16k(pcm8k: Int16Array): Int16Array {
+  const out = new Int16Array(pcm8k.length * 2);
+  for (let i = 0; i < pcm8k.length; i++) {
+    out[i * 2] = pcm8k[i];
+    out[i * 2 + 1] = pcm8k[i];
+  }
+  return out;
+}
+
 export class VoiceChannelClient {
   private readonly channelName: string;
   private readonly callbacks: VoiceCallbacks;
@@ -149,6 +160,7 @@ export class VoiceChannelClient {
   /** Opens the relay socket and starts listening. Call from a user gesture. */
   connect(): void {
     this.setState("connecting");
+    void initImbe(); // load the IMBE vocoder in the background for digital RX
     // Created inside the triggering click so the browser lets audio play.
     this.playCtx = new AudioContext({ sampleRate: TARGET_RATE });
     this.playHead = 0;
@@ -208,8 +220,12 @@ export class VoiceChannelClient {
       return;
     }
     const bytes = new Uint8Array(buffer);
-    // Digital-voice (IMBE) frames cannot be decoded here — skip rather than play noise.
+    // P25 IMBE digital-voice frame: 2-byte marker + 11-byte codeword.
     if (bytes.byteLength === 13 && bytes[0] === IMBE_MAGIC_0 && bytes[1] === IMBE_MAGIC_1) {
+      const pcm8k = imbeDecode(bytes.subarray(2));
+      if (pcm8k) {
+        this.schedulePcm(upsample8kTo16k(pcm8k));
+      }
       return;
     }
     this.schedulePcm(new Int16Array(buffer, 0, Math.floor(buffer.byteLength / 2)));
