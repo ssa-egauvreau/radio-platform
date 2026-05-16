@@ -50,6 +50,22 @@ export interface AuditEntry {
   ip: string | null;
 }
 
+export interface Transmission {
+  id: number;
+  channel_id: number | null;
+  channel_name: string;
+  user_id: number | null;
+  unit_id: string | null;
+  display_name: string | null;
+  started_at: string;
+  ended_at: string | null;
+  duration_ms: number;
+  sample_rate: number;
+  audio_mime: string;
+  transcript: string | null;
+  transcript_status: string;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(code: string, status: number) {
@@ -126,7 +142,23 @@ export const api = {
     request<{ ok: boolean }>("DELETE", `/v1/admin/memberships?userId=${userId}&channelId=${channelId}`),
 
   listAudit: (limit = 200) => request<{ entries: AuditEntry[] }>("GET", `/v1/admin/audit?limit=${limit}`),
+
+  transmissions: (limit = 100) =>
+    request<{ transmissions: Transmission[] }>("GET", `/v1/transmissions?limit=${limit}`),
 };
+
+/** Fetches a transmission's WAV audio as a Blob (a bearer header cannot ride on <audio src>). */
+export async function fetchTransmissionAudio(id: number): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  const res = await fetch(`/v1/transmissions/${id}/audio`, { headers });
+  if (!res.ok) {
+    throw new ApiError(`http_${res.status}`, res.status);
+  }
+  return res.blob();
+}
 
 /** Human-readable copy for the API error codes the UI can surface. */
 export function describeError(error: unknown): string {

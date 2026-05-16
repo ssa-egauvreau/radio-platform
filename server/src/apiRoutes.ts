@@ -7,9 +7,11 @@ import {
   createUser,
   deleteChannel,
   deleteUser,
+  getTransmissionAudio,
   getUserById,
   getUserByUsername,
   listAudit,
+  listTransmissions,
   listChannels,
   listChannelsForUser,
   listMemberships,
@@ -368,6 +370,41 @@ export function createApiRouter(): Router {
     try {
       const limit = Number(req.query.limit ?? 200);
       res.json({ entries: await listAudit(Number.isFinite(limit) ? limit : 200) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- transmissions (recorded audio + transcripts) ----------------------
+
+  router.get("/transmissions", requireAuth, async (req, res) => {
+    try {
+      const me = req.authUser!;
+      const limit = Number(req.query.limit ?? 100);
+      if (me.role === "admin" || me.role === "dispatcher") {
+        res.json({ transmissions: await listTransmissions({ limit }) });
+        return;
+      }
+      const channels = await listChannelsForUser(me.id);
+      res.json({
+        transmissions: await listTransmissions({ channelNames: channels.map((c) => c.name), limit }),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get("/transmissions/:id/audio", requireAuth, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const record = await getTransmissionAudio(id);
+      if (!record) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.setHeader("Content-Type", record.mime);
+      res.setHeader("Content-Disposition", `inline; filename="transmission-${id}.wav"`);
+      res.send(record.audio);
     } catch (error) {
       fail(res, error);
     }

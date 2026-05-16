@@ -6,6 +6,8 @@ import express from "express";
 import { DEFAULT_GREEN_CHANNELS } from "./defaultChannels.js";
 import { ensureSchema, listChannelsFromDb } from "./db.js";
 import { seedInitialAdmin } from "./store.js";
+import { startRecorder } from "./recorder.js";
+import { recoverPendingTranscriptions } from "./transcribe.js";
 import { authenticate } from "./auth.js";
 import { createApiRouter } from "./apiRoutes.js";
 import { countPresence, heartbeatPresence } from "./presence.js";
@@ -153,6 +155,9 @@ async function main(): Promise<void> {
   await seedInitialAdmin().catch((error) => {
     console.error("Initial admin seed failed", error);
   });
+
+  startRecorder();
+  void recoverPendingTranscriptions();
 
   const server = createServer(app);
   attachVoiceRelay(server, { radioApiKey });

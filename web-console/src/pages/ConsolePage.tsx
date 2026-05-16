@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../auth";
 import { api, describeError, type Permission, type UserChannel } from "../api";
 import { VoiceChannelClient, type VoiceState } from "../voice/voiceClient";
+import { TransmissionLog } from "./TransmissionLog";
 
 const PERMISSION_LABEL: Record<Permission, string> = {
   talk_priority: "Talk priority",
@@ -185,12 +186,7 @@ export function ConsolePage() {
             </div>
           )}
 
-          <h3 style={{ marginTop: 24 }}>Transmission Log</h3>
-          <div className="placeholder-box">
-            <strong>Phase 3</strong>
-            Recorded transmissions with user, time, channel, duration, playback/download, and a text
-            transcript previewed before you hit play.
-          </div>
+          <TransmissionLog />
         </div>
 
         <div className="console-col">

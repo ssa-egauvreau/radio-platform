@@ -17,6 +17,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { normalizedChannel } from "./presence.js";
 import { verifyToken, type AuthUser } from "./auth.js";
 import { getChannelByName, getMembership, type Permission } from "./store.js";
+import { recordFrame } from "./recorder.js";
 
 export const VOICE_WS_PATH = "/v1/voice/stream";
 
@@ -33,6 +34,10 @@ interface ClientMeta {
   identity: Identity;
   unitId: string;
   channelNorm: string | null;
+  channelName: string;
+  channelId: number | null;
+  userId: number | null;
+  displayName: string | null;
   permission: Permission;
   joined: boolean;
 }
@@ -73,29 +78,6 @@ function otherActiveHolder(channelNorm: string, candidateUnitUpper: string): str
     return null;
   }
   return slot.unitUpper !== candidateUnitUpper ? slot.unitUpper : null;
-}
-
-/** Resolves the effective channel permission for an account joining `channelName`. */
-async function resolveAccountPermission(
-  user: AuthUser,
-  channelName: string,
-): Promise<{ permission: Permission } | { error: string }> {
-  if (user.role === "admin" || user.role === "dispatcher") {
-    return { permission: "talk_priority" };
-  }
-  try {
-    const channel = await getChannelByName(channelName);
-    if (!channel) {
-      return { error: "unknown_channel" };
-    }
-    const membership = await getMembership(user.id, channel.id);
-    if (!membership) {
-      return { error: "not_a_member" };
-    }
-    return { permission: membership };
-  } catch {
-    return { error: "channel_lookup_failed" };
-  }
 }
 
 export function attachVoiceRelay(
@@ -144,6 +126,10 @@ export function attachVoiceRelay(
           identity,
           unitId: "",
           channelNorm: null,
+          channelName: "",
+          channelId: null,
+          userId: null,
+          displayName: null,
           permission: "listen_only",
           joined: false,
         });
@@ -167,7 +153,11 @@ export function attachVoiceRelay(
     }
   }
 
-  async function handleJoin(ws: WebSocket, meta: ClientMeta, json: { channel?: string; unit_id?: string }): Promise<void> {
+  async function handleJoin(
+    ws: WebSocket,
+    meta: ClientMeta,
+    json: { channel?: string; unit_id?: string },
+  ): Promise<void> {
     const channelName = String(json.channel ?? "").trim();
     const chNorm = normalizedChannel(channelName);
     if (!chNorm || chNorm === "----") {
@@ -175,18 +165,37 @@ export function attachVoiceRelay(
       return;
     }
 
+    let channelRow: { id: number } | null = null;
+    try {
+      channelRow = await getChannelByName(channelName);
+    } catch {
+      channelRow = null; // no database — recording/permissions degrade gracefully
+    }
+
     let unitId: string;
     let permission: Permission;
+    let userId: number | null = null;
+    let displayName: string | null = null;
 
     if (meta.identity.kind === "account") {
       const user = meta.identity.user;
-      const resolved = await resolveAccountPermission(user, channelName);
-      if ("error" in resolved) {
-        ws.send(JSON.stringify({ type: "error", code: resolved.error }));
-        return;
-      }
-      permission = resolved.permission;
+      userId = user.id;
+      displayName = user.displayName;
       unitId = (user.unitId ?? user.username).trim().toUpperCase() || "WEB";
+      if (user.role === "admin" || user.role === "dispatcher") {
+        permission = "talk_priority";
+      } else {
+        if (!channelRow) {
+          ws.send(JSON.stringify({ type: "error", code: "unknown_channel" }));
+          return;
+        }
+        const membership = await getMembership(user.id, channelRow.id).catch(() => null);
+        if (!membership) {
+          ws.send(JSON.stringify({ type: "error", code: "not_a_member" }));
+          return;
+        }
+        permission = membership;
+      }
     } else {
       unitId = String(json.unit_id ?? "").trim().toUpperCase();
       if (!unitId) {
@@ -198,6 +207,10 @@ export function attachVoiceRelay(
 
     meta.unitId = unitId;
     meta.channelNorm = chNorm;
+    meta.channelName = channelName;
+    meta.channelId = channelRow?.id ?? null;
+    meta.userId = userId;
+    meta.displayName = displayName;
     meta.permission = permission;
     meta.joined = true;
     ws.send(JSON.stringify({ type: "joined", channel: channelName, permission, unit_id: unitId }));
@@ -247,6 +260,17 @@ export function attachVoiceRelay(
         }
         touchTransmission(meta.channelNorm, meta.unitId);
         broadcastExcept(ws, meta.channelNorm, payload);
+        recordFrame(
+          {
+            channelNorm: meta.channelNorm,
+            channelName: meta.channelName,
+            channelId: meta.channelId,
+            userId: meta.userId,
+            unitId: meta.unitId,
+            displayName: meta.displayName,
+          },
+          payload,
+        );
       } catch (e) {
         console.warn("voiceRelay message handling error", e);
       }

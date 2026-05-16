@@ -254,6 +254,118 @@ export async function listAudit(limit = 200): Promise<AuditRow[]> {
   return res.rows;
 }
 
+// --- transmissions -------------------------------------------------------
+
+export interface TransmissionRow {
+  id: number;
+  channel_id: number | null;
+  channel_name: string;
+  user_id: number | null;
+  unit_id: string | null;
+  display_name: string | null;
+  started_at: string;
+  ended_at: string | null;
+  duration_ms: number;
+  sample_rate: number;
+  audio_mime: string;
+  transcript: string | null;
+  transcript_status: string;
+}
+
+const TX_META_COLS =
+  "id, channel_id, channel_name, user_id, unit_id, display_name, started_at, " +
+  "ended_at, duration_ms, sample_rate, audio_mime, transcript, transcript_status";
+
+export async function insertTransmission(input: {
+  channelId: number | null;
+  channelName: string;
+  userId: number | null;
+  unitId: string;
+  displayName: string | null;
+  startedAt: Date;
+  endedAt: Date;
+  durationMs: number;
+  sampleRate: number;
+  audio: Buffer;
+}): Promise<number> {
+  const res = await requirePool().query<{ id: number }>(
+    `INSERT INTO transmissions
+       (channel_id, channel_name, user_id, unit_id, display_name, started_at, ended_at,
+        duration_ms, sample_rate, audio, audio_mime, transcript_status)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'audio/wav', 'pending')
+     RETURNING id;`,
+    [
+      input.channelId,
+      input.channelName,
+      input.userId,
+      input.unitId,
+      input.displayName,
+      input.startedAt,
+      input.endedAt,
+      input.durationMs,
+      input.sampleRate,
+      input.audio,
+    ],
+  );
+  return res.rows[0]!.id;
+}
+
+/** Recent transmissions (metadata only — never selects the audio bytes). */
+export async function listTransmissions(opts: { channelNames?: string[]; limit?: number }): Promise<TransmissionRow[]> {
+  const limit = Math.min(Math.max(Math.trunc(opts.limit ?? 100) || 100, 1), 500);
+  if (opts.channelNames) {
+    if (opts.channelNames.length === 0) {
+      return [];
+    }
+    const res = await requirePool().query<TransmissionRow>(
+      `SELECT ${TX_META_COLS} FROM transmissions
+       WHERE lower(channel_name) = ANY($1)
+       ORDER BY started_at DESC LIMIT $2;`,
+      [opts.channelNames.map((n) => n.trim().toLowerCase()), limit],
+    );
+    return res.rows;
+  }
+  const res = await requirePool().query<TransmissionRow>(
+    `SELECT ${TX_META_COLS} FROM transmissions ORDER BY started_at DESC LIMIT $1;`,
+    [limit],
+  );
+  return res.rows;
+}
+
+export async function getTransmissionAudio(id: number): Promise<{ audio: Buffer; mime: string } | null> {
+  const res = await requirePool().query<{ audio: Buffer | null; audio_mime: string }>(
+    `SELECT audio, audio_mime FROM transmissions WHERE id = $1;`,
+    [id],
+  );
+  const row = res.rows[0];
+  if (!row || !row.audio) {
+    return null;
+  }
+  return { audio: row.audio, mime: row.audio_mime };
+}
+
+export async function getTransmissionChannel(id: number): Promise<string | null> {
+  const res = await requirePool().query<{ channel_name: string }>(
+    `SELECT channel_name FROM transmissions WHERE id = $1;`,
+    [id],
+  );
+  return res.rows[0]?.channel_name ?? null;
+}
+
+export async function setTranscript(id: number, status: string, text: string | null): Promise<void> {
+  await requirePool().query(
+    `UPDATE transmissions SET transcript_status = $2, transcript = $3 WHERE id = $1;`,
+    [id, status, text],
+  );
+}
+
+export async function listPendingTranscriptionIds(): Promise<number[]> {
+  const res = await requirePool().query<{ id: number }>(
+    `SELECT id FROM transmissions WHERE transcript_status = 'pending' ORDER BY started_at ASC LIMIT 200;`,
+  );
+  return res.rows.map((r) => r.id);
+}
+
 /** Creates the first administrator on a fresh database so the admin portal is reachable. */
 export async function seedInitialAdmin(): Promise<void> {
   const p = getPool();
