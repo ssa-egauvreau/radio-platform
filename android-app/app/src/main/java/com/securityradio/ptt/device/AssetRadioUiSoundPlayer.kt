@@ -2,6 +2,8 @@ package com.securityradio.ptt.device
 
 import android.app.Application
 import android.media.AudioAttributes
+import android.media.AudioFocusRequest
+import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
@@ -22,8 +24,11 @@ class AssetRadioUiSoundPlayer(
 ) : RadioUiSoundPlayer {
 
     private val main = Handler(Looper.getMainLooper())
+    private val audioManager = app.getSystemService(AudioManager::class.java)
+
     private var talkPermitPlayer: MediaPlayer? = null
     private var busyTonePlayer: MediaPlayer? = null
+    private var busyFocusRequest: AudioFocusRequest? = null
 
     private val uiAudioAttrs: AudioAttributes =
         AudioAttributes.Builder()
@@ -31,10 +36,39 @@ class AssetRadioUiSoundPlayer(
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
 
+    /**
+     * Busy must share the communications audio path — rugged handsets often duck [USAGE_MEDIA]
+     * to silence when VOIP/inbound PCM is routed to the tactical speaker/emulator behaves loosely.
+     */
+    private val busyAudioAttrs: AudioAttributes =
+        AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+
     private fun MediaPlayer.applyUiAudio(): MediaPlayer {
         setAudioAttributes(uiAudioAttrs)
         setVolume(1f, 1f)
         return this
+    }
+
+    private fun acquireBusyToneFocus() {
+        abandonBusyToneFocusInternal()
+        val req = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+            .setAudioAttributes(busyAudioAttrs)
+            .setWillPauseWhenDucked(false)
+            .setAcceptsDelayedFocusGain(false)
+            .setOnAudioFocusChangeListener { /* hold until busy loop stops */ }
+            .build()
+        busyFocusRequest = req
+        audioManager.requestAudioFocus(req)
+    }
+
+    private fun abandonBusyToneFocusInternal() {
+        busyFocusRequest?.let {
+            audioManager.abandonAudioFocusRequest(it)
+        }
+        busyFocusRequest = null
     }
 
     override fun playChannelSwitch() {
@@ -61,7 +95,11 @@ class AssetRadioUiSoundPlayer(
         main.post {
             stopTalkPermitLoopInternal()
             stopBusyLoopInternal()
-            val player = createLoopingPlayer(FILE_BUSY) ?: return@post
+            acquireBusyToneFocus()
+            val player = createBusyLoopMediaPlayer(FILE_BUSY) ?: run {
+                abandonBusyToneFocusInternal()
+                return@post
+            }
             busyTonePlayer = player
         }
     }
@@ -91,6 +129,7 @@ class AssetRadioUiSoundPlayer(
     }
 
     private fun stopBusyLoopInternal() {
+        abandonBusyToneFocusInternal()
         busyTonePlayer?.runCatching {
             setOnCompletionListener(null)
             stop()
@@ -163,19 +202,34 @@ class AssetRadioUiSoundPlayer(
         }
     }
 
-    private fun createLoopingPlayer(fileName: String): MediaPlayer? {
+    /**
+     * Busy loop uses the voice path + manual restart: some handset builds ignore or fail [isLooping]
+     * for certain WAV PCM assets while emulators behave.
+     */
+    private fun createBusyLoopMediaPlayer(fileName: String): MediaPlayer? {
         val afd = try {
             app.assets.openFd("$SOUNDS_DIR/$fileName")
         } catch (_: IOException) {
             return null
         }
         return try {
-            MediaPlayer().applyUiAudio().apply {
+            MediaPlayer().apply {
+                setAudioAttributes(busyAudioAttrs)
+                setVolume(1f, 1f)
                 setDataSource(afd.fileDescriptor, afd.startOffset, afd.length)
                 afd.close()
-                isLooping = true
+                isLooping = false
                 setOnPreparedListener { it.start() }
+                setOnCompletionListener { mp ->
+                    if (mp !== busyTonePlayer) return@setOnCompletionListener
+                    try {
+                        mp.seekTo(0)
+                        mp.start()
+                    } catch (_: IllegalStateException) {
+                    }
+                }
                 setOnErrorListener { mp, _, _ ->
+                    if (busyTonePlayer === mp) busyTonePlayer = null
                     mp.release()
                     true
                 }
