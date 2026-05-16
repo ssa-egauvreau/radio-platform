@@ -273,6 +273,13 @@ class RadioViewModel(
             RadioUiEvent.RequestIgnoreBatteryOptimizations -> {
                 // Handled in Activity
             }
+            RadioUiEvent.ToggleVoiceAnnounceChannelTune -> {
+                soundPlayer.playChannelSwitch()
+                val next = !_uiState.value.announceChannelNameOnTune
+                radioPreferences.setAnnounceChannelOnTuneEnabled(next)
+                _uiState.update { it.copy(announceChannelNameOnTune = next) }
+            }
+            RadioUiEvent.PlayLastTransmission -> playLastTransmission()
         }
     }
 
