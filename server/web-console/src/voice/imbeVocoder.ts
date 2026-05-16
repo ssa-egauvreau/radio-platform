@@ -26,6 +26,11 @@ export async function initImbe(): Promise<boolean> {
   return codec !== null;
 }
 
+/** True once the vocoder has loaded and can encode/decode. */
+export function imbeReady(): boolean {
+  return codec !== null;
+}
+
 /** Decodes an 11-byte IMBE codeword to 160 PCM samples at 8 kHz; null if unavailable. */
 export function imbeDecode(codeword: Uint8Array): Int16Array | null {
   const mod = codec;
