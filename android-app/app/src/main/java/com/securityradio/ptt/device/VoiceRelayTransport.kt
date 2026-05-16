@@ -6,7 +6,6 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import okio.ByteString
-import okio.toByteString
 import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -108,6 +107,7 @@ class VoiceRelayTransport(
         }
     }
 
+    @Suppress("DEPRECATION") // Okio's `ByteArray.toByteString()` is not visible on Android Gradle variant; use Companion `of`.
     override fun consumePcm(buffer: ByteArray, length: Int) {
         if (!wantOnline.get() || length <= 0) return
         var ws = webSocketRef.get()
@@ -125,7 +125,7 @@ class VoiceRelayTransport(
         val active = ws ?: return
         try {
             val copy = buffer.copyOfRange(0, length)
-            active.send(copy.toByteString())
+            active.send(ByteString.of(copy, 0, copy.size))
         } catch (_: Exception) {
         }
     }
