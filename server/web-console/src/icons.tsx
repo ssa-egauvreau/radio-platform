@@ -95,3 +95,39 @@ export function IconShield(props: IconProps) {
     </StrokeIcon>
   );
 }
+
+/** Sun — day theme. */
+export function IconSun(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <circle cx="12" cy="12" r="4" />
+      <line x1="12" y1="2.5" x2="12" y2="5" />
+      <line x1="12" y1="19" x2="12" y2="21.5" />
+      <line x1="2.5" y1="12" x2="5" y2="12" />
+      <line x1="19" y1="12" x2="21.5" y2="12" />
+      <line x1="5.3" y1="5.3" x2="7" y2="7" />
+      <line x1="17" y1="17" x2="18.7" y2="18.7" />
+      <line x1="18.7" y1="5.3" x2="17" y2="7" />
+      <line x1="7" y1="17" x2="5.3" y2="18.7" />
+    </StrokeIcon>
+  );
+}
+
+/** Crescent moon — night theme. */
+export function IconMoon(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M20 13.5A8 8 0 1 1 10.5 4a6.2 6.2 0 0 0 9.5 9.5Z" />
+    </StrokeIcon>
+  );
+}
+
+/** Person — a connected radio / operator. */
+export function IconUser(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <circle cx="12" cy="8" r="3.6" />
+      <path d="M5.5 20a6.5 6.5 0 0 1 13 0" />
+    </StrokeIcon>
+  );
+}

@@ -1,6 +1,7 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
 import { requireAdmin, requireAuth, signToken, verifyPassword, type AuthUser, type Role } from "./auth.js";
+import { listChannelRoster } from "./voiceRelay.js";
 import {
   countActiveAdmins,
   clearAlert,
@@ -503,6 +504,11 @@ export function createApiRouter(): Router {
     } catch (error) {
       fail(res, error);
     }
+  });
+
+  router.get("/channels/roster", requireAuth, (req, res) => {
+    const channel = typeof req.query.channel === "string" ? req.query.channel : "";
+    res.json({ members: listChannelRoster(channel) });
   });
 
   router.get("/alerts", requireAuth, async (req, res) => {
