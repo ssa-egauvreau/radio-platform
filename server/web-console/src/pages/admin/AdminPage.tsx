@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../../auth";
+import { ThemeToggle } from "../../ThemeToggle";
 import { AccountsPanel } from "./AccountsPanel";
 import { ChannelsPanel } from "./ChannelsPanel";
 import { AssignmentsPanel } from "./AssignmentsPanel";
@@ -31,6 +32,7 @@ export function AdminPage() {
         <div className="who">
           <span className="role-chip">{user?.role}</span>
           <span>{user?.displayName}</span>
+          <ThemeToggle />
           <button className="btn sm" onClick={logout}>
             Sign out
           </button>

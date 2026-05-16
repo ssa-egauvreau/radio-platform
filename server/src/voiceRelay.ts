@@ -47,6 +47,46 @@ type VoiceSlot = { unitUpper: string; lastPcmMs: number };
 /** Who is currently keyed on normalized channel keys (presence-style names). */
 const voiceAirByChannel = new Map<string, VoiceSlot>();
 
+export interface RosterMember {
+  unit_id: string;
+  display_name: string | null;
+  kind: "account" | "legacy";
+  connected_ms: number;
+}
+
+interface RosterRecord {
+  channelNorm: string;
+  unitId: string;
+  displayName: string | null;
+  kind: "account" | "legacy";
+  joinedAt: number;
+}
+
+/** Live voice-WebSocket roster so the console can show who is on each channel. */
+const voiceRoster = new Map<WebSocket, RosterRecord>();
+
+/** Members currently connected to a channel's voice stream, longest-connected first. */
+export function listChannelRoster(channelRaw: unknown): RosterMember[] {
+  const chNorm = normalizedChannel(channelRaw);
+  if (!chNorm || chNorm === "----") {
+    return [];
+  }
+  const now = Date.now();
+  const members: RosterMember[] = [];
+  for (const record of voiceRoster.values()) {
+    if (record.channelNorm === chNorm) {
+      members.push({
+        unit_id: record.unitId,
+        display_name: record.displayName,
+        kind: record.kind,
+        connected_ms: now - record.joinedAt,
+      });
+    }
+  }
+  members.sort((a, b) => b.connected_ms - a.connected_ms);
+  return members;
+}
+
 export function peekVoiceTransmittingUnit(channelRaw: unknown): string | null {
   const chNorm = normalizedChannel(channelRaw);
   if (!chNorm || chNorm === "----") {
@@ -213,6 +253,16 @@ export function attachVoiceRelay(
     meta.displayName = displayName;
     meta.permission = permission;
     meta.joined = true;
+    const prior = voiceRoster.get(ws);
+    voiceRoster.set(ws, {
+      channelNorm: chNorm,
+      unitId,
+      displayName,
+      kind: meta.identity.kind,
+      // Keep the original join time across re-joins to the same channel
+      // (Android re-sends `join` on the same socket periodically).
+      joinedAt: prior && prior.channelNorm === chNorm ? prior.joinedAt : Date.now(),
+    });
     ws.send(JSON.stringify({ type: "joined", channel: channelName, permission, unit_id: unitId }));
   }
 
@@ -278,6 +328,7 @@ export function attachVoiceRelay(
 
     ws.on("close", () => {
       clientMeta.delete(ws);
+      voiceRoster.delete(ws);
     });
   });
 

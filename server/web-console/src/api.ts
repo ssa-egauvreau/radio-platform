@@ -94,6 +94,13 @@ export interface Alert {
   cleared_at: string | null;
 }
 
+export interface ChannelMember {
+  unit_id: string;
+  display_name: string | null;
+  kind: string;
+  connected_ms: number;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(code: string, status: number) {
@@ -179,6 +186,9 @@ export const api = {
   sendAlert: (input: { kind: string; channelName: string | null; targetUnit?: string | null; message: string | null }) =>
     request<{ alert: Alert }>("POST", "/v1/alerts", input),
   clearAlert: (id: number) => request<{ alert: Alert }>("POST", `/v1/alerts/${id}/clear`),
+
+  channelRoster: (channel: string) =>
+    request<{ members: ChannelMember[] }>("GET", `/v1/channels/roster?channel=${encodeURIComponent(channel)}`),
 };
 
 /** Fetches a transmission's WAV audio as a Blob (a bearer header cannot ride on <audio src>). */

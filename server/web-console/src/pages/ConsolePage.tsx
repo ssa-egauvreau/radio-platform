@@ -6,7 +6,9 @@ import { VoiceChannelClient, type VoiceState } from "../voice/voiceClient";
 import { TransmissionLog } from "./TransmissionLog";
 import { MapPanel } from "./MapPanel";
 import { AlertsPanel } from "./AlertsPanel";
+import { ChannelRoster } from "./ChannelRoster";
 import { sounds } from "../sounds";
+import { ThemeToggle } from "../ThemeToggle";
 import { IconBolt, IconBeacon, IconRadio, IconLogOut, IconShield } from "../icons";
 
 const PERMISSION_LABEL: Record<Permission, string> = {
@@ -134,6 +136,7 @@ export function ConsolePage() {
         <div className="who">
           <span className="role-chip">{user?.role}</span>
           <span>{user?.displayName}</span>
+          <ThemeToggle />
           <button className="btn sm icon-btn" onClick={logout}>
             <IconLogOut size={14} /> Sign out
           </button>
@@ -228,6 +231,8 @@ export function ConsolePage() {
                   Leave channel
                 </button>
               </div>
+
+              <ChannelRoster channelName={activeChannel.name} />
             </div>
           )}
 
