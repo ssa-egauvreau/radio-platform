@@ -14,6 +14,7 @@ import com.securityradio.ptt.device.HardwareButtonRelay
 import com.securityradio.ptt.device.HardwareMappingRepository
 import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.device.P25ImbeNative
+import com.securityradio.ptt.device.PttMicCapture
 import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.RadioUiSoundPlayer
 import com.securityradio.ptt.device.VoiceRelayTransport
