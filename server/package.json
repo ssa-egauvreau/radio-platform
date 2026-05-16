@@ -5,8 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json && npm --prefix ../web-console install --no-audit --no-fund && npm --prefix ../web-console run build",
-    "build:server": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && npm --prefix web-console install --no-audit --no-fund --include=dev && npm --prefix web-console run build",
+    "build:server": "npm run build",
     "start": "node dist/index.js"
   },
   "dependencies": {

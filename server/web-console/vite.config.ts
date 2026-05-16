@@ -12,8 +12,9 @@ export default defineConfig({
     },
   },
   build: {
-    // Emitted inside server/ so Railway (root directory = server) ships it.
-    outDir: "../server/web-public",
+    // Emitted into server/dist (next to the compiled server) — Railway ships
+    // the dist folder into the runtime image, so the console rides along.
+    outDir: "../dist/web-public",
     emptyOutDir: true,
   },
 });
