@@ -124,7 +124,7 @@ class VoiceRelayTransport(
         val active = ws ?: return
         try {
             val copy = buffer.copyOfRange(0, length)
-            active.send(ByteString.copyOf(copy))
+            active.send(ByteString.of(copy, 0, copy.size))
         } catch (_: Exception) {
         }
     }
