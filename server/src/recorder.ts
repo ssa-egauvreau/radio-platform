@@ -5,6 +5,7 @@ import { getPool } from "./db.js";
 import { insertTransmission } from "./store.js";
 import { encodeWavPcm16 } from "./wav.js";
 import { enqueueTranscription } from "./transcribe.js";
+import { decodeImbeFrame } from "./imbeServerCodec.js";
 
 const SAMPLE_RATE = 16000;
 /** Silence after the last frame that closes a transmission. */
@@ -69,8 +70,20 @@ async function finalize(rec: ActiveRecording): Promise<void> {
 
 /** Feeds one accepted relay frame into the recorder. Call after the frame is broadcast. */
 export function recordFrame(attr: FrameAttribution, payload: Buffer): void {
-  if (!getPool() || payload.length === 0 || isImbeFrame(payload)) {
+  if (!getPool() || payload.length === 0) {
     return;
+  }
+  // Digital (IMBE) frames are decoded to PCM so they record and transcribe like
+  // analog ones. If the vocoder has not loaded yet, the frame is skipped.
+  let pcm: Buffer;
+  if (isImbeFrame(payload)) {
+    const decoded = decodeImbeFrame(payload);
+    if (!decoded) {
+      return;
+    }
+    pcm = decoded;
+  } else {
+    pcm = payload;
   }
   const now = Date.now();
   let rec = active.get(attr.channelNorm);
@@ -83,8 +96,8 @@ export function recordFrame(attr: FrameAttribution, payload: Buffer): void {
     active.set(attr.channelNorm, rec);
   }
   // ws may reuse the frame buffer — copy before retaining it.
-  rec.chunks.push(Buffer.from(payload));
-  rec.bytes += payload.length;
+  rec.chunks.push(Buffer.from(pcm));
+  rec.bytes += pcm.length;
   rec.lastFrameMs = now;
   if (now - rec.startedAt >= MAX_MS) {
     void finalize(rec);
