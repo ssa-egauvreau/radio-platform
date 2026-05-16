@@ -25,6 +25,11 @@ private val normalizedRadioApiBaseUrl: String = when {
     radioApiBaseUrlRaw.endsWith("/") -> radioApiBaseUrlRaw
     else -> "$radioApiBaseUrlRaw/"
 }
+/**
+ * Default backend when [radio.api.base.url] is not set in local.properties.
+ * Override per machine with local.properties — never commit secrets there.
+ */
+private val defaultRailwayApiBaseUrl = "https://radio-platform-production.up.railway.app/"
 private val radioApiKeyRaw = localProps.getProperty("radio.api.key")?.trim().orEmpty()
 
 android {
@@ -41,7 +46,9 @@ android {
 
     buildTypes {
         debug {
-            val apiUrl = normalizedRadioApiBaseUrl.ifBlank { "http://10.0.2.2:8080/" }
+            // Optional shared secret (not from any third-party site): if RADIO_API_KEY is set on the
+            // server, add the same value as radio.api.key in local.properties — otherwise empty is fine.
+            val apiUrl = normalizedRadioApiBaseUrl.ifBlank { defaultRailwayApiBaseUrl }
             buildConfigField("String", "API_BASE_URL", "\"${apiUrl.escapeForBuildConfig()}\"")
             buildConfigField("String", "RADIO_API_KEY", "\"${radioApiKeyRaw.escapeForBuildConfig()}\"")
         }
@@ -51,7 +58,7 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
-            val apiUrl = normalizedRadioApiBaseUrl.ifBlank { "https://CHANGE_ME.up.railway.app/" }
+            val apiUrl = normalizedRadioApiBaseUrl.ifBlank { defaultRailwayApiBaseUrl }
             buildConfigField("String", "API_BASE_URL", "\"${apiUrl.escapeForBuildConfig()}\"")
             buildConfigField("String", "RADIO_API_KEY", "\"${radioApiKeyRaw.escapeForBuildConfig()}\"")
         }

@@ -133,7 +133,7 @@ Rules:
   - **Debug** builds default to `http://10.0.2.2:8080/` (emulator only; points at your PC).
   - **Release** builds default to a placeholder `https://CHANGE_ME.up.railway.app/` until you set the property.
 
-For real devices on Wi‑Fi, you should **always** set `radio.api.base.url` to your Railway HTTPS URL.
+If you omit `radio.api.base.url`, **debug and release builds** fall back to the production Railway host baked into `android-app/app/build.gradle.kts` (`defaultRailwayApiBaseUrl`). Override that constant or use `local.properties` if you deploy a different backend.
 
 ---
 
