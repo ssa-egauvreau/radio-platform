@@ -8,6 +8,7 @@ const FILES = {
 } as const;
 
 const cache = new Map<string, HTMLAudioElement>();
+const active = new Set<HTMLAudioElement>();
 
 function template(url: string): HTMLAudioElement {
   let element = cache.get(url);
@@ -23,6 +24,8 @@ function play(url: string, volume: number): void {
   // Clone so rapid repeats overlap instead of cutting each other off.
   const clip = template(url).cloneNode(true) as HTMLAudioElement;
   clip.volume = volume;
+  active.add(clip);
+  clip.addEventListener("ended", () => active.delete(clip));
   // Autoplay can be blocked until the page has been interacted with — ignore that.
   void clip.play().catch(() => undefined);
 }
@@ -36,6 +39,14 @@ export const sounds = {
   emergency: () => play(FILES.emergency, 1),
   /** Repeater-busy tone. */
   busy: () => play(FILES.busy, 0.8),
+  /** Stop All Sounds — silences every alert/page tone currently playing. */
+  stopAll: () => {
+    for (const clip of active) {
+      clip.pause();
+      clip.currentTime = 0;
+    }
+    active.clear();
+  },
   /** Warms the browser cache so the first tone is not delayed. */
   preload: () => {
     for (const url of Object.values(FILES)) {

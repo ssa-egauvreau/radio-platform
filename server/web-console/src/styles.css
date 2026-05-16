@@ -841,3 +841,59 @@ code.mono {
   font-variant-numeric: tabular-nums;
   flex: none;
 }
+
+/* --- tone-out (police alert tones) --- */
+.toneout {
+  margin-top: 8px;
+}
+.toneout-row {
+  display: flex;
+  gap: 6px;
+}
+.toneout-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 9px 4px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.toneout-btn:not(:disabled):hover {
+  border-color: var(--accent-2);
+  color: var(--text);
+}
+.toneout-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.toneout-btn.priority:not(:disabled) {
+  color: var(--amber);
+  border-color: var(--amber);
+}
+.stopall-btn {
+  width: 100%;
+  margin-top: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 9px;
+  border-radius: 6px;
+  border: 1px solid var(--danger-border);
+  background: var(--bg-input);
+  color: var(--danger-text);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.stopall-btn:hover {
+  border-color: var(--red);
+  background: var(--danger-bg);
+}

@@ -2,14 +2,24 @@ import { useEffect, useRef, useState, type PointerEvent } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "../auth";
 import { api, describeError, type Permission, type UserChannel } from "../api";
-import { VoiceChannelClient, type VoiceState } from "../voice/voiceClient";
+import { VoiceChannelClient, type VoiceState, type ToneOutKind } from "../voice/voiceClient";
 import { TransmissionLog } from "./TransmissionLog";
 import { MapPanel } from "./MapPanel";
 import { AlertsPanel } from "./AlertsPanel";
 import { ChannelRoster } from "./ChannelRoster";
 import { sounds } from "../sounds";
 import { ThemeToggle } from "../ThemeToggle";
-import { IconBolt, IconBeacon, IconRadio, IconLogOut, IconShield } from "../icons";
+import {
+  IconBolt,
+  IconBeacon,
+  IconRadio,
+  IconLogOut,
+  IconShield,
+  IconToneRoutine,
+  IconTonePriority,
+  IconToneStatus,
+  IconStop,
+} from "../icons";
 
 const PERMISSION_LABEL: Record<Permission, string> = {
   talk_priority: "Talk priority",
@@ -92,6 +102,16 @@ export function ConsolePage() {
     const next = !marker33;
     client.setChannelMarker(next);
     setMarker33(next);
+  }
+
+  function sendTone(kind: ToneOutKind) {
+    clientRef.current?.sendToneOut(kind);
+  }
+
+  function stopAllSounds() {
+    clientRef.current?.stopAllTones();
+    sounds.stopAll();
+    setMarker33(false);
   }
 
   async function beginTransmit(event: PointerEvent<HTMLButtonElement>) {
@@ -220,6 +240,39 @@ export function ConsolePage() {
                 <span>{marker33 ? "10-33 MARKER ON" : "10-33 CHANNEL MARKER"}</span>
               </button>
               {marker33 && <div className="marker-note">Emergency traffic — marker tone every 12s</div>}
+
+              <div className="toneout">
+                <div className="toneout-row">
+                  <button
+                    className="toneout-btn"
+                    disabled={!connected || !canTransmit}
+                    onClick={() => sendTone("routine")}
+                  >
+                    <IconToneRoutine size={16} />
+                    Routine
+                  </button>
+                  <button
+                    className="toneout-btn priority"
+                    disabled={!connected || !canTransmit}
+                    onClick={() => sendTone("priority")}
+                  >
+                    <IconTonePriority size={16} />
+                    Priority
+                  </button>
+                  <button
+                    className="toneout-btn"
+                    disabled={!connected || !canTransmit}
+                    onClick={() => sendTone("status")}
+                  >
+                    <IconToneStatus size={16} />
+                    Status
+                  </button>
+                </div>
+                <button className="stopall-btn" onClick={stopAllSounds}>
+                  <IconStop size={16} />
+                  Stop All Sounds
+                </button>
+              </div>
 
               <div className="live-actions">
                 {(voiceState === "error" || voiceState === "closed") && (
