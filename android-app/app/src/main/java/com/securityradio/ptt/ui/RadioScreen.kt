@@ -65,7 +65,6 @@ import com.securityradio.ptt.ui.lcd.LcdGpsIcon
 import com.securityradio.ptt.ui.lcd.LcdListChannelIcon
 import com.securityradio.ptt.ui.lcd.LcdMicIcon
 import com.securityradio.ptt.ui.lcd.LcdScanIcon
-import com.securityradio.ptt.ui.lcd.LcdSignalBarsIcon
 import com.securityradio.ptt.ui.lcd.LcdTextStyles
 import com.securityradio.ptt.ui.lcd.rememberLcdTextStyles
 import com.securityradio.ptt.ui.theme.LocalRadioLcdPalette
@@ -225,13 +224,6 @@ private fun LcdStatusBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                LcdSignalBarsIcon(
-                    bars = state.signalBars,
-                    maxBars = state.maxSignalBars,
-                    colorActive = p.statusBlue,
-                    colorInactive = p.textMuted.copy(alpha = 0.45f),
-                    modifier = Modifier.size(width = 34.dp, height = 14.dp),
-                )
                 LcdGpsIcon(
                     active = p.statusGreen,
                     muted = p.textMuted,
@@ -299,13 +291,8 @@ private fun LcdStatusBar(
                 "SYNCING" -> "LINK: SYNC"
                 else -> "LINK: ${state.networkLabel.uppercase(Locale.US)}"
             }
-            val detail = if (state.rssiExpanded) {
-                " · RSSI ${state.signalBars}/${state.maxSignalBars}"
-            } else {
-                ""
-            }
             Text(
-                text = linkLabel + detail,
+                text = linkLabel,
                 style = styles.status,
                 color = p.textMuted,
                 maxLines = 1,
@@ -759,7 +746,7 @@ private fun LcdSoftKeyRow(
                 )
             }
             val active = when (index) {
-                1 -> state.rssiExpanded
+                1 -> state.mappingSettingsVisible
                 2 -> state.scanActive
                 3 -> state.gpsActive
                 else -> false

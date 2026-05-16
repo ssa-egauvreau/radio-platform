@@ -7,8 +7,6 @@ data class RadioUiState(
     val systemTime: String,
     val networkLabel: String,
     val batteryPercent: Int,
-    val signalBars: Int,
-    val maxSignalBars: Int,
     val zoneLabel: String,
     val channelLabel: String,
     val channelPosition: String,
@@ -39,8 +37,6 @@ data class RadioUiState(
     /** UI toggles for scan / GPS rows (soft keys). */
     val scanActive: Boolean,
     val gpsActive: Boolean,
-    /** Soft-key RSSI detail expansion (UI only). */
-    val rssiExpanded: Boolean,
 
     /**
      * Day / night **preference**: [ThemeMode.AUTO] follows the device light/dark setting in the Compose layer.
@@ -79,8 +75,6 @@ data class RadioUiState(
             systemTime = "--:--",
             networkLabel = "SYNCING",
             batteryPercent = 100,
-            signalBars = 0,
-            maxSignalBars = 5,
             zoneLabel = "ZONE 01",
             channelLabel = "----",
             channelPosition = "-- / --",
@@ -91,7 +85,7 @@ data class RadioUiState(
             displayLine1 = "SUNSET SAFETY AGENCY",
             displayLine2 = "OPERATIONS",
             displayLine3 = "CHANNELS: LOADING",
-            softKeyLabels = listOf("PTT", "RSSI", "SCAN", "GPS", "CHAN"),
+            softKeyLabels = listOf("PTT", "MENU", "SCAN", "GPS", "CHAN"),
             isPttPressed = false,
             isEmergencyActive = false,
             pttBusyTone = false,
@@ -105,7 +99,6 @@ data class RadioUiState(
             rxAttributedLine = "",
             scanActive = false,
             gpsActive = true,
-            rssiExpanded = false,
             themeMode = ThemeMode.AUTO,
             mappingSettingsVisible = false,
             hardwareMappings = emptyMap(),

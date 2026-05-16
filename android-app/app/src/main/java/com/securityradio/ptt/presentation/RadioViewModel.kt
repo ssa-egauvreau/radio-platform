@@ -211,7 +211,7 @@ class RadioViewModel(
                         _uiState.update { state ->
                             when (event.index) {
                                 0 -> state.copy(statusMessage = "PTT: HOLD LCD BAR")
-                                1 -> state.copy(rssiExpanded = !state.rssiExpanded)
+                                1 -> state.copy(mappingSettingsVisible = true),
                                 2 -> onScanSoftKeyToggle(state)
                                 3 -> state.copy(
                                     gpsActive = !state.gpsActive,
