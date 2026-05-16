@@ -43,6 +43,7 @@ const LAST_CHANNEL_KEY = "securityradio.lastChannel";
 const TX_DIGITAL_KEY = "securityradio.txDigital";
 const PTT_CODE_KEY = "securityradio.pttKey";
 const DEFAULT_PTT_CODE = "Space";
+const KEYBOARD_ENABLED_KEY = "securityradio.keyboardOn";
 const volumeKey = (id: number) => `securityradio.vol.${id}`;
 const muteKey = (id: number) => `securityradio.mute.${id}`;
 
@@ -88,6 +89,7 @@ export function ConsolePage() {
   const [txDigital, setTxDigital] = useState(() => localStorage.getItem(TX_DIGITAL_KEY) !== "0");
   const [pttCode, setPttCode] = useState(() => localStorage.getItem(PTT_CODE_KEY) || DEFAULT_PTT_CODE);
   const [rebindingPtt, setRebindingPtt] = useState(false);
+  const [keyboardOn, setKeyboardOn] = useState(() => localStorage.getItem(KEYBOARD_ENABLED_KEY) !== "0");
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [monitors, setMonitors] = useState<MonitorView[]>([]);
@@ -265,9 +267,18 @@ export function ConsolePage() {
     setMonitors((prev) => prev.map((m) => (m.channelId === channelId ? { ...m, muted: next } : m)));
   }
 
+  function toggleKeyboard() {
+    const next = !keyboardOn;
+    setKeyboardOn(next);
+    localStorage.setItem(KEYBOARD_ENABLED_KEY, next ? "1" : "0");
+    if (!next) {
+      setRebindingPtt(false);
+    }
+  }
+
   // Latest handlers/data reachable from the once-mounted keyboard listener.
-  const opsRef = useRef({ channels, selectChannel, startTx, stopTx, pttCode });
-  opsRef.current = { channels, selectChannel, startTx, stopTx, pttCode };
+  const opsRef = useRef({ channels, selectChannel, startTx, stopTx, pttCode, keyboardOn });
+  opsRef.current = { channels, selectChannel, startTx, stopTx, pttCode, keyboardOn };
 
   useEffect(() => {
     sounds.preload();
@@ -302,7 +313,7 @@ export function ConsolePage() {
       return !!el && ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName);
     }
     function onKeyDown(e: KeyboardEvent) {
-      if (inField() || e.metaKey || e.ctrlKey || e.altKey || e.repeat) {
+      if (!opsRef.current.keyboardOn || inField() || e.metaKey || e.ctrlKey || e.altKey || e.repeat) {
         return;
       }
       if (e.code === opsRef.current.pttCode) {
@@ -438,14 +449,25 @@ export function ConsolePage() {
           })}
           {channels.length > 0 && (
             <div className="kbd-hint">
-              Keys 1–9 select · PTT{" "}
               <button
-                className={rebindingPtt ? "key-rebind active" : "key-rebind"}
-                onClick={() => setRebindingPtt((v) => !v)}
-                title="Click, then press a key to rebind push-to-talk"
+                className={keyboardOn ? "kbd-toggle on" : "kbd-toggle"}
+                onClick={toggleKeyboard}
+                title="Enable or disable all keyboard shortcuts"
               >
-                {rebindingPtt ? "press a key…" : keyLabel(pttCode)}
+                Keyboard shortcuts: {keyboardOn ? "On" : "Off"}
               </button>
+              {keyboardOn && (
+                <div className="kbd-keys">
+                  Keys 1–9 select · PTT{" "}
+                  <button
+                    className={rebindingPtt ? "key-rebind active" : "key-rebind"}
+                    onClick={() => setRebindingPtt((v) => !v)}
+                    title="Click, then press a key to rebind push-to-talk"
+                  >
+                    {rebindingPtt ? "press a key…" : keyLabel(pttCode)}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
