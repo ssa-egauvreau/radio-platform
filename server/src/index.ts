@@ -8,6 +8,7 @@ import { ensureSchema, listChannelsFromDb } from "./db.js";
 import { seedInitialAdmin } from "./store.js";
 import { startRecorder } from "./recorder.js";
 import { recoverPendingTranscriptions } from "./transcribe.js";
+import { initServerImbe } from "./imbeServerCodec.js";
 import { authenticate } from "./auth.js";
 import { createApiRouter } from "./apiRoutes.js";
 import { countPresence, heartbeatPresence } from "./presence.js";
@@ -163,6 +164,7 @@ async function main(): Promise<void> {
 
   startRecorder();
   void recoverPendingTranscriptions();
+  void initServerImbe();
 
   const server = createServer(app);
   attachVoiceRelay(server, { radioApiKey });
