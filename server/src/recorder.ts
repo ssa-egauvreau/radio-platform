@@ -18,12 +18,18 @@ const IMBE_MAGIC_0 = 0xf5;
 const IMBE_MAGIC_1 = 0xab;
 
 export interface FrameAttribution {
+  agencyId: number;
   channelNorm: string;
   channelName: string;
   channelId: number | null;
   userId: number | null;
   unitId: string;
   displayName: string | null;
+}
+
+/** Recordings are tracked per agency + channel so tenants never share a talk-spurt. */
+function recKey(attr: { agencyId: number; channelNorm: string }): string {
+  return `${attr.agencyId} ${attr.channelNorm}`;
 }
 
 interface ActiveRecording extends FrameAttribution {
@@ -43,8 +49,8 @@ function isImbeFrame(payload: Buffer): boolean {
 }
 
 async function finalize(rec: ActiveRecording): Promise<void> {
-  if (active.get(rec.channelNorm) === rec) {
-    active.delete(rec.channelNorm);
+  if (active.get(recKey(rec)) === rec) {
+    active.delete(recKey(rec));
   }
   if (rec.decoder) {
     rec.decoder.free();
@@ -57,6 +63,7 @@ async function finalize(rec: ActiveRecording): Promise<void> {
   const durationMs = Math.round((pcm.length / 2 / SAMPLE_RATE) * 1000);
   try {
     const id = await insertTransmission({
+      agencyId: rec.agencyId,
       channelId: rec.channelId,
       channelName: rec.channelName,
       userId: rec.userId,
@@ -80,14 +87,15 @@ export function recordFrame(attr: FrameAttribution, payload: Buffer): void {
     return;
   }
   const now = Date.now();
-  let rec = active.get(attr.channelNorm);
+  const key = recKey(attr);
+  let rec = active.get(key);
   if (rec && rec.unitId !== attr.unitId) {
     void finalize(rec);
     rec = undefined;
   }
   if (!rec) {
     rec = { ...attr, startedAt: now, lastFrameMs: now, chunks: [], bytes: 0, decoder: null };
-    active.set(attr.channelNorm, rec);
+    active.set(key, rec);
   }
   // Digital (IMBE) frames are decoded to PCM with a decoder dedicated to this
   // talk-spurt, so interleaved channels never share frame-to-frame history.

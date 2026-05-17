@@ -4,8 +4,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
 import { DEFAULT_GREEN_CHANNELS } from "./defaultChannels.js";
-import { ensureSchema, listChannelsFromDb } from "./db.js";
-import { seedInitialAdmin } from "./store.js";
+import { ensureSchema, getPool, listChannelsFromDb } from "./db.js";
+import { getAgencyById, resolveAgencyByKey, seedInitialAccounts } from "./store.js";
 import { startRecorder } from "./recorder.js";
 import { recoverPendingTranscriptions } from "./transcribe.js";
 import { initServerImbe } from "./imbeServerCodec.js";
@@ -21,10 +21,12 @@ app.use(authenticate);
 const radioApiKey = process.env.RADIO_API_KEY?.trim();
 
 /**
- * Legacy Android endpoints stay behind the shared `RADIO_API_KEY`.
- * The console/admin API (`/v1/auth`, `/v1/admin`, `/v1/me`) authenticates with per-account JWTs instead.
+ * Handset / radio endpoints. Each request is bound to an agency: a console JWT
+ * carries its agency, while an Android handset presents a per-agency radio key
+ * (the legacy global `RADIO_API_KEY` still maps to the default agency).
+ * The console/admin/owner API authenticates with per-account JWTs instead.
  */
-const LEGACY_KEYED_PATHS = new Set([
+const LEGACY_RADIO_PATHS = new Set([
   "/v1/channels",
   "/v1/air",
   "/v1/presence/heartbeat",
@@ -35,16 +37,45 @@ const LEGACY_KEYED_PATHS = new Set([
   "/v1/radio/emergency",
 ]);
 
-app.use((req, res, next) => {
-  if (!radioApiKey || !LEGACY_KEYED_PATHS.has(req.path)) {
+app.use(async (req, res, next) => {
+  if (!LEGACY_RADIO_PATHS.has(req.path)) {
     next();
     return;
   }
-  if (req.header("x-radio-key") !== radioApiKey) {
-    res.status(401).json({ error: "unauthorized" });
-    return;
+  try {
+    if (!getPool()) {
+      // No database configured — handlers fall back to in-memory defaults.
+      next();
+      return;
+    }
+    if (req.authUser) {
+      if (req.authUser.agencyId == null) {
+        res.status(403).json({ error: "forbidden" });
+        return;
+      }
+      const ag = await getAgencyById(req.authUser.agencyId);
+      if (!ag || ag.disabled) {
+        res.status(403).json({ error: "forbidden" });
+        return;
+      }
+      req.agency = { id: ag.id, name: ag.name, slug: ag.slug };
+      next();
+      return;
+    }
+    const headerRaw = req.headers["x-radio-key"];
+    const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
+    const key = headerVal ?? (typeof req.query.key === "string" ? req.query.key : null);
+    const ag = await resolveAgencyByKey(key ?? null, radioApiKey);
+    if (!ag) {
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+    req.agency = { id: ag.id, name: ag.name, slug: ag.slug };
+    next();
+  } catch (error) {
+    console.error("Agency resolution failed", error);
+    res.status(500).json({ error: "server_error" });
   }
-  next();
 });
 
 app.get("/health", (_req, res) => {
@@ -54,9 +85,9 @@ app.get("/health", (_req, res) => {
 // Console + admin API. Unmatched paths fall through to the legacy routes below.
 app.use("/v1", createApiRouter());
 
-app.get("/v1/channels", async (_req, res) => {
+app.get("/v1/channels", async (req, res) => {
   try {
-    const rows = await listChannelsFromDb();
+    const rows = await listChannelsFromDb(req.agency?.id ?? 0);
     const channels = rows && rows.length > 0 ? rows : [...DEFAULT_GREEN_CHANNELS];
     res.json({ channels });
   } catch (error) {
@@ -74,7 +105,7 @@ app.get("/v1/air", (req, res) => {
   const envBusy = raw === "1" || raw === "true" || raw === "yes";
 
   const chQ = typeof req.query.channel === "string" ? req.query.channel : "";
-  const transmitting = peekVoiceTransmittingUnit(chQ);
+  const transmitting = peekVoiceTransmittingUnit(req.agency?.id ?? 0, chQ);
   const occupied = envBusy || transmitting !== null;
 
   res.json({
@@ -85,7 +116,7 @@ app.get("/v1/air", (req, res) => {
 
 /** Registers (or refreshes TTL for) this unit on its tuned channel via periodic Android heartbeats. */
 app.post("/v1/presence/heartbeat", (req, res) => {
-  const hb = heartbeatPresence(req.body?.unit_id, req.body?.channel);
+  const hb = heartbeatPresence(req.agency?.id ?? 0, req.body?.unit_id, req.body?.channel);
   if (!hb.ok) {
     res.status(400).json({ error: hb.error ?? "presence_refused" });
     return;
@@ -96,7 +127,7 @@ app.post("/v1/presence/heartbeat", (req, res) => {
 /** Returns distinct units whose heartbeats arrived within TTL for the queried channel label. */
 app.get("/v1/presence/count", (req, res) => {
   const channelRaw = typeof req.query.channel === "string" ? req.query.channel : "";
-  const count = countPresence(channelRaw);
+  const count = countPresence(req.agency?.id ?? 0, channelRaw);
   res.json({
     channel: channelRaw.trim(),
     count,
@@ -158,8 +189,8 @@ async function main(): Promise<void> {
   await ensureSchema().catch((error) => {
     console.error("Database bootstrap failed (continuing without DB)", error);
   });
-  await seedInitialAdmin().catch((error) => {
-    console.error("Initial admin seed failed", error);
+  await seedInitialAccounts().catch((error) => {
+    console.error("Initial account seed failed", error);
   });
 
   startRecorder();

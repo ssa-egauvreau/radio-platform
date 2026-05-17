@@ -6,8 +6,13 @@
  * - Subsequent binary frames: raw PCM mono 16-bit LE, 16000 Hz (matches Android capture).
  *
  * Authentication:
- * - Browser console clients pass a JWT as `?token=` — their channel permission is enforced.
- * - Android handsets pass the shared `X-Radio-Key` header (or `?key=`) and default to `talk`.
+ * - Browser console clients pass a JWT as `?token=` — their agency and channel
+ *   permission are taken from the token.
+ * - Android handsets pass a radio key (`X-Radio-Key` header or `?key=`); the key
+ *   identifies which agency the handset belongs to.
+ *
+ * Channels are namespaced per agency, so two tenants may both run "Green 1"
+ * without ever hearing each other.
  */
 
 import type { IncomingMessage } from "node:http";
@@ -16,7 +21,8 @@ import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer } from "ws";
 import { normalizedChannel } from "./presence.js";
 import { verifyToken, type AuthUser } from "./auth.js";
-import { getChannelByName, getMembership, type Permission } from "./store.js";
+import { getPool } from "./db.js";
+import { getChannelByName, getMembership, resolveAgencyByKey, type Permission } from "./store.js";
 import { recordFrame } from "./recorder.js";
 
 export const VOICE_WS_PATH = "/v1/voice/stream";
@@ -28,12 +34,14 @@ export const VOICE_WS_PATH = "/v1/voice/stream";
  */
 const VOICE_AIR_TTL_MS = 2000;
 
-type Identity = { kind: "account"; user: AuthUser } | { kind: "legacy" };
+type Identity = { kind: "account"; user: AuthUser } | { kind: "legacy"; agencyId: number };
 
 interface ClientMeta {
   identity: Identity;
+  agencyId: number;
   unitId: string;
   channelNorm: string | null;
+  channelKey: string | null;
   channelName: string;
   channelId: number | null;
   userId: number | null;
@@ -44,7 +52,7 @@ interface ClientMeta {
 
 type VoiceSlot = { unitUpper: string; lastPcmMs: number };
 
-/** Who is currently keyed on normalized channel keys (presence-style names). */
+/** Who is currently keyed, keyed by `agency:channel` so tenants stay isolated. */
 const voiceAirByChannel = new Map<string, VoiceSlot>();
 
 export interface RosterMember {
@@ -55,7 +63,7 @@ export interface RosterMember {
 }
 
 interface RosterRecord {
-  channelNorm: string;
+  channelKey: string;
   unitId: string;
   displayName: string | null;
   kind: "account" | "legacy";
@@ -65,16 +73,34 @@ interface RosterRecord {
 /** Live voice-WebSocket roster so the console can show who is on each channel. */
 const voiceRoster = new Map<WebSocket, RosterRecord>();
 
+/** Composite channel key namespacing a normalized channel under its agency. */
+function channelKey(agencyId: number, channelNorm: string): string {
+  return `${agencyId} ${channelNorm}`;
+}
+
+/**
+ * Resolves the agency a key-authenticated handset belongs to.
+ * `requiredKey` is the legacy global `RADIO_API_KEY`, which maps to the default agency.
+ */
+async function resolveLegacyAgency(key: string | null, requiredKey: string | undefined): Promise<number | null> {
+  if (!getPool()) {
+    return 0; // no database — a single in-memory bucket for local dev
+  }
+  const agency = await resolveAgencyByKey(key, requiredKey).catch(() => null);
+  return agency?.id ?? null;
+}
+
 /** Members currently connected to a channel's voice stream, longest-connected first. */
-export function listChannelRoster(channelRaw: unknown): RosterMember[] {
+export function listChannelRoster(agencyId: number, channelRaw: unknown): RosterMember[] {
   const chNorm = normalizedChannel(channelRaw);
   if (!chNorm || chNorm === "----") {
     return [];
   }
+  const key = channelKey(agencyId, chNorm);
   const now = Date.now();
   const members: RosterMember[] = [];
   for (const record of voiceRoster.values()) {
-    if (record.channelNorm === chNorm) {
+    if (record.channelKey === key) {
       members.push({
         unit_id: record.unitId,
         display_name: record.displayName,
@@ -87,34 +113,35 @@ export function listChannelRoster(channelRaw: unknown): RosterMember[] {
   return members;
 }
 
-export function peekVoiceTransmittingUnit(channelRaw: unknown): string | null {
+export function peekVoiceTransmittingUnit(agencyId: number, channelRaw: unknown): string | null {
   const chNorm = normalizedChannel(channelRaw);
   if (!chNorm || chNorm === "----") {
     return null;
   }
-  const slot = voiceAirByChannel.get(chNorm);
+  const key = channelKey(agencyId, chNorm);
+  const slot = voiceAirByChannel.get(key);
   if (!slot) {
     return null;
   }
   if (Date.now() - slot.lastPcmMs > VOICE_AIR_TTL_MS) {
-    voiceAirByChannel.delete(chNorm);
+    voiceAirByChannel.delete(key);
     return null;
   }
   return slot.unitUpper;
 }
 
-function touchTransmission(channelNorm: string, unitUpper: string): void {
-  voiceAirByChannel.set(channelNorm, { unitUpper, lastPcmMs: Date.now() });
+function touchTransmission(chanKey: string, unitUpper: string): void {
+  voiceAirByChannel.set(chanKey, { unitUpper, lastPcmMs: Date.now() });
 }
 
 /** Unit currently holding the channel, if it is someone other than the candidate; else null. */
-function otherActiveHolder(channelNorm: string, candidateUnitUpper: string): string | null {
-  const slot = voiceAirByChannel.get(channelNorm);
+function otherActiveHolder(chanKey: string, candidateUnitUpper: string): string | null {
+  const slot = voiceAirByChannel.get(chanKey);
   if (!slot) {
     return null;
   }
   if (Date.now() - slot.lastPcmMs > VOICE_AIR_TTL_MS) {
-    voiceAirByChannel.delete(channelNorm);
+    voiceAirByChannel.delete(chanKey);
     return null;
   }
   return slot.unitUpper !== candidateUnitUpper ? slot.unitUpper : null;
@@ -130,60 +157,71 @@ export function attachVoiceRelay(
   const clientMeta = new Map<WebSocket, ClientMeta>();
 
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    try {
-      const host = req.headers.host ?? "localhost";
-      const url = new URL(req.url ?? "/", `http://${host}`);
-      if (url.pathname !== VOICE_WS_PATH) {
-        socket.destroy();
-        return;
-      }
-
-      let identity: Identity;
-      const token = url.searchParams.get("token");
-      if (token) {
-        const user = verifyToken(token);
-        if (!user) {
-          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+    void (async () => {
+      try {
+        const host = req.headers.host ?? "localhost";
+        const url = new URL(req.url ?? "/", `http://${host}`);
+        if (url.pathname !== VOICE_WS_PATH) {
           socket.destroy();
           return;
         }
-        identity = { kind: "account", user };
-      } else if (requiredKey) {
-        const headerRaw = req.headers["x-radio-key"];
-        const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
-        if (headerVal !== requiredKey && url.searchParams.get("key") !== requiredKey) {
-          socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-          socket.destroy();
-          return;
-        }
-        identity = { kind: "legacy" };
-      } else {
-        identity = { kind: "legacy" };
-      }
 
-      wss.handleUpgrade(req, socket, head, (ws) => {
-        clientMeta.set(ws, {
-          identity,
-          unitId: "",
-          channelNorm: null,
-          channelName: "",
-          channelId: null,
-          userId: null,
-          displayName: null,
-          permission: "listen_only",
-          joined: false,
+        let identity: Identity;
+        const token = url.searchParams.get("token");
+        if (token) {
+          const user = verifyToken(token);
+          if (!user) {
+            socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+            socket.destroy();
+            return;
+          }
+          if (user.agencyId == null) {
+            // Platform owners have no agency and cannot join a voice channel.
+            socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+            socket.destroy();
+            return;
+          }
+          identity = { kind: "account", user };
+        } else {
+          const headerRaw = req.headers["x-radio-key"];
+          const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
+          const key = headerVal ?? url.searchParams.get("key");
+          const agencyId = await resolveLegacyAgency(key ?? null, requiredKey);
+          if (agencyId == null) {
+            socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+            socket.destroy();
+            return;
+          }
+          identity = { kind: "legacy", agencyId };
+        }
+
+        const agencyId = identity.kind === "account" ? identity.user.agencyId! : identity.agencyId;
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          clientMeta.set(ws, {
+            identity,
+            agencyId,
+            unitId: "",
+            channelNorm: null,
+            channelKey: null,
+            channelName: "",
+            channelId: null,
+            userId: null,
+            displayName: null,
+            permission: "listen_only",
+            joined: false,
+          });
+          wss.emit("connection", ws, req);
         });
-        wss.emit("connection", ws, req);
-      });
-    } catch {
-      socket.destroy();
-    }
+      } catch {
+        socket.destroy();
+      }
+    })();
   });
 
-  function broadcastExcept(from: WebSocket, channelNorm: string, payload: Buffer): void {
+  function broadcastExcept(from: WebSocket, chanKey: string, payload: Buffer): void {
     for (const [peer, meta] of clientMeta) {
       if (peer === from) continue;
-      if (!meta.channelNorm || meta.channelNorm !== channelNorm) continue;
+      if (!meta.channelKey || meta.channelKey !== chanKey) continue;
       if (peer.readyState !== WebSocket.OPEN) continue;
       try {
         peer.send(payload);
@@ -207,7 +245,7 @@ export function attachVoiceRelay(
 
     let channelRow: { id: number } | null = null;
     try {
-      channelRow = await getChannelByName(channelName);
+      channelRow = await getChannelByName(meta.agencyId, channelName);
     } catch {
       channelRow = null; // no database — recording/permissions degrade gracefully
     }
@@ -245,8 +283,10 @@ export function attachVoiceRelay(
       permission = "talk";
     }
 
+    const chanKey = channelKey(meta.agencyId, chNorm);
     meta.unitId = unitId;
     meta.channelNorm = chNorm;
+    meta.channelKey = chanKey;
     meta.channelName = channelName;
     meta.channelId = channelRow?.id ?? null;
     meta.userId = userId;
@@ -255,13 +295,13 @@ export function attachVoiceRelay(
     meta.joined = true;
     const prior = voiceRoster.get(ws);
     voiceRoster.set(ws, {
-      channelNorm: chNorm,
+      channelKey: chanKey,
       unitId,
       displayName,
       kind: meta.identity.kind,
       // Keep the original join time across re-joins to the same channel
       // (Android re-sends `join` on the same socket periodically).
-      joinedAt: prior && prior.channelNorm === chNorm ? prior.joinedAt : Date.now(),
+      joinedAt: prior && prior.channelKey === chanKey ? prior.joinedAt : Date.now(),
     });
     ws.send(JSON.stringify({ type: "joined", channel: channelName, permission, unit_id: unitId }));
   }
@@ -284,7 +324,7 @@ export function attachVoiceRelay(
           return;
         }
 
-        if (!meta.joined || !meta.channelNorm) {
+        if (!meta.joined || !meta.channelNorm || !meta.channelKey) {
           return;
         }
         // Listen-only members may monitor a channel but never key up.
@@ -292,7 +332,7 @@ export function attachVoiceRelay(
           return;
         }
         // One transmitter per channel per air window. talk_priority pre-empts the current holder.
-        const holder = otherActiveHolder(meta.channelNorm, meta.unitId);
+        const holder = otherActiveHolder(meta.channelKey, meta.unitId);
         if (holder && meta.permission !== "talk_priority") {
           return;
         }
@@ -308,10 +348,11 @@ export function attachVoiceRelay(
         if (payload.length === 0) {
           return;
         }
-        touchTransmission(meta.channelNorm, meta.unitId);
-        broadcastExcept(ws, meta.channelNorm, payload);
+        touchTransmission(meta.channelKey, meta.unitId);
+        broadcastExcept(ws, meta.channelKey, payload);
         recordFrame(
           {
+            agencyId: meta.agencyId,
             channelNorm: meta.channelNorm,
             channelName: meta.channelName,
             channelId: meta.channelId,
