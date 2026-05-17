@@ -28,6 +28,9 @@ final class RadioViewModel: ObservableObject {
         locationReporter.configure(unitId: unitId)
         uiState.localShortUnitId = unitId
 
+        locationReporter.onAuthorizationChange = { [weak self] authorized in
+            Task { @MainActor in self?.handleLocationAuth(authorized) }
+        }
         if uiState.gpsActive {
             locationReporter.start()
         }
@@ -132,18 +135,26 @@ final class RadioViewModel: ObservableObject {
 
     // MARK: - emergency / GPS
 
+    /// Emergency is safety-critical: the local state is only confirmed once the
+    /// server accepts it, and rolled back if the request fails.
     private func toggleEmergency() {
         let activating = !uiState.isEmergencyActive
         uiState.isEmergencyActive = activating
-        uiState.statusMessage = activating ? "EMERGENCY ACTIVE" : "EMERGENCY OFF"
+        uiState.statusMessage = activating ? "EMERGENCY — SENDING…" : "EMERGENCY — CLEARING…"
         let channel = currentChannel
         Task {
-            try? await api.setEmergency(
-                unitId: unitId,
-                channel: channel,
-                active: activating,
-                message: activating ? "Emergency activated" : nil
-            )
+            do {
+                try await api.setEmergency(
+                    unitId: unitId,
+                    channel: channel,
+                    active: activating,
+                    message: activating ? "Emergency activated" : nil
+                )
+                uiState.statusMessage = activating ? "EMERGENCY ACTIVE" : "EMERGENCY OFF"
+            } catch {
+                uiState.isEmergencyActive = !activating
+                uiState.statusMessage = activating ? "EMERGENCY SEND FAILED" : "EMERGENCY CLEAR FAILED"
+            }
         }
     }
 
@@ -152,11 +163,19 @@ final class RadioViewModel: ObservableObject {
         uiState.gpsActive = next
         if next {
             locationReporter.start()
-            uiState.statusMessage = "GPS ON"
+            uiState.statusMessage = uiState.locationAuthorized ? "GPS ON" : "GPS — REQUESTING ACCESS…"
         } else {
             locationReporter.stop()
             uiState.statusMessage = "GPS OFF"
         }
+    }
+
+    /// Reflects the real CoreLocation authorization so the shell never claims
+    /// GPS is on while location access is denied.
+    private func handleLocationAuth(_ authorized: Bool) {
+        uiState.locationAuthorized = authorized
+        guard uiState.gpsActive else { return }
+        uiState.statusMessage = authorized ? "GPS ON" : "GPS — NO LOCATION ACCESS"
     }
 
     // MARK: - polling loops

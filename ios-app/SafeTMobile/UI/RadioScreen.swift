@@ -112,21 +112,24 @@ struct RadioScreen: View {
     // MARK: - channel / GPS controls
 
     private func channelRow(_ state: RadioUiState) -> some View {
-        HStack(spacing: 10) {
+        let gps = gpsButtonStyle(state)
+        return HStack(spacing: 10) {
             controlButton(title: "CH \u{25BC}", enabled: !state.channelsLoading) {
                 viewModel.handle(.channelDown)
             }
-            controlButton(
-                title: state.gpsActive ? "GPS ON" : "GPS OFF",
-                tint: state.gpsActive ? .safetGreen : .safetTextDim,
-                enabled: true
-            ) {
+            controlButton(title: gps.title, tint: gps.tint, enabled: true) {
                 viewModel.handle(.toggleGps)
             }
             controlButton(title: "CH \u{25B2}", enabled: !state.channelsLoading) {
                 viewModel.handle(.channelUp)
             }
         }
+    }
+
+    private func gpsButtonStyle(_ state: RadioUiState) -> (title: String, tint: Color) {
+        if !state.gpsActive { return ("GPS OFF", .safetTextDim) }
+        if state.locationAuthorized { return ("GPS ON", .safetGreen) }
+        return ("GPS \u{2014} NO ACCESS", .safetAmber)
     }
 
     private func controlButton(

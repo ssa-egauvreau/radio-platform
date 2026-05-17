@@ -17,4 +17,5 @@ struct RadioUiState {
     var localShortUnitId = ""
     var radiosOnlineOnChannel: Int?
     var gpsActive = true
+    var locationAuthorized = false
 }

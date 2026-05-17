@@ -11,6 +11,9 @@ final class LocationReporter: NSObject, CLLocationManagerDelegate {
     private var running = false
     private var lastPostAt = Date.distantPast
 
+    /// Called when location authorization changes; `true` once when-in-use/always is granted.
+    var onAuthorizationChange: ((Bool) -> Void)?
+
     /// Minimum gap between position posts.
     private let minPostInterval: TimeInterval = 12
 
@@ -66,5 +69,11 @@ final class LocationReporter: NSObject, CLLocationManagerDelegate {
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         // Non-fatal — the server keeps the last known position.
+    }
+
+    func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
+        let authorized = manager.authorizationStatus == .authorizedWhenInUse
+            || manager.authorizationStatus == .authorizedAlways
+        onAuthorizationChange?(authorized)
     }
 }
