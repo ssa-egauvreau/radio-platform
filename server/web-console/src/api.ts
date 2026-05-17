@@ -296,6 +296,7 @@ export function describeError(error: unknown): string {
       unauthorized: "Your session expired — sign in again.",
       database_unavailable: "The database is not configured on the server.",
       bad_role: "Unknown role.",
+      agency_disabled: "Your agency has been disabled. Contact your platform owner.",
     };
     return map[error.message] ?? `Request failed (${error.message}).`;
   }

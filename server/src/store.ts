@@ -105,22 +105,49 @@ export async function resolveAgencyByKey(
   return def && !def.disabled ? def : null;
 }
 
-/** Creates an agency and seeds it with three starter channels. */
-export async function createAgency(input: { name: string; slug: string; radioKey: string }): Promise<AgencyRow> {
-  const p = requirePool();
-  const res = await p.query<AgencyRow>(
-    `INSERT INTO agencies (name, slug, radio_key) VALUES ($1, $2, $3) RETURNING ${AGENCY_COLS};`,
-    [input.name.trim(), input.slug, input.radioKey],
-  );
-  const agency = res.rows[0]!;
-  await p.query(
-    `INSERT INTO radio_channels (agency_id, sort_order, name) VALUES
-       ($1, 1, 'Green 1'),
-       ($1, 2, 'Green 2'),
-       ($1, 3, 'Green 3');`,
-    [agency.id],
-  );
-  return agency;
+/**
+ * Creates an agency, seeds it with three starter channels, and creates its
+ * first administrator — all in one transaction, so a mid-way failure never
+ * leaves an orphaned agency with no admin.
+ */
+export async function createAgencyWithAdmin(input: {
+  name: string;
+  slug: string;
+  radioKey: string;
+  adminUsername: string;
+  adminDisplayName: string;
+  adminPassword: string;
+}): Promise<{ agency: AgencyRow; admin: UserRow }> {
+  const passwordHash = await hashPassword(input.adminPassword);
+  const client = await requirePool().connect();
+  try {
+    await client.query("BEGIN");
+    const agencyRes = await client.query<AgencyRow>(
+      `INSERT INTO agencies (name, slug, radio_key) VALUES ($1, $2, $3) RETURNING ${AGENCY_COLS};`,
+      [input.name.trim(), input.slug, input.radioKey],
+    );
+    const agency = agencyRes.rows[0]!;
+    await client.query(
+      `INSERT INTO radio_channels (agency_id, sort_order, name) VALUES
+         ($1, 1, 'Green 1'),
+         ($1, 2, 'Green 2'),
+         ($1, 3, 'Green 3');`,
+      [agency.id],
+    );
+    const adminRes = await client.query<UserRow>(
+      `INSERT INTO users (username, display_name, password_hash, role, unit_id, agency_id)
+       VALUES ($1, $2, $3, 'admin', NULL, $4)
+       RETURNING ${USER_COLS};`,
+      [input.adminUsername.trim(), input.adminDisplayName.trim(), passwordHash, agency.id],
+    );
+    await client.query("COMMIT");
+    return { agency, admin: adminRes.rows[0]! };
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export async function updateAgency(

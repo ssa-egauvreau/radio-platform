@@ -15,7 +15,7 @@ import {
   countActiveAdmins,
   clearAlert,
   clearEmergenciesFromUnit,
-  createAgency,
+  createAgencyWithAdmin,
   createAlert,
   createChannel,
   createUser,
@@ -104,6 +104,27 @@ function radioAgencyId(req: Request): number {
 /** Router for account/auth, admin, owner, and radio endpoints, mounted at `/v1`. */
 export function createApiRouter(): Router {
   const router = Router();
+
+  // Reject API calls from an account whose agency was disabled (or deleted)
+  // after its token was issued. Login and the radio middleware already block
+  // this, but an issued JWT stays valid until it expires.
+  router.use(async (req, res, next) => {
+    try {
+      const agencyId = req.authUser?.agencyId;
+      if (agencyId == null) {
+        next();
+        return;
+      }
+      const agency = await getAgencyById(agencyId);
+      if (!agency || agency.disabled) {
+        res.status(403).json({ error: "agency_disabled" });
+        return;
+      }
+      next();
+    } catch (error) {
+      fail(res, error);
+    }
+  });
 
   // --- authentication ----------------------------------------------------
 
@@ -202,18 +223,14 @@ export function createApiRouter(): Router {
         res.status(409).json({ error: "username_taken" });
         return;
       }
-      const agency = await createAgency({
+      // Agency, its starter channels and its first admin are created atomically.
+      const { agency, admin } = await createAgencyWithAdmin({
         name,
         slug: slugify(name),
         radioKey: generateRadioKey(),
-      });
-      const admin = await createUser({
-        username: adminUsername,
-        displayName: adminDisplayName,
-        password: adminPassword,
-        role: "admin",
-        unitId: null,
-        agencyId: agency.id,
+        adminUsername,
+        adminDisplayName,
+        adminPassword,
       });
       await writeAudit({
         agencyId: agency.id,
