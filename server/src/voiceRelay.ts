@@ -48,9 +48,14 @@ interface ClientMeta {
   displayName: string | null;
   permission: Permission;
   joined: boolean;
+  /** Last time a "channel busy" notice was sent to this client (throttling). */
+  lastBusyMs: number;
 }
 
-type VoiceSlot = { unitUpper: string; lastPcmMs: number };
+/** Throttle for the per-client "channel busy" notice. */
+const BUSY_NOTICE_MS = 750;
+
+type VoiceSlot = { ws: WebSocket; unitUpper: string; lastPcmMs: number; priority: boolean };
 
 /** Who is currently keyed, keyed by `agency:channel` so tenants stay isolated. */
 const voiceAirByChannel = new Map<string, VoiceSlot>();
@@ -159,21 +164,35 @@ export function peekVoiceTransmittingUnit(agencyId: number, channelRaw: unknown)
   return slot.unitUpper;
 }
 
-function touchTransmission(chanKey: string, unitUpper: string): void {
-  voiceAirByChannel.set(chanKey, { unitUpper, lastPcmMs: Date.now() });
+type AirClaim = { ok: true } | { ok: false; holder: string };
+
+/**
+ * Strict half-duplex: at most one transmitter per channel at a time. Records
+ * the caller as the channel holder when it is allowed to transmit. A
+ * `talk_priority` operator may take the channel from a non-priority talker, but
+ * never from another priority talker — so two operators can never double up.
+ */
+function claimAir(chanKey: string, ws: WebSocket, unitUpper: string, priority: boolean): AirClaim {
+  const slot = voiceAirByChannel.get(chanKey);
+  const now = Date.now();
+  if (slot && now - slot.lastPcmMs <= VOICE_AIR_TTL_MS && slot.ws !== ws) {
+    // A different connection is holding the channel.
+    if (!(priority && !slot.priority)) {
+      return { ok: false, holder: slot.unitUpper };
+    }
+    // priority pre-empts a non-priority holder — fall through and take over.
+  }
+  voiceAirByChannel.set(chanKey, { ws, unitUpper, lastPcmMs: now, priority });
+  return { ok: true };
 }
 
-/** Unit currently holding the channel, if it is someone other than the candidate; else null. */
-function otherActiveHolder(chanKey: string, candidateUnitUpper: string): string | null {
-  const slot = voiceAirByChannel.get(chanKey);
-  if (!slot) {
-    return null;
+/** Frees any channel a closing socket was holding, so the air clears at once. */
+function releaseAir(ws: WebSocket): void {
+  for (const [chanKey, slot] of voiceAirByChannel) {
+    if (slot.ws === ws) {
+      voiceAirByChannel.delete(chanKey);
+    }
   }
-  if (Date.now() - slot.lastPcmMs > VOICE_AIR_TTL_MS) {
-    voiceAirByChannel.delete(chanKey);
-    return null;
-  }
-  return slot.unitUpper !== candidateUnitUpper ? slot.unitUpper : null;
 }
 
 export function attachVoiceRelay(
@@ -246,6 +265,7 @@ export function attachVoiceRelay(
             displayName: null,
             permission: "listen_only",
             joined: false,
+            lastBusyMs: 0,
           });
           wss.emit("connection", ws, req);
         });
@@ -368,11 +388,6 @@ export function attachVoiceRelay(
         if (meta.permission === "listen_only") {
           return;
         }
-        // One transmitter per channel per air window. talk_priority pre-empts the current holder.
-        const holder = otherActiveHolder(meta.channelKey, meta.unitId);
-        if (holder && meta.permission !== "talk_priority") {
-          return;
-        }
 
         let payload: Buffer;
         if (Buffer.isBuffer(raw)) {
@@ -385,7 +400,20 @@ export function attachVoiceRelay(
         if (payload.length === 0) {
           return;
         }
-        touchTransmission(meta.channelKey, meta.unitId);
+        // Strict half-duplex — only the channel holder's audio goes through.
+        const claim = claimAir(meta.channelKey, ws, meta.unitId, meta.permission === "talk_priority");
+        if (!claim.ok) {
+          const now = Date.now();
+          if (now - meta.lastBusyMs > BUSY_NOTICE_MS) {
+            meta.lastBusyMs = now;
+            try {
+              ws.send(JSON.stringify({ type: "busy", unit_id: claim.holder }));
+            } catch {
+              /* ignore stale peer */
+            }
+          }
+          return;
+        }
         broadcastExcept(ws, meta.channelKey, payload);
         recordFrame(
           {
@@ -407,6 +435,7 @@ export function attachVoiceRelay(
     ws.on("close", () => {
       clientMeta.delete(ws);
       voiceRoster.delete(ws);
+      releaseAir(ws);
     });
   });
 

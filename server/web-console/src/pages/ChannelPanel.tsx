@@ -51,6 +51,7 @@ export function ChannelPanel({
   const [txDigital, setTxDigital] = useState(() => loadTxDigital(channel.id));
   const [volume, setVolume] = useState(() => loadVolume(channel.id));
   const [muted, setMuted] = useState(() => loadMuted(channel.id));
+  const [receiving, setReceiving] = useState(false);
 
   const clientRef = useRef<VoiceChannelClient | null>(null);
 
@@ -61,6 +62,13 @@ export function ChannelPanel({
         setVoiceDetail(detail ?? null);
       },
       onPermission: (perm) => setPermission(perm),
+      onReceiving: (rx) => setReceiving(rx),
+      onBusy: (unit) => {
+        sounds.busy();
+        setVoiceDetail(
+          unit ? `Channel busy — ${unit} is transmitting.` : "Channel busy — another unit is transmitting.",
+        );
+      },
     });
     client.setDigitalTx(loadTxDigital(channel.id));
     client.setVolume(loadVolume(channel.id));
@@ -86,11 +94,15 @@ export function ChannelPanel({
       await client.startTransmit();
       sounds.permit();
     } catch (err) {
-      setVoiceDetail(
-        err instanceof Error && err.message === "listen_only"
-          ? "You have listen-only access on this channel."
-          : "Microphone unavailable or permission denied.",
-      );
+      const code = err instanceof Error ? err.message : "";
+      if (code === "channel_busy") {
+        sounds.busy();
+        setVoiceDetail("Channel busy — another unit is transmitting.");
+      } else if (code === "listen_only") {
+        setVoiceDetail("You have listen-only access on this channel.");
+      } else {
+        setVoiceDetail("Microphone unavailable or permission denied.");
+      }
     }
   }, []);
 
@@ -212,6 +224,7 @@ export function ChannelPanel({
       >
         <span className="live-channel cp-name">{channel.name}</span>
         <span className={`state-chip ${voiceState}`}>{STATE_LABEL[voiceState]}</span>
+        {receiving && !transmitting && <span className="state-chip busy">BUSY</span>}
         {primary && <span className="cp-primary">PTT</span>}
         <button
           className="cp-close"
@@ -254,7 +267,7 @@ export function ChannelPanel({
       )}
 
       <button
-        className={transmitting ? "tx-button active" : "tx-button"}
+        className={transmitting ? "tx-button active" : receiving ? "tx-button busy" : "tx-button"}
         disabled={!connected || !canTransmit}
         onPointerDown={beginTransmit}
         onPointerUp={stopTx}
@@ -262,18 +275,20 @@ export function ChannelPanel({
       >
         <span className="tx-main">
           <IconBolt size={26} />
-          {transmitting ? "ON AIR" : canTransmit ? "XMIT" : "LISTEN ONLY"}
+          {transmitting ? "ON AIR" : !canTransmit ? "LISTEN ONLY" : receiving ? "BUSY" : "XMIT"}
         </span>
         <span className="tx-sub">
           {transmitting
             ? "release to stop"
             : !canTransmit
               ? "no transmit permission"
-              : connected
-                ? primary
-                  ? `hold to talk · ${keyLabel(pttCode)}`
-                  : "hold to talk"
-                : "connecting…"}
+              : !connected
+                ? "connecting…"
+                : receiving
+                  ? "channel busy — another unit transmitting"
+                  : primary
+                    ? `hold to talk · ${keyLabel(pttCode)}`
+                    : "hold to talk"}
         </span>
       </button>
 
