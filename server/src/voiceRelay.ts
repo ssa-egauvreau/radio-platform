@@ -108,7 +108,12 @@ export function dropAgencyVoiceConnections(agencyId: number): number {
  */
 async function resolveLegacyAgency(key: string | null, requiredKey: string | undefined): Promise<number | null> {
   if (!getPool()) {
-    return 0; // no database — a single in-memory bucket for local dev
+    // No database — per-agency keys can't be resolved, but the global radio
+    // key still gates handset traffic. Bucket 0 stands in for the lone tenant.
+    if (!requiredKey) {
+      return 0;
+    }
+    return key === requiredKey ? 0 : null;
   }
   const agency = await resolveAgencyByKey(key, requiredKey).catch(() => null);
   return agency?.id ?? null;

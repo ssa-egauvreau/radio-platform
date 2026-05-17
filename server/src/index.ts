@@ -44,8 +44,20 @@ app.use(async (req, res, next) => {
   }
   try {
     if (!getPool()) {
-      // No database configured — handlers fall back to in-memory defaults.
-      next();
+      // No database — per-agency keys can't be resolved, but the global
+      // RADIO_API_KEY (env, DB-independent) must still gate handset endpoints.
+      if (!radioApiKey || req.authUser) {
+        next();
+        return;
+      }
+      const headerRaw = req.headers["x-radio-key"];
+      const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
+      const key = headerVal ?? (typeof req.query.key === "string" ? req.query.key : null);
+      if (key === radioApiKey) {
+        next();
+        return;
+      }
+      res.status(401).json({ error: "unauthorized" });
       return;
     }
     if (req.authUser) {
