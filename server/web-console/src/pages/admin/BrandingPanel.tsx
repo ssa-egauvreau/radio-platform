@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
-import { api, describeError, getToken, uploadAgencyLogo } from "../../api";
+import { AGENCY_LOGO_CHANGED_EVENT, api, describeError, getToken, uploadAgencyLogo } from "../../api";
 import { useAuth } from "../../auth";
 
 /** Admin panel for agency branding — the agency name and an uploadable logo. */
@@ -62,6 +62,7 @@ export function BrandingPanel() {
     try {
       await uploadAgencyLogo(file);
       await reload();
+      window.dispatchEvent(new Event(AGENCY_LOGO_CHANGED_EVENT));
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -78,6 +79,7 @@ export function BrandingPanel() {
     try {
       await api.deleteAgencyLogo();
       await reload();
+      window.dispatchEvent(new Event(AGENCY_LOGO_CHANGED_EVENT));
     } catch (err) {
       setError(describeError(err));
     } finally {

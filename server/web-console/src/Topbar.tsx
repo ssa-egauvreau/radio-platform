@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "./auth";
-import { getToken } from "./api";
+import { AGENCY_LOGO_CHANGED_EVENT, getToken } from "./api";
 import { ThemeToggle } from "./ThemeToggle";
 import { IconRadio, IconShield, IconLogOut, SafetMark } from "./icons";
 
@@ -11,7 +11,15 @@ export function Topbar({ section }: { section: "console" | "admin" | "owner" }) 
   const sectionLabel = section === "admin" ? "Control" : section === "owner" ? "Platform" : "Command";
 
   const [agencyLogo, setAgencyLogo] = useState<string | null>(null);
+  const [logoNonce, setLogoNonce] = useState(0);
   const agencyId = user?.agencyId ?? null;
+
+  // Re-fetch the logo when the Branding tab uploads or removes one this session.
+  useEffect(() => {
+    const bump = () => setLogoNonce((n) => n + 1);
+    window.addEventListener(AGENCY_LOGO_CHANGED_EVENT, bump);
+    return () => window.removeEventListener(AGENCY_LOGO_CHANGED_EVENT, bump);
+  }, []);
 
   useEffect(() => {
     if (agencyId == null) {
@@ -27,6 +35,8 @@ export function Topbar({ section }: { section: "console" | "admin" | "owner" }) 
         if (blob && !cancelled) {
           objectUrl = URL.createObjectURL(blob);
           setAgencyLogo(objectUrl);
+        } else if (!cancelled) {
+          setAgencyLogo(null);
         }
       })
       .catch(() => undefined);
@@ -36,7 +46,7 @@ export function Topbar({ section }: { section: "console" | "admin" | "owner" }) 
         URL.revokeObjectURL(objectUrl);
       }
     };
-  }, [agencyId]);
+  }, [agencyId, logoNonce]);
 
   return (
     <header className="topbar">

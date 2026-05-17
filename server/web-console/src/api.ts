@@ -39,6 +39,9 @@ export function deviceTypeLabel(value: string | null): string {
   return DEVICE_TYPE_OPTIONS.find((o) => o.value === (value ?? ""))?.label ?? "—";
 }
 
+/** Window event fired when the agency logo is uploaded or removed, so the top bar can refresh. */
+export const AGENCY_LOGO_CHANGED_EVENT = "safet:agency-logo-changed";
+
 export interface Agency {
   id: number;
   name: string;
