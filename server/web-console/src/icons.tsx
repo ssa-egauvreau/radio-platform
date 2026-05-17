@@ -30,6 +30,19 @@ export function IconBolt({ size = 18, ...rest }: IconProps) {
   );
 }
 
+/** safeT PTT brand mark — signal bars + a T whose stem is a lightning bolt. */
+export function SafetMark({ size = 24, ...rest }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 96 96" aria-hidden="true" {...rest}>
+      <rect x="10" y="60" width="12" height="20" rx="2.5" fill="#2563eb" />
+      <rect x="26" y="49" width="12" height="31" rx="2.5" fill="#2563eb" />
+      <rect x="42" y="38" width="12" height="42" rx="2.5" fill="#2563eb" />
+      <rect x="40" y="12" width="46" height="12" rx="3" fill="#2563eb" />
+      <path d="M67 24 L53 51 L63 51 L55 84 L80 48 L67 48 L75 24 Z" fill="#22c5e5" />
+    </svg>
+  );
+}
+
 /** Concentric broadcast arcs — the 10-33 channel marker. */
 export function IconBeacon(props: IconProps) {
   return (

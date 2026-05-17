@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useAuth } from "../auth";
 import { describeError } from "../api";
+import { SafetMark } from "../icons";
 
 export function LoginPage() {
   const { login } = useAuth();
@@ -25,8 +26,15 @@ export function LoginPage() {
   return (
     <div className="login-wrap">
       <form className="login-card" onSubmit={onSubmit}>
-        <h1>Security Radio</h1>
-        <div className="sub">Dispatch Console</div>
+        <div className="login-brand">
+          <SafetMark size={46} />
+          <div>
+            <h1>
+              safe<b>T</b> PTT
+            </h1>
+            <div className="sub">Dispatch Console</div>
+          </div>
+        </div>
         {error && <div className="banner error">{error}</div>}
         <label htmlFor="username">Username</label>
         <input

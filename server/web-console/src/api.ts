@@ -1,4 +1,4 @@
-// Typed client for the Security Radio API. All calls are same-origin (the Node server serves this app).
+// Typed client for the safeT PTT API. All calls are same-origin (the Node server serves this app).
 
 export type Role = "admin" | "dispatcher" | "radio";
 export type Permission = "talk_priority" | "talk" | "listen_only";
