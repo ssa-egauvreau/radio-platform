@@ -215,6 +215,19 @@ export async function ensureSchema(): Promise<void> {
     `ALTER TABLE unit_aliases ADD COLUMN IF NOT EXISTS agency_id INT REFERENCES agencies(id) ON DELETE CASCADE;`,
   );
 
+  // Per-agency custom radio tones (talk permit, channel change, emergency, busy).
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS agency_sounds (
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL,
+      audio BYTEA NOT NULL,
+      mime TEXT NOT NULL,
+      byte_size INT NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (agency_id, kind)
+    );
+  `);
+
   // --- migrate any pre-existing single-tenant data into the default agency ---
   const def = await p.query<{ id: number }>(
     `INSERT INTO agencies (name, slug)

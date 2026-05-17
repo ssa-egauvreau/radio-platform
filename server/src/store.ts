@@ -10,6 +10,14 @@ export const ROLES: Role[] = ["owner", "admin", "dispatcher", "radio"];
 export const AGENCY_ROLES: Role[] = ["admin", "dispatcher", "radio"];
 export const PERMISSIONS: Permission[] = ["talk_priority", "talk", "listen_only"];
 
+/** Radio tones an agency may replace with its own uploaded audio. */
+export const SOUND_KINDS = ["permit", "channel_switch", "emergency", "busy"] as const;
+export type SoundKind = (typeof SOUND_KINDS)[number];
+
+export function isSoundKind(value: unknown): value is SoundKind {
+  return (SOUND_KINDS as readonly string[]).includes(value as string);
+}
+
 // --- agencies (tenants) --------------------------------------------------
 
 export interface AgencyRow {
@@ -873,6 +881,58 @@ export async function listInboxAlerts(
     [agencyId, sinceId, unit, channel ?? ""],
   );
   return res.rows;
+}
+
+// --- agency sounds (custom radio tones) ----------------------------------
+
+export interface AgencySoundMeta {
+  kind: string;
+  mime: string;
+  byte_size: number;
+  updated_at: string;
+}
+
+/** Metadata for the tones an agency has customized (never selects the audio bytes). */
+export async function listAgencySounds(agencyId: number): Promise<AgencySoundMeta[]> {
+  const res = await requirePool().query<AgencySoundMeta>(
+    `SELECT kind, mime, byte_size, updated_at FROM agency_sounds WHERE agency_id = $1 ORDER BY kind ASC;`,
+    [agencyId],
+  );
+  return res.rows;
+}
+
+export async function getAgencySound(
+  agencyId: number,
+  kind: string,
+): Promise<{ audio: Buffer; mime: string } | null> {
+  const res = await requirePool().query<{ audio: Buffer; mime: string }>(
+    `SELECT audio, mime FROM agency_sounds WHERE agency_id = $1 AND kind = $2;`,
+    [agencyId, kind],
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function setAgencySound(
+  agencyId: number,
+  kind: string,
+  audio: Buffer,
+  mime: string,
+): Promise<void> {
+  await requirePool().query(
+    `INSERT INTO agency_sounds (agency_id, kind, audio, mime, byte_size, updated_at)
+     VALUES ($1, $2, $3, $4, $5, now())
+     ON CONFLICT (agency_id, kind) DO UPDATE SET
+       audio = EXCLUDED.audio, mime = EXCLUDED.mime, byte_size = EXCLUDED.byte_size, updated_at = now();`,
+    [agencyId, kind, audio, mime, audio.length],
+  );
+}
+
+export async function deleteAgencySound(agencyId: number, kind: string): Promise<boolean> {
+  const res = await requirePool().query(
+    `DELETE FROM agency_sounds WHERE agency_id = $1 AND kind = $2;`,
+    [agencyId, kind],
+  );
+  return (res.rowCount ?? 0) > 0;
 }
 
 /** First candidate username not already taken; falls back to a unique suffix. */

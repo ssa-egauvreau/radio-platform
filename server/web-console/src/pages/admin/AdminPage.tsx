@@ -4,15 +4,17 @@ import { AccountsPanel } from "./AccountsPanel";
 import { ChannelsPanel } from "./ChannelsPanel";
 import { AssignmentsPanel } from "./AssignmentsPanel";
 import { UnitAliasesPanel } from "./UnitAliasesPanel";
+import { SoundsPanel } from "./SoundsPanel";
 import { AuditPanel } from "./AuditPanel";
 
-type TabId = "accounts" | "channels" | "assignments" | "aliases" | "audit";
+type TabId = "accounts" | "channels" | "assignments" | "aliases" | "sounds" | "audit";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "accounts", label: "Accounts" },
   { id: "channels", label: "Channels" },
   { id: "assignments", label: "Assignments" },
   { id: "aliases", label: "Unit Aliases" },
+  { id: "sounds", label: "Sounds" },
   { id: "audit", label: "Audit Log" },
 ];
 
@@ -40,6 +42,7 @@ export function AdminPage() {
           {tab === "channels" && <ChannelsPanel />}
           {tab === "assignments" && <AssignmentsPanel />}
           {tab === "aliases" && <UnitAliasesPanel />}
+          {tab === "sounds" && <SoundsPanel />}
           {tab === "audit" && <AuditPanel />}
         </main>
       </div>

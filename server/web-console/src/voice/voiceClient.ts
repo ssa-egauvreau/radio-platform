@@ -9,6 +9,10 @@ export type VoiceState = "idle" | "connecting" | "listening" | "transmitting" | 
 export interface VoiceCallbacks {
   onState: (state: VoiceState, detail?: string) => void;
   onPermission: (permission: Permission) => void;
+  /** Fired when inbound channel audio starts/stops — i.e. another unit is transmitting. */
+  onReceiving: (receiving: boolean) => void;
+  /** Fired when the relay rejects our transmission because the channel is already held. */
+  onBusy: (holderUnit: string | null) => void;
 }
 
 const TARGET_RATE = 16000;
@@ -29,6 +33,9 @@ const JOIN_ERRORS: Record<string, string> = {
   bad_join: "The channel could not be joined.",
   channel_lookup_failed: "The server could not verify channel access.",
 };
+
+/** No inbound audio for this long means the channel is clear again. */
+const RX_GAP_MS = 500;
 
 const MARKER_INTERVAL_MS = 12000;
 const MARKER_BEEP_MS = 200;
@@ -166,6 +173,10 @@ export class VoiceChannelClient {
   private digitalTx = true;
   private gestureUnbind: (() => void) | null = null;
 
+  private lastInboundMs = 0;
+  private receiving = false;
+  private rxWatchdog: number | null = null;
+
   constructor(channelName: string, callbacks: VoiceCallbacks) {
     this.channelName = channelName;
     this.callbacks = callbacks;
@@ -177,6 +188,11 @@ export class VoiceChannelClient {
 
   get canTransmit(): boolean {
     return this.permission !== "listen_only";
+  }
+
+  /** True while another unit's audio is arriving — the channel is occupied. */
+  get channelBusy(): boolean {
+    return Date.now() - this.lastInboundMs < RX_GAP_MS;
   }
 
   /** Chooses P25 IMBE (true) or clear PCM (false) for outgoing audio. */
@@ -256,6 +272,17 @@ export class VoiceChannelClient {
     void this.playCtx.resume();
     this.armAudioResume();
 
+    this.lastInboundMs = 0;
+    this.receiving = false;
+    if (this.rxWatchdog === null) {
+      this.rxWatchdog = window.setInterval(() => {
+        if (this.receiving && Date.now() - this.lastInboundMs > RX_GAP_MS) {
+          this.receiving = false;
+          this.callbacks.onReceiving(false);
+        }
+      }, 200);
+    }
+
     let ws: WebSocket;
     try {
       ws = new WebSocket(voiceSocketUrl());
@@ -289,7 +316,7 @@ export class VoiceChannelClient {
   }
 
   private handleControl(text: string): void {
-    let msg: { type?: string; permission?: Permission; code?: string };
+    let msg: { type?: string; permission?: Permission; code?: string; unit_id?: string };
     try {
       msg = JSON.parse(text);
     } catch {
@@ -299,9 +326,24 @@ export class VoiceChannelClient {
       this.permission = msg.permission ?? "listen_only";
       this.callbacks.onPermission(this.permission);
       this.setState("listening");
+    } else if (msg.type === "busy") {
+      // The relay rejected our audio — another unit holds the channel.
+      if (this.transmitting) {
+        this.stopTransmit();
+      }
+      this.callbacks.onBusy(msg.unit_id ?? null);
     } else if (msg.type === "error") {
       this.setState("error", JOIN_ERRORS[msg.code ?? ""] ?? `Join rejected (${msg.code ?? "unknown"}).`);
       this.close();
+    }
+  }
+
+  /** Marks that channel audio is arriving from another unit. */
+  private markInbound(): void {
+    this.lastInboundMs = Date.now();
+    if (!this.receiving) {
+      this.receiving = true;
+      this.callbacks.onReceiving(true);
     }
   }
 
@@ -309,6 +351,7 @@ export class VoiceChannelClient {
     if (buffer.byteLength < 2) {
       return;
     }
+    this.markInbound();
     const bytes = new Uint8Array(buffer);
     // P25 IMBE digital-voice frame: 2-byte marker + 11-byte codeword.
     if (bytes.byteLength === 13 && bytes[0] === IMBE_MAGIC_0 && bytes[1] === IMBE_MAGIC_1) {
@@ -367,6 +410,10 @@ export class VoiceChannelClient {
     }
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       throw new Error("not_connected");
+    }
+    // Strict half-duplex — refuse to key up while another unit holds the channel.
+    if (this.channelBusy) {
+      throw new Error("channel_busy");
     }
 
     if (!this.micStream) {
@@ -490,6 +537,11 @@ export class VoiceChannelClient {
     this.setChannelMarker(false);
     this.stopLocalTones();
     this.unbindAudioResume();
+    if (this.rxWatchdog !== null) {
+      window.clearInterval(this.rxWatchdog);
+      this.rxWatchdog = null;
+    }
+    this.receiving = false;
     this.transmitting = false;
     if (this.capNode) {
       this.capNode.port.onmessage = null;

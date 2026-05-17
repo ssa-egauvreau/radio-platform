@@ -10,6 +10,8 @@ import com.securityradio.ptt.data.remote.RadioApi
 import com.securityradio.ptt.device.AssetRadioUiSoundPlayer
 import com.securityradio.ptt.device.AudioRecordPttCapture
 import com.securityradio.ptt.device.ChannelSpeechHelper
+import com.securityradio.ptt.device.CustomSoundDownloader
+import com.securityradio.ptt.device.CustomSoundStore
 import com.securityradio.ptt.device.HardwareMappingRepository
 import com.securityradio.ptt.device.InboundVoicePlayer
 import com.securityradio.ptt.device.LocalUnitIdentifier
@@ -33,7 +35,9 @@ class RadioAppGraph(application: Application) {
 
     val hardwareMappingRepository = HardwareMappingRepository(application)
 
-    val soundPlayer: RadioUiSoundPlayer = AssetRadioUiSoundPlayer(application)
+    val customSoundStore = CustomSoundStore(application)
+
+    val soundPlayer: RadioUiSoundPlayer = AssetRadioUiSoundPlayer(application, customSoundStore)
 
     val localUnitIdentifier: LocalUnitIdentifier = LocalUnitIdentifier(application)
 
@@ -46,6 +50,13 @@ class RadioAppGraph(application: Application) {
     private val radioApiKeyProvider: () -> String = {
         radioPreferences.getAgencyRadioKey().ifBlank { BuildConfig.RADIO_API_KEY }
     }
+
+    /** Pulls the agency's custom radio tones; refreshed at startup and on key change. */
+    val customSoundDownloader = CustomSoundDownloader(
+        httpApiBaseUrl = BuildConfig.API_BASE_URL,
+        apiKeyProvider = radioApiKeyProvider,
+        store = customSoundStore,
+    )
 
     val voiceRelay: VoiceRelayTransport = VoiceRelayTransport(
         httpApiBaseUrl = BuildConfig.API_BASE_URL,
@@ -77,4 +88,9 @@ class RadioAppGraph(application: Application) {
         api = channelsApi,
         localFallback = stubChannelRepository,
     )
+
+    init {
+        // Pull this agency's custom tones in the background on startup.
+        customSoundDownloader.refreshAsync()
+    }
 }
