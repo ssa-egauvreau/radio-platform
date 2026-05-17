@@ -27,6 +27,11 @@ function voiceSocketUrl(): string {
   return `${proto}//${window.location.host}/v1/voice/stream?token=${encodeURIComponent(token)}`;
 }
 
+/** Console client platform — "desktop" inside the Electron shell, otherwise "web". */
+function consolePlatform(): string {
+  return (window as { safetDesktop?: boolean }).safetDesktop === true ? "desktop" : "web";
+}
+
 const JOIN_ERRORS: Record<string, string> = {
   not_a_member: "You are not assigned to this channel.",
   unknown_channel: "That channel no longer exists.",
@@ -294,7 +299,9 @@ export class VoiceChannelClient {
     this.ws = ws;
 
     ws.onopen = () => {
-      ws.send(JSON.stringify({ type: "join", unit_id: "WEB", channel: this.channelName }));
+      ws.send(
+        JSON.stringify({ type: "join", unit_id: "WEB", channel: this.channelName, client: consolePlatform() }),
+      );
     };
     ws.onmessage = (event: MessageEvent) => {
       if (typeof event.data === "string") {

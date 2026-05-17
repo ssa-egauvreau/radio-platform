@@ -64,6 +64,8 @@ export interface RosterMember {
   unit_id: string;
   display_name: string | null;
   kind: "account" | "legacy";
+  /** Client platform reported on join: android, ios, web, desktop, bridge, or unknown. */
+  client: string;
   connected_ms: number;
 }
 
@@ -72,7 +74,16 @@ interface RosterRecord {
   unitId: string;
   displayName: string | null;
   kind: "account" | "legacy";
+  client: string;
   joinedAt: number;
+}
+
+/** Client platforms the relay recognizes; anything else is recorded as "unknown". */
+const KNOWN_CLIENTS = new Set(["android", "ios", "web", "desktop", "bridge"]);
+
+function normalizeClient(raw: unknown): string {
+  const value = String(raw ?? "").trim().toLowerCase();
+  return KNOWN_CLIENTS.has(value) ? value : "unknown";
 }
 
 /** Live voice-WebSocket roster so the console can show who is on each channel. */
@@ -139,6 +150,7 @@ export function listChannelRoster(agencyId: number, channelRaw: unknown): Roster
         unit_id: record.unitId,
         display_name: record.displayName,
         kind: record.kind,
+        client: record.client,
         connected_ms: now - record.joinedAt,
       });
     }
@@ -291,7 +303,7 @@ export function attachVoiceRelay(
   async function handleJoin(
     ws: WebSocket,
     meta: ClientMeta,
-    json: { channel?: string; unit_id?: string },
+    json: { channel?: string; unit_id?: string; client?: string },
   ): Promise<void> {
     const channelName = String(json.channel ?? "").trim();
     const chNorm = normalizedChannel(channelName);
@@ -356,6 +368,7 @@ export function attachVoiceRelay(
       unitId,
       displayName,
       kind: meta.identity.kind,
+      client: normalizeClient(json.client),
       // Keep the original join time across re-joins to the same channel
       // (Android re-sends `join` on the same socket periodically).
       joinedAt: prior && prior.channelKey === chanKey ? prior.joinedAt : Date.now(),
@@ -374,7 +387,12 @@ export function attachVoiceRelay(
           const text = Buffer.isBuffer(raw)
             ? raw.toString("utf8")
             : Buffer.from(raw as ArrayBuffer).toString("utf8");
-          const json = JSON.parse(text) as { type?: string; channel?: string; unit_id?: string };
+          const json = JSON.parse(text) as {
+            type?: string;
+            channel?: string;
+            unit_id?: string;
+            client?: string;
+          };
           if (json.type === "join") {
             void handleJoin(ws, meta, json);
           }

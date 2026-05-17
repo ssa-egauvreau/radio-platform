@@ -135,6 +135,8 @@ export interface ChannelMember {
   unit_id: string;
   display_name: string | null;
   kind: string;
+  /** Client platform: android, ios, web, desktop, bridge, or unknown. */
+  client: string;
   connected_ms: number;
 }
 

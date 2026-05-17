@@ -264,7 +264,7 @@ class VoiceRelayTransport(
     private fun sendJoin(ws: WebSocket) {
         val uid = escapeJsonFragment(pendingUnitId)
         val ch = escapeJsonFragment(pendingChannelRaw)
-        val json = """{"type":"join","unit_id":"$uid","channel":"$ch"}"""
+        val json = """{"type":"join","unit_id":"$uid","channel":"$ch","client":"android"}"""
         try {
             ws.send(json)
         } catch (_: Exception) {
