@@ -19,7 +19,7 @@ export function Topbar({ section }: { section: "console" | "admin" | "owner" }) 
       <nav className="topnav">
         {section !== "owner" && (
           <>
-            <Link className={section === "console" ? "nav-tab active" : "nav-tab"} to="/">
+            <Link className={section === "console" ? "nav-tab active" : "nav-tab"} to="/console">
               <IconRadio size={15} /> Command
             </Link>
             {user?.role === "admin" && (

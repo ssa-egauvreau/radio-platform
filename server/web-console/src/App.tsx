@@ -1,9 +1,11 @@
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth";
+import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ConsolePage } from "./pages/ConsolePage";
 import { AdminPage } from "./pages/admin/AdminPage";
 import { OwnerPage } from "./pages/owner/OwnerPage";
+import { LegalPage } from "./pages/legal/LegalPage";
 
 export function App() {
   const { ready, user } = useAuth();
@@ -12,14 +14,16 @@ export function App() {
     return <div className="boot">Loading…</div>;
   }
 
-  // Platform owners have no agency, so the radio console is not their home.
-  const home = user?.role === "owner" ? "/owner" : "/";
+  // Where a signed-in account lands — platform owners have no agency, so the
+  // radio console is not their home.
+  const home = user?.role === "owner" ? "/owner" : "/console";
 
   return (
     <Routes>
+      <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={user ? <Navigate to={home} replace /> : <LoginPage />} />
       <Route
-        path="/"
+        path="/console"
         element={
           !user ? (
             <Navigate to="/login" replace />
@@ -38,7 +42,7 @@ export function App() {
           ) : user.role === "owner" ? (
             <OwnerPage />
           ) : (
-            <Navigate to="/" replace />
+            <Navigate to="/console" replace />
           )
         }
       />
@@ -50,11 +54,14 @@ export function App() {
           ) : user.role === "admin" ? (
             <AdminPage />
           ) : (
-            <Navigate to="/" replace />
+            <Navigate to="/console" replace />
           )
         }
       />
-      <Route path="*" element={<Navigate to={home} replace />} />
+      <Route path="/legal/terms" element={<LegalPage doc="terms" />} />
+      <Route path="/legal/privacy" element={<LegalPage doc="privacy" />} />
+      <Route path="/legal/eula" element={<LegalPage doc="eula" />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
 }
