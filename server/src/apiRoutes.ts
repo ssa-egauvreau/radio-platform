@@ -1,38 +1,54 @@
 import { Router } from "express";
-import type { Request, Response } from "express";
-import { requireAdmin, requireAuth, signToken, verifyPassword, type AuthUser, type Role } from "./auth.js";
-import { listChannelRoster } from "./voiceRelay.js";
+import type { NextFunction, Request, Response } from "express";
 import {
+  requireAdmin,
+  requireAuth,
+  requireOwner,
+  signToken,
+  verifyPassword,
+  type AuthUser,
+  type Role,
+} from "./auth.js";
+import { dropAgencyVoiceConnections, listChannelRoster } from "./voiceRelay.js";
+import {
+  AGENCY_ROLES,
   countActiveAdmins,
   clearAlert,
   clearEmergenciesFromUnit,
+  createAgencyWithAdmin,
   createAlert,
-  listAlerts,
-  listInboxAlerts,
-  listPositions,
-  upsertPosition,
   createChannel,
   createUser,
+  deleteAgency,
   deleteChannel,
+  deleteUnitAlias,
   deleteUser,
+  generateRadioKey,
+  getAgencyById,
+  getChannelById,
   getTransmissionAudio,
   getUserById,
   getUserByUsername,
+  listAgencies,
+  listAlerts,
   listAudit,
-  listTransmissions,
   listChannels,
   listChannelsForUser,
+  listInboxAlerts,
   listMemberships,
+  listPositions,
+  listTransmissions,
   listUnitAliases,
   listUsers,
   PERMISSIONS,
-  ROLES,
   removeMembership,
-  updateChannel,
   setMembership,
   setUnitAlias,
-  deleteUnitAlias,
+  uniqueAgencySlug,
+  updateAgency,
+  updateChannel,
   updateUser,
+  upsertPosition,
   writeAudit,
   type Permission,
   type TransmissionSort,
@@ -58,17 +74,57 @@ function fail(res: Response, error: unknown): void {
   res.status(500).json({ error: "server_error" });
 }
 
-function asRole(value: unknown): Role | null {
-  return ROLES.includes(value as Role) ? (value as Role) : null;
+/** Only roles an agency may contain — never the platform `owner`. */
+function asAgencyRole(value: unknown): Role | null {
+  return AGENCY_ROLES.includes(value as Role) ? (value as Role) : null;
 }
 
 function asPermission(value: unknown): Permission | null {
   return PERMISSIONS.includes(value as Permission) ? (value as Permission) : null;
 }
 
-/** Router for account/auth and admin endpoints, mounted at `/v1`. */
+/** Requires a signed-in account that belongs to an agency (blocks platform owners). */
+function requireAgencyMember(req: Request, res: Response, next: NextFunction): void {
+  if (!req.authUser) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  if (req.authUser.agencyId == null) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  next();
+}
+
+/** Agency a key-authenticated handset request belongs to (0 only in DB-less local dev). */
+function radioAgencyId(req: Request): number {
+  return req.agency?.id ?? 0;
+}
+
+/** Router for account/auth, admin, owner, and radio endpoints, mounted at `/v1`. */
 export function createApiRouter(): Router {
   const router = Router();
+
+  // Reject API calls from an account whose agency was disabled (or deleted)
+  // after its token was issued. Login and the radio middleware already block
+  // this, but an issued JWT stays valid until it expires.
+  router.use(async (req, res, next) => {
+    try {
+      const agencyId = req.authUser?.agencyId;
+      if (agencyId == null) {
+        next();
+        return;
+      }
+      const agency = await getAgencyById(agencyId);
+      if (!agency || agency.disabled) {
+        res.status(403).json({ error: "agency_disabled" });
+        return;
+      }
+      next();
+    } catch (error) {
+      fail(res, error);
+    }
+  });
 
   // --- authentication ----------------------------------------------------
 
@@ -81,8 +137,10 @@ export function createApiRouter(): Router {
         return;
       }
       const user = await getUserByUsername(username);
-      if (!user || user.disabled || !(await verifyPassword(password, user.password_hash))) {
+      const blocked = !user || user.disabled || user.agency_disabled === true;
+      if (blocked || !(await verifyPassword(password, user!.password_hash))) {
         await writeAudit({
+          agencyId: user?.agency_id ?? null,
           actorUserId: user?.id ?? null,
           actorName: username,
           action: "login_failed",
@@ -92,13 +150,21 @@ export function createApiRouter(): Router {
         return;
       }
       const authUser: AuthUser = {
-        id: user.id,
-        username: user.username,
-        displayName: user.display_name,
-        role: user.role,
-        unitId: user.unit_id,
+        id: user!.id,
+        username: user!.username,
+        displayName: user!.display_name,
+        role: user!.role,
+        unitId: user!.unit_id,
+        agencyId: user!.agency_id,
+        agencyName: user!.agency_name,
       };
-      await writeAudit({ actorUserId: user.id, actorName: user.username, action: "login", ip: clientIp(req) });
+      await writeAudit({
+        agencyId: user!.agency_id,
+        actorUserId: user!.id,
+        actorName: user!.username,
+        action: "login",
+        ip: clientIp(req),
+      });
       res.json({ token: signToken(authUser), user: authUser });
     } catch (error) {
       fail(res, error);
@@ -111,11 +177,11 @@ export function createApiRouter(): Router {
 
   // --- channels the caller may use (console + radios) --------------------
 
-  router.get("/me/channels", requireAuth, async (req, res) => {
+  router.get("/me/channels", requireAgencyMember, async (req, res) => {
     try {
       const me = req.authUser!;
       if (me.role === "admin" || me.role === "dispatcher") {
-        const all = await listChannels();
+        const all = await listChannels(me.agencyId!);
         res.json({
           channels: all.map((c) => ({
             id: c.id,
@@ -133,22 +199,149 @@ export function createApiRouter(): Router {
     }
   });
 
-  // --- admin: accounts ---------------------------------------------------
+  // --- owner: agencies (platform tenants) --------------------------------
 
-  router.get("/admin/users", requireAdmin, async (_req, res) => {
+  router.get("/owner/agencies", requireOwner, async (_req, res) => {
     try {
-      res.json({ users: await listUsers() });
+      res.json({ agencies: await listAgencies() });
     } catch (error) {
       fail(res, error);
     }
   });
 
-  router.post("/admin/users", requireAdmin, async (req, res) => {
+  router.post("/owner/agencies", requireOwner, async (req, res) => {
     try {
+      const name = String(req.body?.name ?? "").trim();
+      const adminUsername = String(req.body?.adminUsername ?? "").trim();
+      const adminPassword = String(req.body?.adminPassword ?? "");
+      const adminDisplayName = String(req.body?.adminDisplayName ?? "").trim() || adminUsername;
+      if (!name || !adminUsername || !adminPassword) {
+        res.status(400).json({ error: "missing_fields" });
+        return;
+      }
+      if (await getUserByUsername(adminUsername)) {
+        res.status(409).json({ error: "username_taken" });
+        return;
+      }
+      // Agency, its starter channels and its first admin are created atomically.
+      const { agency, admin } = await createAgencyWithAdmin({
+        name,
+        slug: await uniqueAgencySlug(name),
+        radioKey: generateRadioKey(),
+        adminUsername,
+        adminDisplayName,
+        adminPassword,
+      });
+      await writeAudit({
+        agencyId: agency.id,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "agency_create",
+        target: agency.name,
+        detail: { slug: agency.slug, admin: adminUsername },
+        ip: clientIp(req),
+      });
+      res.status(201).json({ agency, admin });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.patch("/owner/agencies/:id", requireOwner, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const existing = await getAgencyById(id);
+      if (!existing) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      const patch: { name?: string; disabled?: boolean; radioKey?: string } = {};
+      if (req.body?.name !== undefined) {
+        const name = String(req.body.name).trim();
+        if (!name) {
+          res.status(400).json({ error: "missing_name" });
+          return;
+        }
+        patch.name = name;
+      }
+      if (req.body?.disabled !== undefined) {
+        patch.disabled = Boolean(req.body.disabled);
+      }
+      if (req.body?.regenerateRadioKey === true) {
+        patch.radioKey = generateRadioKey();
+      }
+      const agency = await updateAgency(id, patch);
+      // Disabling the agency or rotating its radio key revokes access — drop any
+      // live voice sockets so they cannot outlast the change.
+      if (patch.disabled === true || patch.radioKey !== undefined) {
+        dropAgencyVoiceConnections(id);
+      }
+      await writeAudit({
+        agencyId: id,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "agency_update",
+        target: existing.name,
+        detail: { fields: Object.keys(patch) },
+        ip: clientIp(req),
+      });
+      res.json({ agency });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.delete("/owner/agencies/:id", requireOwner, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const existing = await getAgencyById(id);
+      if (!existing) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await deleteAgency(id);
+      dropAgencyVoiceConnections(id);
+      // Audit row carries no agency id — the agency (and its audit rows) are gone.
+      await writeAudit({
+        agencyId: null,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "agency_delete",
+        target: existing.name,
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get("/owner/agencies/:id/users", requireOwner, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const agency = await getAgencyById(id);
+      if (!agency) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.json({ users: await listUsers(id) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post("/owner/agencies/:id/users", requireOwner, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const agency = await getAgencyById(id);
+      if (!agency) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
       const username = String(req.body?.username ?? "").trim();
       const displayName = String(req.body?.displayName ?? "").trim() || username;
       const password = String(req.body?.password ?? "");
-      const role = asRole(req.body?.role) ?? "radio";
+      const role = asAgencyRole(req.body?.role) ?? "radio";
       const unitId = req.body?.unitId ? String(req.body.unitId).trim().toUpperCase() : null;
       if (!username || !password) {
         res.status(400).json({ error: "missing_fields" });
@@ -158,8 +351,128 @@ export function createApiRouter(): Router {
         res.status(409).json({ error: "username_taken" });
         return;
       }
-      const user = await createUser({ username, displayName, password, role, unitId });
+      const user = await createUser({ username, displayName, password, role, unitId, agencyId: id });
       await writeAudit({
+        agencyId: id,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "user_create",
+        target: username,
+        detail: { role, unitId, byOwner: true },
+        ip: clientIp(req),
+      });
+      res.status(201).json({ user });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.patch("/owner/agencies/:id/users/:uid", requireOwner, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const uid = Number(req.params.uid);
+      const existing = await getUserById(uid, id);
+      if (!existing) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      const patch: { displayName?: string; role?: Role; unitId?: string | null; disabled?: boolean; password?: string } = {};
+      if (req.body?.displayName !== undefined) patch.displayName = String(req.body.displayName);
+      if (req.body?.role !== undefined) {
+        const role = asAgencyRole(req.body.role);
+        if (!role) {
+          res.status(400).json({ error: "bad_role" });
+          return;
+        }
+        patch.role = role;
+      }
+      if (req.body?.unitId !== undefined) {
+        patch.unitId = req.body.unitId ? String(req.body.unitId).trim().toUpperCase() : null;
+      }
+      if (req.body?.disabled !== undefined) patch.disabled = Boolean(req.body.disabled);
+      if (req.body?.password) patch.password = String(req.body.password);
+
+      const demotesAdmin = existing.role === "admin" && patch.role !== undefined && patch.role !== "admin";
+      const disablesAdmin = existing.role === "admin" && patch.disabled === true;
+      if ((demotesAdmin || disablesAdmin) && (await countActiveAdmins(id)) <= 1) {
+        res.status(409).json({ error: "last_admin" });
+        return;
+      }
+
+      const user = await updateUser(uid, patch);
+      await writeAudit({
+        agencyId: id,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "user_update",
+        target: existing.username,
+        detail: { fields: Object.keys(patch), byOwner: true },
+        ip: clientIp(req),
+      });
+      res.json({ user });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.delete("/owner/agencies/:id/users/:uid", requireOwner, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const uid = Number(req.params.uid);
+      const existing = await getUserById(uid, id);
+      if (!existing) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      if (existing.role === "admin" && (await countActiveAdmins(id)) <= 1) {
+        res.status(409).json({ error: "last_admin" });
+        return;
+      }
+      await deleteUser(uid);
+      await writeAudit({
+        agencyId: id,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "user_delete",
+        target: existing.username,
+        detail: { byOwner: true },
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- admin: accounts ---------------------------------------------------
+
+  router.get("/admin/users", requireAdmin, async (req, res) => {
+    try {
+      res.json({ users: await listUsers(req.authUser!.agencyId!) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post("/admin/users", requireAdmin, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const username = String(req.body?.username ?? "").trim();
+      const displayName = String(req.body?.displayName ?? "").trim() || username;
+      const password = String(req.body?.password ?? "");
+      const role = asAgencyRole(req.body?.role) ?? "radio";
+      const unitId = req.body?.unitId ? String(req.body.unitId).trim().toUpperCase() : null;
+      if (!username || !password) {
+        res.status(400).json({ error: "missing_fields" });
+        return;
+      }
+      if (await getUserByUsername(username)) {
+        res.status(409).json({ error: "username_taken" });
+        return;
+      }
+      const user = await createUser({ username, displayName, password, role, unitId, agencyId });
+      await writeAudit({
+        agencyId,
         actorUserId: req.authUser!.id,
         actorName: req.authUser!.username,
         action: "user_create",
@@ -175,8 +488,9 @@ export function createApiRouter(): Router {
 
   router.patch("/admin/users/:id", requireAdmin, async (req, res) => {
     try {
+      const agencyId = req.authUser!.agencyId!;
       const id = Number(req.params.id);
-      const existing = await getUserById(id);
+      const existing = await getUserById(id, agencyId);
       if (!existing) {
         res.status(404).json({ error: "not_found" });
         return;
@@ -184,7 +498,7 @@ export function createApiRouter(): Router {
       const patch: { displayName?: string; role?: Role; unitId?: string | null; disabled?: boolean; password?: string } = {};
       if (req.body?.displayName !== undefined) patch.displayName = String(req.body.displayName);
       if (req.body?.role !== undefined) {
-        const role = asRole(req.body.role);
+        const role = asAgencyRole(req.body.role);
         if (!role) {
           res.status(400).json({ error: "bad_role" });
           return;
@@ -199,13 +513,14 @@ export function createApiRouter(): Router {
 
       const demotesAdmin = existing.role === "admin" && patch.role !== undefined && patch.role !== "admin";
       const disablesAdmin = existing.role === "admin" && patch.disabled === true;
-      if ((demotesAdmin || disablesAdmin) && (await countActiveAdmins()) <= 1) {
+      if ((demotesAdmin || disablesAdmin) && (await countActiveAdmins(agencyId)) <= 1) {
         res.status(409).json({ error: "last_admin" });
         return;
       }
 
       const user = await updateUser(id, patch);
       await writeAudit({
+        agencyId,
         actorUserId: req.authUser!.id,
         actorName: req.authUser!.username,
         action: "user_update",
@@ -221,8 +536,9 @@ export function createApiRouter(): Router {
 
   router.delete("/admin/users/:id", requireAdmin, async (req, res) => {
     try {
+      const agencyId = req.authUser!.agencyId!;
       const id = Number(req.params.id);
-      const existing = await getUserById(id);
+      const existing = await getUserById(id, agencyId);
       if (!existing) {
         res.status(404).json({ error: "not_found" });
         return;
@@ -231,12 +547,13 @@ export function createApiRouter(): Router {
         res.status(409).json({ error: "cannot_delete_self" });
         return;
       }
-      if (existing.role === "admin" && (await countActiveAdmins()) <= 1) {
+      if (existing.role === "admin" && (await countActiveAdmins(agencyId)) <= 1) {
         res.status(409).json({ error: "last_admin" });
         return;
       }
       await deleteUser(id);
       await writeAudit({
+        agencyId,
         actorUserId: req.authUser!.id,
         actorName: req.authUser!.username,
         action: "user_delete",
@@ -251,9 +568,9 @@ export function createApiRouter(): Router {
 
   // --- admin: channels ---------------------------------------------------
 
-  router.get("/admin/channels", requireAdmin, async (_req, res) => {
+  router.get("/admin/channels", requireAdmin, async (req, res) => {
     try {
-      res.json({ channels: await listChannels() });
+      res.json({ channels: await listChannels(req.authUser!.agencyId!) });
     } catch (error) {
       fail(res, error);
     }
@@ -261,13 +578,15 @@ export function createApiRouter(): Router {
 
   router.post("/admin/channels", requireAdmin, async (req, res) => {
     try {
+      const agencyId = req.authUser!.agencyId!;
       const name = String(req.body?.name ?? "").trim();
       if (!name) {
         res.status(400).json({ error: "missing_name" });
         return;
       }
-      const channel = await createChannel(name);
+      const channel = await createChannel(agencyId, name);
       await writeAudit({
+        agencyId,
         actorUserId: req.authUser!.id,
         actorName: req.authUser!.username,
         action: "channel_create",
@@ -282,6 +601,7 @@ export function createApiRouter(): Router {
 
   router.patch("/admin/channels/:id", requireAdmin, async (req, res) => {
     try {
+      const agencyId = req.authUser!.agencyId!;
       const id = Number(req.params.id);
       const patch: { name?: string; color?: string | null; zone?: string | null } = {};
       if (req.body?.name !== undefined) {
@@ -298,12 +618,13 @@ export function createApiRouter(): Router {
       if (req.body?.zone !== undefined) {
         patch.zone = req.body.zone ? String(req.body.zone).trim() : null;
       }
-      const channel = await updateChannel(id, patch);
+      const channel = await updateChannel(id, agencyId, patch);
       if (!channel) {
         res.status(404).json({ error: "not_found" });
         return;
       }
       await writeAudit({
+        agencyId,
         actorUserId: req.authUser!.id,
         actorName: req.authUser!.username,
         action: "channel_update",
@@ -319,13 +640,15 @@ export function createApiRouter(): Router {
 
   router.delete("/admin/channels/:id", requireAdmin, async (req, res) => {
     try {
+      const agencyId = req.authUser!.agencyId!;
       const id = Number(req.params.id);
-      const ok = await deleteChannel(id);
+      const ok = await deleteChannel(id, agencyId);
       if (!ok) {
         res.status(404).json({ error: "not_found" });
         return;
       }
       await writeAudit({
+        agencyId,
         actorUserId: req.authUser!.id,
         actorName: req.authUser!.username,
         action: "channel_delete",
@@ -340,9 +663,9 @@ export function createApiRouter(): Router {
 
   // --- unit aliases (friendly labels for radio unit IDs) -----------------
 
-  router.get("/unit-aliases", requireAuth, async (_req, res) => {
+  router.get("/unit-aliases", requireAgencyMember, async (req, res) => {
     try {
-      res.json({ aliases: await listUnitAliases() });
+      res.json({ aliases: await listUnitAliases(req.authUser!.agencyId!) });
     } catch (error) {
       fail(res, error);
     }
@@ -350,14 +673,16 @@ export function createApiRouter(): Router {
 
   router.put("/admin/unit-aliases", requireAdmin, async (req, res) => {
     try {
+      const agencyId = req.authUser!.agencyId!;
       const unitId = String(req.body?.unitId ?? "").trim();
       const label = String(req.body?.label ?? "").trim();
       if (!unitId || !label) {
         res.status(400).json({ error: "missing_fields" });
         return;
       }
-      const alias = await setUnitAlias(unitId, label);
+      const alias = await setUnitAlias(agencyId, unitId, label);
       await writeAudit({
+        agencyId,
         actorUserId: req.authUser!.id,
         actorName: req.authUser!.username,
         action: "unit_alias_set",
@@ -373,13 +698,15 @@ export function createApiRouter(): Router {
 
   router.delete("/admin/unit-aliases/:unitId", requireAdmin, async (req, res) => {
     try {
+      const agencyId = req.authUser!.agencyId!;
       const unitId = String(req.params.unitId ?? "").trim();
-      const ok = await deleteUnitAlias(unitId);
+      const ok = await deleteUnitAlias(agencyId, unitId);
       if (!ok) {
         res.status(404).json({ error: "not_found" });
         return;
       }
       await writeAudit({
+        agencyId,
         actorUserId: req.authUser!.id,
         actorName: req.authUser!.username,
         action: "unit_alias_delete",
@@ -394,9 +721,9 @@ export function createApiRouter(): Router {
 
   // --- admin: channel assignments / permissions --------------------------
 
-  router.get("/admin/memberships", requireAdmin, async (_req, res) => {
+  router.get("/admin/memberships", requireAdmin, async (req, res) => {
     try {
-      res.json({ memberships: await listMemberships() });
+      res.json({ memberships: await listMemberships(req.authUser!.agencyId!) });
     } catch (error) {
       fail(res, error);
     }
@@ -404,6 +731,7 @@ export function createApiRouter(): Router {
 
   router.put("/admin/memberships", requireAdmin, async (req, res) => {
     try {
+      const agencyId = req.authUser!.agencyId!;
       const userId = Number(req.body?.userId);
       const channelId = Number(req.body?.channelId);
       const permission = asPermission(req.body?.permission);
@@ -411,8 +739,18 @@ export function createApiRouter(): Router {
         res.status(400).json({ error: "missing_fields" });
         return;
       }
+      // Both sides of the assignment must belong to the caller's agency.
+      const [user, channel] = await Promise.all([
+        getUserById(userId, agencyId),
+        getChannelById(channelId, agencyId),
+      ]);
+      if (!user || !channel) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
       await setMembership(userId, channelId, permission);
       await writeAudit({
+        agencyId,
         actorUserId: req.authUser!.id,
         actorName: req.authUser!.username,
         action: "membership_set",
@@ -428,14 +766,21 @@ export function createApiRouter(): Router {
 
   router.delete("/admin/memberships", requireAdmin, async (req, res) => {
     try {
+      const agencyId = req.authUser!.agencyId!;
       const userId = Number(req.query.userId);
       const channelId = Number(req.query.channelId);
       if (!Number.isFinite(userId) || !Number.isFinite(channelId)) {
         res.status(400).json({ error: "missing_fields" });
         return;
       }
+      const user = await getUserById(userId, agencyId);
+      if (!user) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
       const ok = await removeMembership(userId, channelId);
       await writeAudit({
+        agencyId,
         actorUserId: req.authUser!.id,
         actorName: req.authUser!.username,
         action: "membership_remove",
@@ -453,7 +798,7 @@ export function createApiRouter(): Router {
   router.get("/admin/audit", requireAdmin, async (req, res) => {
     try {
       const limit = Number(req.query.limit ?? 200);
-      res.json({ entries: await listAudit(Number.isFinite(limit) ? limit : 200) });
+      res.json({ entries: await listAudit(req.authUser!.agencyId!, Number.isFinite(limit) ? limit : 200) });
     } catch (error) {
       fail(res, error);
     }
@@ -461,12 +806,14 @@ export function createApiRouter(): Router {
 
   // --- transmissions (recorded audio + transcripts) ----------------------
 
-  router.get("/transmissions", requireAuth, async (req, res) => {
+  router.get("/transmissions", requireAgencyMember, async (req, res) => {
     try {
       const me = req.authUser!;
+      const agencyId = me.agencyId!;
       const str = (v: unknown): string | undefined =>
         typeof v === "string" && v.trim() !== "" ? v : undefined;
       const opts = {
+        agencyId,
         limit: Number(req.query.limit ?? 100),
         search: str(req.query.search),
         channel: str(req.query.channel),
@@ -488,10 +835,10 @@ export function createApiRouter(): Router {
     }
   });
 
-  router.get("/transmissions/:id/audio", requireAuth, async (req, res) => {
+  router.get("/transmissions/:id/audio", requireAgencyMember, async (req, res) => {
     try {
       const id = Number(req.params.id);
-      const record = await getTransmissionAudio(id);
+      const record = await getTransmissionAudio(id, req.authUser!.agencyId!);
       if (!record) {
         res.status(404).json({ error: "not_found" });
         return;
@@ -504,7 +851,7 @@ export function createApiRouter(): Router {
     }
   });
 
-  // --- radio endpoints (handsets, shared-key auth) -----------------------
+  // --- radio endpoints (handsets, radio-key auth) ------------------------
 
   router.post("/radio/location", async (req, res) => {
     try {
@@ -521,6 +868,7 @@ export function createApiRouter(): Router {
         return Number.isFinite(n) ? n : null;
       };
       await upsertPosition({
+        agencyId: radioAgencyId(req),
         unitId,
         userId: req.authUser?.id ?? null,
         displayName: body.display_name ? String(body.display_name) : req.authUser?.displayName ?? null,
@@ -546,7 +894,7 @@ export function createApiRouter(): Router {
       }
       const channel = req.query.channel ? String(req.query.channel) : null;
       const since = Number(req.query.since ?? 0);
-      const alerts = await listInboxAlerts(unit, channel, Number.isFinite(since) ? since : 0);
+      const alerts = await listInboxAlerts(radioAgencyId(req), unit, channel, Number.isFinite(since) ? since : 0);
       const lastId = alerts.length > 0 ? alerts[alerts.length - 1]!.id : Number.isFinite(since) ? since : 0;
       res.json({ alerts, lastId });
     } catch (error) {
@@ -562,12 +910,14 @@ export function createApiRouter(): Router {
         res.status(400).json({ error: "missing_unit" });
         return;
       }
+      const agencyId = radioAgencyId(req);
       if (body.active === false) {
-        const cleared = await clearEmergenciesFromUnit(unit, unit);
+        const cleared = await clearEmergenciesFromUnit(agencyId, unit, unit);
         res.json({ ok: true, cleared });
         return;
       }
       const alert = await createAlert({
+        agencyId,
         kind: "emergency",
         channelName: body.channel ? String(body.channel) : null,
         targetUnit: null,
@@ -584,31 +934,32 @@ export function createApiRouter(): Router {
 
   // --- console: live map + alerts ----------------------------------------
 
-  router.get("/locations", requireAuth, async (_req, res) => {
+  router.get("/locations", requireAgencyMember, async (req, res) => {
     try {
-      res.json({ positions: await listPositions() });
+      res.json({ positions: await listPositions(req.authUser!.agencyId!) });
     } catch (error) {
       fail(res, error);
     }
   });
 
-  router.get("/channels/roster", requireAuth, (req, res) => {
+  router.get("/channels/roster", requireAgencyMember, (req, res) => {
     const channel = typeof req.query.channel === "string" ? req.query.channel : "";
-    res.json({ members: listChannelRoster(channel) });
+    res.json({ members: listChannelRoster(req.authUser!.agencyId!, channel) });
   });
 
-  router.get("/alerts", requireAuth, async (req, res) => {
+  router.get("/alerts", requireAgencyMember, async (req, res) => {
     try {
       const limit = Number(req.query.limit ?? 100);
-      res.json({ alerts: await listAlerts(Number.isFinite(limit) ? limit : 100) });
+      res.json({ alerts: await listAlerts(req.authUser!.agencyId!, Number.isFinite(limit) ? limit : 100) });
     } catch (error) {
       fail(res, error);
     }
   });
 
-  router.post("/alerts", requireAuth, async (req, res) => {
+  router.post("/alerts", requireAgencyMember, async (req, res) => {
     try {
       const me = req.authUser!;
+      const agencyId = me.agencyId!;
       const kind = req.body?.kind === "page" ? "page" : "emergency";
       if (kind === "page" && me.role !== "admin" && me.role !== "dispatcher") {
         res.status(403).json({ error: "forbidden" });
@@ -622,6 +973,7 @@ export function createApiRouter(): Router {
         return;
       }
       const alert = await createAlert({
+        agencyId,
         kind,
         channelName,
         targetUnit,
@@ -631,6 +983,7 @@ export function createApiRouter(): Router {
         message: message ?? (kind === "emergency" ? "Emergency" : null),
       });
       await writeAudit({
+        agencyId,
         actorUserId: me.id,
         actorName: me.username,
         action: `alert_${kind}`,
@@ -644,16 +997,18 @@ export function createApiRouter(): Router {
     }
   });
 
-  router.post("/alerts/:id/clear", requireAuth, async (req, res) => {
+  router.post("/alerts/:id/clear", requireAgencyMember, async (req, res) => {
     try {
       const me = req.authUser!;
+      const agencyId = me.agencyId!;
       const id = Number(req.params.id);
-      const alert = await clearAlert(id, me.displayName);
+      const alert = await clearAlert(id, agencyId, me.displayName);
       if (!alert) {
         res.status(404).json({ error: "not_found" });
         return;
       }
       await writeAudit({
+        agencyId,
         actorUserId: me.id,
         actorName: me.username,
         action: "alert_clear",

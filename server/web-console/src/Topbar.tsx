@@ -3,9 +3,10 @@ import { useAuth } from "./auth";
 import { ThemeToggle } from "./ThemeToggle";
 import { IconRadio, IconShield, IconLogOut, SafetMark } from "./icons";
 
-/** Shared top menu bar with Command / Control navigation tabs. */
-export function Topbar({ section }: { section: "console" | "admin" }) {
+/** Shared top menu bar with Command / Control / Platform navigation. */
+export function Topbar({ section }: { section: "console" | "admin" | "owner" }) {
   const { user, logout } = useAuth();
+  const sectionLabel = section === "admin" ? "Control" : section === "owner" ? "Platform" : "Command";
   return (
     <header className="topbar">
       <div className="brand">
@@ -13,16 +14,20 @@ export function Topbar({ section }: { section: "console" | "admin" }) {
         <span className="brand-word">
           safe<b>T</b>
         </span>
-        <span className="brand-section">{section === "admin" ? "Control" : "Command"}</span>
+        <span className="brand-section">{sectionLabel}</span>
       </div>
       <nav className="topnav">
-        <Link className={section === "console" ? "nav-tab active" : "nav-tab"} to="/console">
-          <IconRadio size={15} /> Command
-        </Link>
-        {user?.role === "admin" && (
-          <Link className={section === "admin" ? "nav-tab active" : "nav-tab"} to="/admin">
-            <IconShield size={15} /> Control
-          </Link>
+        {section !== "owner" && (
+          <>
+            <Link className={section === "console" ? "nav-tab active" : "nav-tab"} to="/console">
+              <IconRadio size={15} /> Command
+            </Link>
+            {user?.role === "admin" && (
+              <Link className={section === "admin" ? "nav-tab active" : "nav-tab"} to="/admin">
+                <IconShield size={15} /> Control
+              </Link>
+            )}
+          </>
         )}
       </nav>
       <div className="who">

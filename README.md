@@ -8,8 +8,17 @@ Build **safeT PTT** — a private enterprise push-to-talk platform for public sa
 ## Surfaces
 - **safeT Mobile** — the Android radio handset app (`android-app/`).
 - **safeT Command** — the web dispatch console (`server/web-console/`) and its desktop shell (`desktop-console/`).
-- **safeT Control** — the admin panel (within the web console).
+- **safeT Control** — the per-agency admin panel (within the web console).
+- **safeT Platform** — the owner portal for provisioning agencies/tenants (within the web console).
 - Brand assets live in `brand/`.
+
+## Multi-agency (tenancy)
+The backend is multi-tenant: every account, channel, recording, alert and radio
+handset belongs to an **agency**. A platform `owner` account provisions agencies
+from the Platform portal; each agency's `admin` then manages it from Control.
+Pre-existing single-tenant data is migrated into a "Default Agency" on first
+boot. Handsets bind to an agency with a per-agency radio key (the legacy global
+`RADIO_API_KEY` still maps to the Default Agency).
 
 ## Tech stack
 - Android: Kotlin + Jetpack Compose

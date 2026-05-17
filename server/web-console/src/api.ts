@@ -1,6 +1,6 @@
 // Typed client for the safeT PTT API. All calls are same-origin (the Node server serves this app).
 
-export type Role = "admin" | "dispatcher" | "radio";
+export type Role = "owner" | "admin" | "dispatcher" | "radio";
 export type Permission = "talk_priority" | "talk" | "listen_only";
 
 export interface SessionUser {
@@ -9,6 +9,8 @@ export interface SessionUser {
   displayName: string;
   role: Role;
   unitId: string | null;
+  agencyId: number | null;
+  agencyName: string | null;
 }
 
 export interface AdminUser {
@@ -18,7 +20,20 @@ export interface AdminUser {
   role: Role;
   unit_id: string | null;
   disabled: boolean;
+  agency_id: number | null;
   created_at: string;
+}
+
+export interface Agency {
+  id: number;
+  name: string;
+  slug: string;
+  radio_key: string | null;
+  disabled: boolean;
+  created_at: string;
+  /** Present on the owner agency listing; omitted on create/update responses. */
+  user_count?: number;
+  channel_count?: number;
 }
 
 export interface Channel {
@@ -224,6 +239,31 @@ export const api = {
     request<{ alias: UnitAlias }>("PUT", "/v1/admin/unit-aliases", { unitId, label }),
   deleteUnitAlias: (unitId: string) =>
     request<{ ok: boolean }>("DELETE", `/v1/admin/unit-aliases/${encodeURIComponent(unitId)}`),
+
+  // --- owner: agencies (platform tenants) --------------------------------
+  listAgencies: () => request<{ agencies: Agency[] }>("GET", "/v1/owner/agencies"),
+  createAgency: (input: {
+    name: string;
+    adminUsername: string;
+    adminDisplayName: string;
+    adminPassword: string;
+  }) => request<{ agency: Agency; admin: AdminUser }>("POST", "/v1/owner/agencies", input),
+  updateAgency: (id: number, patch: { name?: string; disabled?: boolean; regenerateRadioKey?: boolean }) =>
+    request<{ agency: Agency }>("PATCH", `/v1/owner/agencies/${id}`, patch),
+  deleteAgency: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/owner/agencies/${id}`),
+
+  agencyUsers: (id: number) => request<{ users: AdminUser[] }>("GET", `/v1/owner/agencies/${id}/users`),
+  createAgencyUser: (
+    id: number,
+    input: { username: string; displayName: string; password: string; role: Role; unitId: string | null },
+  ) => request<{ user: AdminUser }>("POST", `/v1/owner/agencies/${id}/users`, input),
+  updateAgencyUser: (
+    id: number,
+    uid: number,
+    patch: Partial<{ displayName: string; role: Role; unitId: string | null; disabled: boolean; password: string }>,
+  ) => request<{ user: AdminUser }>("PATCH", `/v1/owner/agencies/${id}/users/${uid}`, patch),
+  deleteAgencyUser: (id: number, uid: number) =>
+    request<{ ok: boolean }>("DELETE", `/v1/owner/agencies/${id}/users/${uid}`),
 };
 
 /** Fetches a transmission's WAV audio as a Blob (a bearer header cannot ride on <audio src>). */
@@ -256,6 +296,7 @@ export function describeError(error: unknown): string {
       unauthorized: "Your session expired — sign in again.",
       database_unavailable: "The database is not configured on the server.",
       bad_role: "Unknown role.",
+      agency_disabled: "Your agency has been disabled. Contact your platform owner.",
     };
     return map[error.message] ?? `Request failed (${error.message}).`;
   }

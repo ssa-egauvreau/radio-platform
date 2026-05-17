@@ -39,7 +39,7 @@ fun httpApiBaseUrlToVoiceWebSocketUrl(httpBaseUrl: String): String {
  */
 class VoiceRelayTransport(
     httpApiBaseUrl: String,
-    private val apiKey: String,
+    private val apiKeyProvider: () -> String,
     private val inbound: InboundVoicePlayer,
 ) : StreamingPcmSink {
 
@@ -239,6 +239,22 @@ class VoiceRelayTransport(
         inbound.stop()
     }
 
+    /**
+     * Drop and reopen the relay socket so a changed agency radio key takes
+     * effect on live voice immediately, instead of staying on the old tenant
+     * until the connection happens to drop.
+     */
+    fun reconnect() {
+        synchronized(connectionLock) {
+            socketReady.set(false)
+            pcmAccLen = 0
+            webSocketRef.getAndSet(null)?.close(1001, "reconnect")
+            if (wantOnline.get()) {
+                openSocketLocked()
+            }
+        }
+    }
+
     /** Permanent teardown when discarding transport (normally unused — prefer [disconnect]). */
     fun shutdown() {
         disconnect()
@@ -257,7 +273,8 @@ class VoiceRelayTransport(
 
     private fun openSocketLocked() {
         val rb = Request.Builder().url(wsUrl)
-        val key = apiKey.trim()
+        // Resolved per connection so an agency key change applies on the next reconnect.
+        val key = apiKeyProvider().trim()
         if (key.isNotEmpty()) {
             rb.header("X-Radio-Key", key)
         }

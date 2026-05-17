@@ -4,6 +4,7 @@ import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ConsolePage } from "./pages/ConsolePage";
 import { AdminPage } from "./pages/admin/AdminPage";
+import { OwnerPage } from "./pages/owner/OwnerPage";
 import { LegalPage } from "./pages/legal/LegalPage";
 
 export function App() {
@@ -13,13 +14,37 @@ export function App() {
     return <div className="boot">Loading…</div>;
   }
 
+  // Where a signed-in account lands — platform owners have no agency, so the
+  // radio console is not their home.
+  const home = user?.role === "owner" ? "/owner" : "/console";
+
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
-      <Route path="/login" element={user ? <Navigate to="/console" replace /> : <LoginPage />} />
+      <Route path="/login" element={user ? <Navigate to={home} replace /> : <LoginPage />} />
       <Route
         path="/console"
-        element={user ? <ConsolePage /> : <Navigate to="/login" replace />}
+        element={
+          !user ? (
+            <Navigate to="/login" replace />
+          ) : user.role === "owner" ? (
+            <Navigate to="/owner" replace />
+          ) : (
+            <ConsolePage />
+          )
+        }
+      />
+      <Route
+        path="/owner/*"
+        element={
+          !user ? (
+            <Navigate to="/login" replace />
+          ) : user.role === "owner" ? (
+            <OwnerPage />
+          ) : (
+            <Navigate to="/console" replace />
+          )
+        }
       />
       <Route
         path="/admin/*"

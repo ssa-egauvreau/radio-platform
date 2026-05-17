@@ -3,7 +3,9 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import type { NextFunction, Request, Response } from "express";
 
-export type Role = "admin" | "dispatcher" | "radio";
+export type Role = "owner" | "admin" | "dispatcher" | "radio";
+
+const ROLE_VALUES: Role[] = ["owner", "admin", "dispatcher", "radio"];
 
 export interface AuthUser {
   id: number;
@@ -11,6 +13,16 @@ export interface AuthUser {
   displayName: string;
   role: Role;
   unitId: string | null;
+  /** Tenant the account belongs to; null for platform `owner` accounts. */
+  agencyId: number | null;
+  agencyName: string | null;
+}
+
+/** Agency resolved for a request (from a JWT, or a handset's radio key). */
+export interface AgencyContext {
+  id: number;
+  name: string;
+  slug: string;
 }
 
 declare global {
@@ -18,6 +30,7 @@ declare global {
   namespace Express {
     interface Request {
       authUser?: AuthUser;
+      agency?: AgencyContext;
     }
   }
 }
@@ -45,7 +58,15 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
 
 export function signToken(user: AuthUser): string {
   return jwt.sign(
-    { uid: user.id, un: user.username, dn: user.displayName, role: user.role, unit: user.unitId },
+    {
+      uid: user.id,
+      un: user.username,
+      dn: user.displayName,
+      role: user.role,
+      unit: user.unitId,
+      aid: user.agencyId,
+      an: user.agencyName,
+    },
     JWT_SECRET,
     { expiresIn: TOKEN_TTL_SECONDS },
   );
@@ -54,13 +75,15 @@ export function signToken(user: AuthUser): string {
 export function verifyToken(token: string): AuthUser | null {
   try {
     const p = jwt.verify(token, JWT_SECRET) as Record<string, unknown>;
-    const role = p.role === "admin" || p.role === "dispatcher" ? (p.role as Role) : "radio";
+    const role = ROLE_VALUES.includes(p.role as Role) ? (p.role as Role) : "radio";
     return {
       id: Number(p.uid),
       username: String(p.un ?? ""),
       displayName: String(p.dn ?? ""),
       role,
       unitId: p.unit == null ? null : String(p.unit),
+      agencyId: p.aid == null ? null : Number(p.aid),
+      agencyName: p.an == null ? null : String(p.an),
     };
   } catch {
     return null;
@@ -100,7 +123,21 @@ export function requireAdmin(req: Request, res: Response, next: NextFunction): v
     res.status(401).json({ error: "unauthorized" });
     return;
   }
-  if (req.authUser.role !== "admin") {
+  // An agency admin must be scoped to an agency to manage anything.
+  if (req.authUser.role !== "admin" || req.authUser.agencyId == null) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  next();
+}
+
+/** Guards the platform owner portal — agency provisioning across all tenants. */
+export function requireOwner(req: Request, res: Response, next: NextFunction): void {
+  if (!req.authUser) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  if (req.authUser.role !== "owner") {
     res.status(403).json({ error: "forbidden" });
     return;
   }
