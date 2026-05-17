@@ -305,7 +305,7 @@ export function ChannelPanel({
       </button>
 
       <button className="txmode-btn" onClick={toggleTxMode}>
-        TX MODE: <strong>{txDigital ? "DIGITAL · P25" : "ANALOG"}</strong>
+        TX MODE: <strong>{txDigital ? "COMPRESSED · FAST" : "HIGH QUALITY · NORMAL SPEED"}</strong>
       </button>
 
       <button

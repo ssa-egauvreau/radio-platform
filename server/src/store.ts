@@ -18,6 +18,14 @@ export function isSoundKind(value: unknown): value is SoundKind {
   return (SOUND_KINDS as readonly string[]).includes(value as string);
 }
 
+/** Device category an agency assigns to an account. */
+export const DEVICE_TYPES = ["unit_radio", "handheld", "dispatch_console", "phone", "radio_bridge"] as const;
+export type DeviceType = (typeof DEVICE_TYPES)[number];
+
+export function isDeviceType(value: unknown): value is DeviceType {
+  return (DEVICE_TYPES as readonly string[]).includes(value as string);
+}
+
 // --- agencies (tenants) --------------------------------------------------
 
 export interface AgencyRow {
@@ -204,6 +212,27 @@ export async function deleteAgency(id: number): Promise<boolean> {
   return (res.rowCount ?? 0) > 0;
 }
 
+/** Agency branding logo bytes, or null when the agency has not uploaded one. */
+export async function getAgencyLogo(agencyId: number): Promise<{ logo: Buffer; mime: string } | null> {
+  const res = await requirePool().query<{ logo: Buffer | null; logo_mime: string | null }>(
+    `SELECT logo, logo_mime FROM agencies WHERE id = $1;`,
+    [agencyId],
+  );
+  const row = res.rows[0];
+  if (!row || !row.logo || !row.logo_mime) {
+    return null;
+  }
+  return { logo: row.logo, mime: row.logo_mime };
+}
+
+export async function setAgencyLogo(agencyId: number, logo: Buffer, mime: string): Promise<void> {
+  await requirePool().query(`UPDATE agencies SET logo = $2, logo_mime = $3 WHERE id = $1;`, [agencyId, logo, mime]);
+}
+
+export async function deleteAgencyLogo(agencyId: number): Promise<void> {
+  await requirePool().query(`UPDATE agencies SET logo = NULL, logo_mime = NULL WHERE id = $1;`, [agencyId]);
+}
+
 // --- users ---------------------------------------------------------------
 
 export interface UserRow {
@@ -212,6 +241,7 @@ export interface UserRow {
   display_name: string;
   role: Role;
   unit_id: string | null;
+  device_type: string | null;
   disabled: boolean;
   agency_id: number | null;
   created_at: string;
@@ -256,7 +286,7 @@ export interface AuditRow {
   ip: string | null;
 }
 
-const USER_COLS = "id, username, display_name, role, unit_id, disabled, agency_id, created_at";
+const USER_COLS = "id, username, display_name, role, unit_id, device_type, disabled, agency_id, created_at";
 
 /** Accounts within one agency. */
 export async function listUsers(agencyId: number): Promise<UserRow[]> {
@@ -282,7 +312,7 @@ export async function getUserById(id: number, agencyId?: number): Promise<UserRo
 /** Login lookup — usernames are globally unique, so this carries the agency to the token. */
 export async function getUserByUsername(username: string): Promise<UserWithHash | null> {
   const res = await requirePool().query<UserWithHash>(
-    `SELECT u.id, u.username, u.display_name, u.role, u.unit_id, u.disabled, u.agency_id,
+    `SELECT u.id, u.username, u.display_name, u.role, u.unit_id, u.device_type, u.disabled, u.agency_id,
             u.created_at, u.password_hash,
             a.name AS agency_name, a.disabled AS agency_disabled
        FROM users u
@@ -300,20 +330,36 @@ export async function createUser(input: {
   role: Role;
   unitId: string | null;
   agencyId: number | null;
+  deviceType?: string | null;
 }): Promise<UserRow> {
   const hash = await hashPassword(input.password);
   const res = await requirePool().query<UserRow>(
-    `INSERT INTO users (username, display_name, password_hash, role, unit_id, agency_id)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO users (username, display_name, password_hash, role, unit_id, agency_id, device_type)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING ${USER_COLS};`,
-    [input.username.trim(), input.displayName.trim(), hash, input.role, input.unitId, input.agencyId],
+    [
+      input.username.trim(),
+      input.displayName.trim(),
+      hash,
+      input.role,
+      input.unitId,
+      input.agencyId,
+      input.deviceType ?? null,
+    ],
   );
   return res.rows[0]!;
 }
 
 export async function updateUser(
   id: number,
-  patch: { displayName?: string; role?: Role; unitId?: string | null; disabled?: boolean; password?: string },
+  patch: {
+    displayName?: string;
+    role?: Role;
+    unitId?: string | null;
+    deviceType?: string | null;
+    disabled?: boolean;
+    password?: string;
+  },
 ): Promise<UserRow | null> {
   const sets: string[] = [];
   const vals: unknown[] = [];
@@ -321,6 +367,7 @@ export async function updateUser(
   if (patch.displayName !== undefined) { sets.push(`display_name = $${i++}`); vals.push(patch.displayName.trim()); }
   if (patch.role !== undefined) { sets.push(`role = $${i++}`); vals.push(patch.role); }
   if (patch.unitId !== undefined) { sets.push(`unit_id = $${i++}`); vals.push(patch.unitId); }
+  if (patch.deviceType !== undefined) { sets.push(`device_type = $${i++}`); vals.push(patch.deviceType); }
   if (patch.disabled !== undefined) { sets.push(`disabled = $${i++}`); vals.push(patch.disabled); }
   if (patch.password !== undefined) { sets.push(`password_hash = $${i++}`); vals.push(await hashPassword(patch.password)); }
   if (sets.length === 0) {

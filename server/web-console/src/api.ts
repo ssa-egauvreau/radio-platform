@@ -19,9 +19,24 @@ export interface AdminUser {
   display_name: string;
   role: Role;
   unit_id: string | null;
+  device_type: string | null;
   disabled: boolean;
   agency_id: number | null;
   created_at: string;
+}
+
+/** Device categories an admin can assign to an account. */
+export const DEVICE_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "—" },
+  { value: "unit_radio", label: "Unit radio (in-car)" },
+  { value: "handheld", label: "Handheld (pacset)" },
+  { value: "dispatch_console", label: "Dispatch console" },
+  { value: "phone", label: "Phone" },
+  { value: "radio_bridge", label: "Radio bridge" },
+];
+
+export function deviceTypeLabel(value: string | null): string {
+  return DEVICE_TYPE_OPTIONS.find((o) => o.value === (value ?? ""))?.label ?? "—";
 }
 
 export interface Agency {
@@ -189,11 +204,24 @@ export const api = {
   myChannels: () => request<{ channels: UserChannel[] }>("GET", "/v1/me/channels"),
 
   listUsers: () => request<{ users: AdminUser[] }>("GET", "/v1/admin/users"),
-  createUser: (input: { username: string; displayName: string; password: string; role: Role; unitId: string | null }) =>
-    request<{ user: AdminUser }>("POST", "/v1/admin/users", input),
+  createUser: (input: {
+    username: string;
+    displayName: string;
+    password: string;
+    role: Role;
+    unitId: string | null;
+    deviceType: string | null;
+  }) => request<{ user: AdminUser }>("POST", "/v1/admin/users", input),
   updateUser: (
     id: number,
-    patch: Partial<{ displayName: string; role: Role; unitId: string | null; disabled: boolean; password: string }>,
+    patch: Partial<{
+      displayName: string;
+      role: Role;
+      unitId: string | null;
+      deviceType: string | null;
+      disabled: boolean;
+      password: string;
+    }>,
   ) => request<{ user: AdminUser }>("PATCH", `/v1/admin/users/${id}`, patch),
   deleteUser: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/admin/users/${id}`),
 
@@ -262,12 +290,26 @@ export const api = {
   agencyUsers: (id: number) => request<{ users: AdminUser[] }>("GET", `/v1/owner/agencies/${id}/users`),
   createAgencyUser: (
     id: number,
-    input: { username: string; displayName: string; password: string; role: Role; unitId: string | null },
+    input: {
+      username: string;
+      displayName: string;
+      password: string;
+      role: Role;
+      unitId: string | null;
+      deviceType: string | null;
+    },
   ) => request<{ user: AdminUser }>("POST", `/v1/owner/agencies/${id}/users`, input),
   updateAgencyUser: (
     id: number,
     uid: number,
-    patch: Partial<{ displayName: string; role: Role; unitId: string | null; disabled: boolean; password: string }>,
+    patch: Partial<{
+      displayName: string;
+      role: Role;
+      unitId: string | null;
+      deviceType: string | null;
+      disabled: boolean;
+      password: string;
+    }>,
   ) => request<{ user: AdminUser }>("PATCH", `/v1/owner/agencies/${id}/users/${uid}`, patch),
   deleteAgencyUser: (id: number, uid: number) =>
     request<{ ok: boolean }>("DELETE", `/v1/owner/agencies/${id}/users/${uid}`),
@@ -276,7 +318,28 @@ export const api = {
   listSounds: () => request<{ sounds: AgencySound[] }>("GET", "/v1/admin/sounds"),
   deleteSound: (kind: string) =>
     request<{ ok: boolean }>("DELETE", `/v1/admin/sounds/${encodeURIComponent(kind)}`),
+
+  // --- agency branding ---------------------------------------------------
+  deleteAgencyLogo: () => request<{ ok: boolean }>("DELETE", "/v1/admin/agency/logo"),
 };
+
+/** Uploads a custom agency logo (raw image body — not JSON). */
+export async function uploadAgencyLogo(file: File): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": file.type || "image/png" };
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  const res = await fetch("/v1/admin/agency/logo", { method: "PUT", headers, body: file });
+  if (!res.ok) {
+    let code = `http_${res.status}`;
+    try {
+      code = (JSON.parse(await res.text()) as { error?: string }).error ?? code;
+    } catch {
+      /* keep the generic code */
+    }
+    throw new ApiError(code, res.status);
+  }
+}
 
 /** Uploads a custom tone for one sound kind (raw audio body — not JSON). */
 export async function uploadSound(kind: string, file: File): Promise<void> {

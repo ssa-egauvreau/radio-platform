@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, describeError, type AdminUser, type Role } from "../../api";
+import { api, describeError, DEVICE_TYPE_OPTIONS, type AdminUser, type Role } from "../../api";
 
 const ROLES: Role[] = ["admin", "dispatcher", "radio"];
 
@@ -14,6 +14,7 @@ export function AgencyUsersPanel({ agencyId, agencyName }: { agencyId: number; a
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<Role>("radio");
   const [unitId, setUnitId] = useState("");
+  const [deviceType, setDeviceType] = useState("");
   const [creating, setCreating] = useState(false);
 
   async function reload() {
@@ -44,12 +45,14 @@ export function AgencyUsersPanel({ agencyId, agencyName }: { agencyId: number; a
         password,
         role,
         unitId: unitId.trim() ? unitId.trim().toUpperCase() : null,
+        deviceType: deviceType || null,
       });
       setUsername("");
       setDisplayName("");
       setPassword("");
       setRole("radio");
       setUnitId("");
+      setDeviceType("");
       await reload();
     } catch (err) {
       setError(describeError(err));
@@ -120,6 +123,16 @@ export function AgencyUsersPanel({ agencyId, agencyName }: { agencyId: number; a
           <label>Unit ID</label>
           <input value={unitId} onChange={(e) => setUnitId(e.target.value)} placeholder="optional" />
         </div>
+        <div className="field">
+          <label>Device</label>
+          <select value={deviceType} onChange={(e) => setDeviceType(e.target.value)}>
+            {DEVICE_TYPE_OPTIONS.map((d) => (
+              <option key={d.value} value={d.value}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </div>
         <button className="btn primary" type="submit" disabled={creating}>
           {creating ? "Creating…" : "Add account"}
         </button>
@@ -137,6 +150,7 @@ export function AgencyUsersPanel({ agencyId, agencyName }: { agencyId: number; a
               <th>Display name</th>
               <th>Role</th>
               <th>Unit ID</th>
+              <th>Device</th>
               <th>Status</th>
               <th />
             </tr>
@@ -163,6 +177,18 @@ export function AgencyUsersPanel({ agencyId, agencyName }: { agencyId: number; a
                       —
                     </span>
                   )}
+                </td>
+                <td>
+                  <select
+                    value={user.device_type ?? ""}
+                    onChange={(e) => patch(user, { deviceType: e.target.value || null })}
+                  >
+                    {DEVICE_TYPE_OPTIONS.map((d) => (
+                      <option key={d.value} value={d.value}>
+                        {d.label}
+                      </option>
+                    ))}
+                  </select>
                 </td>
                 <td>
                   <span className={user.disabled ? "pill off" : "pill on"}>

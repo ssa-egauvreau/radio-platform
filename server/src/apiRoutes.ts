@@ -41,11 +41,15 @@ import {
   listUnitAliases,
   listUsers,
   PERMISSIONS,
+  deleteAgencyLogo,
   deleteAgencySound,
+  getAgencyLogo,
   getAgencySound,
+  isDeviceType,
   isSoundKind,
   listAgencySounds,
   resolveAgencyByKey,
+  setAgencyLogo,
   setAgencySound,
   removeMembership,
   setMembership,
@@ -65,6 +69,14 @@ const radioApiKey = process.env.RADIO_API_KEY?.trim();
 
 /** Upper bound for an uploaded tone (short clips; keeps a clip well under this). */
 const SOUND_MAX_BYTES = "1mb";
+
+/** Upper bound for an uploaded agency logo. */
+const LOGO_MAX_BYTES = "512kb";
+
+/** Reads a device-category value from request input, or null when absent/invalid. */
+function asDeviceType(value: unknown): string | null {
+  return isDeviceType(value) ? value : null;
+}
 
 function clientIp(req: Request): string {
   const fwd = req.headers["x-forwarded-for"];
@@ -355,6 +367,7 @@ export function createApiRouter(): Router {
       const password = String(req.body?.password ?? "");
       const role = asAgencyRole(req.body?.role) ?? "radio";
       const unitId = req.body?.unitId ? String(req.body.unitId).trim().toUpperCase() : null;
+      const deviceType = asDeviceType(req.body?.deviceType);
       if (!username || !password) {
         res.status(400).json({ error: "missing_fields" });
         return;
@@ -363,7 +376,7 @@ export function createApiRouter(): Router {
         res.status(409).json({ error: "username_taken" });
         return;
       }
-      const user = await createUser({ username, displayName, password, role, unitId, agencyId: id });
+      const user = await createUser({ username, displayName, password, role, unitId, agencyId: id, deviceType });
       await writeAudit({
         agencyId: id,
         actorUserId: req.authUser!.id,
@@ -388,7 +401,14 @@ export function createApiRouter(): Router {
         res.status(404).json({ error: "not_found" });
         return;
       }
-      const patch: { displayName?: string; role?: Role; unitId?: string | null; disabled?: boolean; password?: string } = {};
+      const patch: {
+        displayName?: string;
+        role?: Role;
+        unitId?: string | null;
+        deviceType?: string | null;
+        disabled?: boolean;
+        password?: string;
+      } = {};
       if (req.body?.displayName !== undefined) patch.displayName = String(req.body.displayName);
       if (req.body?.role !== undefined) {
         const role = asAgencyRole(req.body.role);
@@ -400,6 +420,9 @@ export function createApiRouter(): Router {
       }
       if (req.body?.unitId !== undefined) {
         patch.unitId = req.body.unitId ? String(req.body.unitId).trim().toUpperCase() : null;
+      }
+      if (req.body?.deviceType !== undefined) {
+        patch.deviceType = asDeviceType(req.body.deviceType);
       }
       if (req.body?.disabled !== undefined) patch.disabled = Boolean(req.body.disabled);
       if (req.body?.password) patch.password = String(req.body.password);
@@ -474,6 +497,7 @@ export function createApiRouter(): Router {
       const password = String(req.body?.password ?? "");
       const role = asAgencyRole(req.body?.role) ?? "radio";
       const unitId = req.body?.unitId ? String(req.body.unitId).trim().toUpperCase() : null;
+      const deviceType = asDeviceType(req.body?.deviceType);
       if (!username || !password) {
         res.status(400).json({ error: "missing_fields" });
         return;
@@ -482,7 +506,7 @@ export function createApiRouter(): Router {
         res.status(409).json({ error: "username_taken" });
         return;
       }
-      const user = await createUser({ username, displayName, password, role, unitId, agencyId });
+      const user = await createUser({ username, displayName, password, role, unitId, agencyId, deviceType });
       await writeAudit({
         agencyId,
         actorUserId: req.authUser!.id,
@@ -507,7 +531,14 @@ export function createApiRouter(): Router {
         res.status(404).json({ error: "not_found" });
         return;
       }
-      const patch: { displayName?: string; role?: Role; unitId?: string | null; disabled?: boolean; password?: string } = {};
+      const patch: {
+        displayName?: string;
+        role?: Role;
+        unitId?: string | null;
+        deviceType?: string | null;
+        disabled?: boolean;
+        password?: string;
+      } = {};
       if (req.body?.displayName !== undefined) patch.displayName = String(req.body.displayName);
       if (req.body?.role !== undefined) {
         const role = asAgencyRole(req.body.role);
@@ -519,6 +550,9 @@ export function createApiRouter(): Router {
       }
       if (req.body?.unitId !== undefined) {
         patch.unitId = req.body.unitId ? String(req.body.unitId).trim().toUpperCase() : null;
+      }
+      if (req.body?.deviceType !== undefined) {
+        patch.deviceType = asDeviceType(req.body.deviceType);
       }
       if (req.body?.disabled !== undefined) patch.disabled = Boolean(req.body.disabled);
       if (req.body?.password) patch.password = String(req.body.password);
@@ -832,6 +866,87 @@ export function createApiRouter(): Router {
       res.setHeader("Content-Type", sound.mime);
       res.setHeader("Cache-Control", "no-cache");
       res.send(sound.audio);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- agency logo (branding) --------------------------------------------
+
+  router.put(
+    "/admin/agency/logo",
+    requireAdmin,
+    raw({ type: () => true, limit: LOGO_MAX_BYTES }),
+    async (req, res) => {
+      try {
+        const mime = (req.header("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+        if (!mime.startsWith("image/")) {
+          res.status(415).json({ error: "bad_image_type" });
+          return;
+        }
+        const body: unknown = req.body;
+        if (!Buffer.isBuffer(body) || body.length === 0) {
+          res.status(400).json({ error: "missing_image" });
+          return;
+        }
+        const agencyId = req.authUser!.agencyId!;
+        await setAgencyLogo(agencyId, body, mime);
+        await writeAudit({
+          agencyId,
+          actorUserId: req.authUser!.id,
+          actorName: req.authUser!.username,
+          action: "agency_logo_set",
+          detail: { mime, bytes: body.length },
+          ip: clientIp(req),
+        });
+        res.json({ ok: true, mime, byte_size: body.length });
+      } catch (error) {
+        fail(res, error);
+      }
+    },
+  );
+
+  router.delete("/admin/agency/logo", requireAdmin, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      await deleteAgencyLogo(agencyId);
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "agency_logo_clear",
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // Serves an agency's logo to consoles (JWT) and handsets (radio key).
+  // 404 simply means "no logo" — the client falls back to the safeT mark.
+  router.get("/agency/logo", async (req, res) => {
+    try {
+      let agencyId = req.authUser?.agencyId ?? null;
+      if (agencyId == null) {
+        const headerRaw = req.headers["x-radio-key"];
+        const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
+        const key = headerVal ?? (typeof req.query.key === "string" ? req.query.key : null);
+        const agency = await resolveAgencyByKey(key ?? null, radioApiKey).catch(() => null);
+        agencyId = agency?.id ?? null;
+      }
+      if (agencyId == null) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      const logo = await getAgencyLogo(agencyId);
+      if (!logo) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.setHeader("Content-Type", logo.mime);
+      res.setHeader("Cache-Control", "no-cache");
+      res.send(logo.logo);
     } catch (error) {
       fail(res, error);
     }

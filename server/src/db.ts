@@ -83,6 +83,9 @@ export async function ensureSchema(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+  // Optional agency-branding logo, uploaded by an agency admin.
+  await p.query(`ALTER TABLE agencies ADD COLUMN IF NOT EXISTS logo BYTEA;`);
+  await p.query(`ALTER TABLE agencies ADD COLUMN IF NOT EXISTS logo_mime TEXT;`);
 
   await p.query(`
     CREATE TABLE IF NOT EXISTS radio_channels (
@@ -111,6 +114,8 @@ export async function ensureSchema(): Promise<void> {
   `);
   // Platform `owner` accounts have no agency, so this column stays nullable.
   await p.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS agency_id INT REFERENCES agencies(id) ON DELETE CASCADE;`);
+  // Device category the admin assigns to an account (unit_radio, handheld, …).
+  await p.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS device_type TEXT;`);
 
   await p.query(`
     CREATE TABLE IF NOT EXISTS channel_members (
