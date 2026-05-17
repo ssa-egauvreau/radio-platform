@@ -22,7 +22,7 @@ import { WebSocket, WebSocketServer } from "ws";
 import { normalizedChannel } from "./presence.js";
 import { verifyToken, type AuthUser } from "./auth.js";
 import { getPool } from "./db.js";
-import { getChannelByName, getMembership, resolveAgencyByKey, type Permission } from "./store.js";
+import { getAgencyById, getChannelByName, getMembership, resolveAgencyByKey, type Permission } from "./store.js";
 import { recordFrame } from "./recorder.js";
 
 export const VOICE_WS_PATH = "/v1/voice/stream";
@@ -180,6 +180,15 @@ export function attachVoiceRelay(
             socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
             socket.destroy();
             return;
+          }
+          // A token outlives its agency being disabled — reject the upgrade if so.
+          if (getPool()) {
+            const agency = await getAgencyById(user.agencyId).catch(() => null);
+            if (!agency || agency.disabled) {
+              socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+              socket.destroy();
+              return;
+            }
           }
           identity = { kind: "account", user };
         } else {

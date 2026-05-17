@@ -855,6 +855,17 @@ export async function listInboxAlerts(
   return res.rows;
 }
 
+/** First candidate username not already taken; falls back to a unique suffix. */
+async function firstAvailableUsername(candidates: string[]): Promise<string> {
+  for (const candidate of candidates) {
+    const name = candidate.trim();
+    if (name && !(await getUserByUsername(name))) {
+      return name;
+    }
+  }
+  return `owner-${Date.now().toString(36)}`;
+}
+
 /**
  * Ensures the owner portal and the admin portal are both reachable:
  * - a platform `owner` account exists (created on fresh databases and on
@@ -870,15 +881,25 @@ export async function seedInitialAccounts(): Promise<void> {
   const owners = await p.query<{ c: string }>(`SELECT COUNT(*)::text AS c FROM users WHERE role = 'owner';`);
   if (Number(owners.rows[0]?.c ?? "0") === 0) {
     const ownerPassword = process.env.OWNER_INITIAL_PASSWORD?.trim() || "platform-owner";
+    // "owner" may already be taken by a tenant account on a pre-multi-tenant
+    // install, so fall back to another name rather than failing to seed.
+    const ownerUsername = await firstAvailableUsername([
+      process.env.OWNER_USERNAME?.trim() ?? "",
+      "owner",
+      "platform-owner",
+      "platform-admin",
+    ]);
     await createUser({
-      username: "owner",
+      username: ownerUsername,
       displayName: "Platform Owner",
       password: ownerPassword,
       role: "owner",
       unitId: null,
       agencyId: null,
     });
-    console.log(`Seeded platform owner — username "owner", password "${ownerPassword}". Change it after first login.`);
+    console.log(
+      `Seeded platform owner — username "${ownerUsername}", password "${ownerPassword}". Change it after first login.`,
+    );
   }
 
   const agencyUsers = await p.query<{ c: string }>(`SELECT COUNT(*)::text AS c FROM users WHERE role <> 'owner';`);
