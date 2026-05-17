@@ -48,7 +48,7 @@ app.use((req, res, next) => {
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", service: "security-radio-api" });
+  res.json({ status: "ok", service: "safet-ptt-api" });
 });
 
 // Console + admin API. Unmatched paths fall through to the legacy routes below.
@@ -170,7 +170,7 @@ async function main(): Promise<void> {
   attachVoiceRelay(server, { radioApiKey });
 
   server.listen(port, () => {
-    console.log(`Security Radio API listening on ${port}`);
+    console.log(`safeT PTT API listening on ${port}`);
     console.log(`RADIO_API_KEY ${radioApiKey ? "enabled" : "disabled"}`);
     console.log(`Voice relay WebSocket path ${VOICE_WS_PATH}`);
     console.log(`DATABASE_URL ${process.env.DATABASE_URL ? "configured" : "not set (in-memory defaults)"}`);

@@ -1,54 +1,61 @@
 :root {
-  --bg: #0c0e12;
-  --bg-raised: #14171d;
-  --bg-input: #1c2026;
-  --panel: #11141a;
-  --border: #2a2f3a;
-  --text: #e6e8ee;
-  --text-dim: #9aa1ad;
+  --bg: #0b1220;
+  --bg-raised: #111827;
+  --bg-input: #1a2335;
+  --panel: #0f1726;
+  --border: #1f2937;
+  --text: #f3f4f6;
+  --text-dim: #94a3b8;
   --text-muted: #6b7280;
-  --accent: #f0a23b;
-  --accent-ink: #1a1205;
-  --accent-2: #4fb0ff;
+  --accent: #2563eb;
+  --accent-ink: #ffffff;
+  --accent-2: #22c5e5;
   --green: #4ade80;
   --red: #ef4444;
-  --amber: #fbbf24;
+  --amber: #f59e0b;
   --danger-bg: #2a161a;
   --danger-border: #5b2330;
   --danger-text: #ffb4b4;
   --info-bg: #14222e;
   --info-border: #29475c;
   --info-text: #b9dcf2;
-  --channel-active-bg: #221a0d;
-  --marker-bg: #2a2208;
+  --channel-active-bg: #11233d;
+  --marker-bg: #15243b;
   color-scheme: dark;
-  font-family: ui-rounded, "SF Pro Rounded", "Nunito", "Segoe UI", Roboto, system-ui, sans-serif;
+  font-family: "Roboto", "Segoe UI", system-ui, -apple-system, sans-serif;
 }
 
 :root[data-theme="day"] {
-  --bg: #e9e9e9;
+  --bg: #f3f4f6;
   --bg-raised: #ffffff;
   --bg-input: #ffffff;
-  --panel: #dededf;
-  --border: #c5c5c7;
-  --text: #343539;
-  --text-dim: #5a5a5c;
-  --text-muted: #8e8e90;
-  --accent: #f29472;
-  --accent-ink: #2c1d14;
-  --accent-2: #6370c4;
-  --green: #3c9e58;
-  --red: #bb454c;
-  --amber: #a9760a;
-  --danger-bg: #f6e3e2;
-  --danger-border: #ddb1ad;
-  --danger-text: #8c3138;
-  --info-bg: #eaecf8;
-  --info-border: #c4cae8;
-  --info-text: #3c4892;
-  --channel-active-bg: #fde7de;
-  --marker-bg: #f7ead0;
+  --panel: #e5e7eb;
+  --border: #d1d5db;
+  --text: #1f2937;
+  --text-dim: #4b5563;
+  --text-muted: #6b7280;
+  --accent: #2563eb;
+  --accent-ink: #ffffff;
+  --accent-2: #0891b2;
+  --green: #16a34a;
+  --red: #dc2626;
+  --amber: #d97706;
+  --danger-bg: #fdeaea;
+  --danger-border: #f0b4b4;
+  --danger-text: #b42318;
+  --info-bg: #e7f0fb;
+  --info-border: #c2d8f0;
+  --info-text: #1d4ed8;
+  --channel-active-bg: #dce9ff;
+  --marker-bg: #e0ecff;
   color-scheme: light;
+}
+
+h1,
+h2,
+h3,
+.brand {
+  font-family: "Exo 2", "Segoe UI", system-ui, sans-serif;
 }
 
 * {
@@ -148,15 +155,26 @@ a {
   border-radius: 8px;
   padding: 28px;
 }
+.login-brand {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  margin-bottom: 22px;
+}
 .login-card h1 {
-  margin: 0 0 4px;
-  font-size: 18px;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
+  margin: 0;
+  font-size: 23px;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.login-card h1 b {
+  color: var(--accent-2);
+  font-weight: 600;
 }
 .login-card .sub {
   color: var(--text-muted);
-  margin-bottom: 22px;
+  margin: 2px 0 0;
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -192,13 +210,31 @@ a {
   flex: none;
 }
 .brand {
-  font-weight: 700;
-  letter-spacing: 0.16em;
-  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
 }
-.brand span {
-  color: var(--accent);
-  font-weight: 500;
+.brand svg {
+  display: block;
+}
+.brand-word {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.005em;
+  color: var(--text);
+}
+.brand-word b {
+  color: var(--accent-2);
+  font-weight: 600;
+}
+.brand-section {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-left: 9px;
+  border-left: 1px solid var(--border);
 }
 .topnav {
   display: flex;

@@ -1,7 +1,15 @@
-# Security Radio Platform
+# safeT PTT
+
+Talk · Transmit · Together
 
 ## Goal
-Build a private enterprise push-to-talk radio platform. Android comes first. iOS and Windows come later. The Android UI should mimic the feel of a Motorola APX radio without copying branded assets.
+Build **safeT PTT** — a private enterprise push-to-talk platform for public safety. Android comes first; iOS and Windows come later. The Android UI should mimic the feel of a Motorola APX radio without copying branded assets.
+
+## Surfaces
+- **safeT Mobile** — the Android radio handset app (`android-app/`).
+- **safeT Command** — the web dispatch console (`server/web-console/`) and its desktop shell (`desktop-console/`).
+- **safeT Control** — the admin panel (within the web console).
+- Brand assets live in `brand/`.
 
 ## Tech stack
 - Android: Kotlin + Jetpack Compose
