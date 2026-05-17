@@ -103,7 +103,8 @@ function configurePermissions() {
   });
   ses.setPermissionCheckHandler((_contents, permission, requestingOrigin, details) => {
     if (permission !== "media") return false;
-    if (details && details.mediaType === "video") return false;
+    // Allow only an explicit audio check; "video" and "unknown" are denied.
+    if (!details || details.mediaType !== "audio") return false;
     return isDispatchUrl(requestingOrigin);
   });
 }
