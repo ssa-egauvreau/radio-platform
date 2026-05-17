@@ -44,7 +44,7 @@ import {
   removeMembership,
   setMembership,
   setUnitAlias,
-  slugify,
+  uniqueAgencySlug,
   updateAgency,
   updateChannel,
   updateUser,
@@ -226,7 +226,7 @@ export function createApiRouter(): Router {
       // Agency, its starter channels and its first admin are created atomically.
       const { agency, admin } = await createAgencyWithAdmin({
         name,
-        slug: slugify(name),
+        slug: await uniqueAgencySlug(name),
         radioKey: generateRadioKey(),
         adminUsername,
         adminDisplayName,

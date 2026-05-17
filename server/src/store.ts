@@ -34,7 +34,7 @@ export function generateRadioKey(): string {
 }
 
 /** Derives a stable URL slug from a free-text agency name. */
-export function slugify(name: string): string {
+function slugify(name: string): string {
   const base = name
     .trim()
     .toLowerCase()
@@ -42,6 +42,26 @@ export function slugify(name: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 48);
   return base || "agency";
+}
+
+/**
+ * A slug derived from `name` that no agency uses yet — suffixed (`-2`, `-3`, …)
+ * when distinct names normalize to the same base, so tenant creation does not
+ * fail spuriously on a derived-slug clash. The unique index remains the backstop
+ * against the rare check-then-insert race.
+ */
+export async function uniqueAgencySlug(name: string): Promise<string> {
+  const base = slugify(name);
+  if (!(await getAgencyBySlug(base))) {
+    return base;
+  }
+  for (let i = 2; i < 100; i++) {
+    const candidate = `${base}-${i}`;
+    if (!(await getAgencyBySlug(candidate))) {
+      return candidate;
+    }
+  }
+  return `${base}-${Date.now().toString(36)}`;
 }
 
 export async function listAgencies(): Promise<AgencySummary[]> {
