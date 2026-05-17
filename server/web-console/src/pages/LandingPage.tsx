@@ -431,6 +431,9 @@ export function LandingPage() {
             <a href="#platform">Platform</a>
             <a href="#features">Features</a>
             <a href="#pricing">Pricing</a>
+            <Link to="/legal/terms">Terms</Link>
+            <Link to="/legal/privacy">Privacy</Link>
+            <Link to="/legal/eula">EULA</Link>
             <Link to="/login">Sign in</Link>
             <a href={`mailto:${SALES_EMAIL}`}>Contact</a>
           </nav>
