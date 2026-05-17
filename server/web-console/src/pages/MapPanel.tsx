@@ -85,18 +85,29 @@ export function MapPanel() {
     let cancelled = false;
     async function poll() {
       try {
-        // Positions and alerts together, so a unit in emergency is flagged on the map.
-        const [locs, alertList] = await Promise.all([api.locations(), api.alerts()]);
+        // Positions drive the map; alerts only tint markers, so a failed
+        // alerts fetch must not stop position updates.
+        const [locsResult, alertsResult] = await Promise.allSettled([
+          api.locations(),
+          api.alerts(),
+        ]);
         const map = mapRef.current;
         if (cancelled || !map) {
           return;
         }
+        if (locsResult.status !== "fulfilled") {
+          setError("Could not load radio positions.");
+          return;
+        }
         setError(null);
+        const locs = locsResult.value;
 
         const emergencyUnits = new Set(
-          alertList.alerts
-            .filter((a) => a.kind === "emergency" && a.active && a.from_unit)
-            .map((a) => String(a.from_unit).toUpperCase()),
+          alertsResult.status === "fulfilled"
+            ? alertsResult.value.alerts
+                .filter((a) => a.kind === "emergency" && a.active && a.from_unit)
+                .map((a) => String(a.from_unit).toUpperCase())
+            : [],
         );
 
         const seen = new Set<string>();
