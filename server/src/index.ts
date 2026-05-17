@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { DEFAULT_GREEN_CHANNELS } from "./defaultChannels.js";
 import { ensureSchema, getPool, listChannelsFromDb } from "./db.js";
-import { getAgencyById, resolveAgencyByKey, seedInitialAccounts } from "./store.js";
+import { resolveAgencyByKey, seedInitialAccounts } from "./store.js";
 import { startRecorder } from "./recorder.js";
 import { recoverPendingTranscriptions } from "./transcribe.js";
 import { initServerImbe } from "./imbeServerCodec.js";
@@ -43,41 +43,22 @@ app.use(async (req, res, next) => {
     return;
   }
   try {
+    const headerRaw = req.headers["x-radio-key"];
+    const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
+    const key = headerVal ?? (typeof req.query.key === "string" ? req.query.key : null);
     if (!getPool()) {
       // No database — per-agency keys can't be resolved, but the global
       // RADIO_API_KEY (env, DB-independent) must still gate handset endpoints.
-      if (!radioApiKey || req.authUser) {
-        next();
-        return;
-      }
-      const headerRaw = req.headers["x-radio-key"];
-      const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
-      const key = headerVal ?? (typeof req.query.key === "string" ? req.query.key : null);
-      if (key === radioApiKey) {
+      if (!radioApiKey || key === radioApiKey) {
         next();
         return;
       }
       res.status(401).json({ error: "unauthorized" });
       return;
     }
-    if (req.authUser) {
-      if (req.authUser.agencyId == null) {
-        res.status(403).json({ error: "forbidden" });
-        return;
-      }
-      const ag = await getAgencyById(req.authUser.agencyId);
-      if (!ag || ag.disabled) {
-        res.status(403).json({ error: "forbidden" });
-        return;
-      }
-      req.agency = { id: ag.id, name: ag.name, slug: ag.slug };
-      next();
-      return;
-    }
-    const headerRaw = req.headers["x-radio-key"];
-    const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
-    const key = headerVal ?? (typeof req.query.key === "string" ? req.query.key : null);
-    const ag = await resolveAgencyByKey(key ?? null, radioApiKey);
+    // Handset endpoints are gated by the radio key, never by a console JWT —
+    // a bearer token may still ride along and is used only for attribution.
+    const ag = await resolveAgencyByKey(key, radioApiKey);
     if (!ag) {
       res.status(401).json({ error: "unauthorized" });
       return;
