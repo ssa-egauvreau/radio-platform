@@ -9,7 +9,7 @@ import {
   type AuthUser,
   type Role,
 } from "./auth.js";
-import { listChannelRoster } from "./voiceRelay.js";
+import { dropAgencyVoiceConnections, listChannelRoster } from "./voiceRelay.js";
 import {
   AGENCY_ROLES,
   countActiveAdmins,
@@ -271,6 +271,11 @@ export function createApiRouter(): Router {
         patch.radioKey = generateRadioKey();
       }
       const agency = await updateAgency(id, patch);
+      // Disabling the agency or rotating its radio key revokes access — drop any
+      // live voice sockets so they cannot outlast the change.
+      if (patch.disabled === true || patch.radioKey !== undefined) {
+        dropAgencyVoiceConnections(id);
+      }
       await writeAudit({
         agencyId: id,
         actorUserId: req.authUser!.id,
@@ -295,6 +300,7 @@ export function createApiRouter(): Router {
         return;
       }
       await deleteAgency(id);
+      dropAgencyVoiceConnections(id);
       // Audit row carries no agency id — the agency (and its audit rows) are gone.
       await writeAudit({
         agencyId: null,

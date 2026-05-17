@@ -73,9 +73,33 @@ interface RosterRecord {
 /** Live voice-WebSocket roster so the console can show who is on each channel. */
 const voiceRoster = new Map<WebSocket, RosterRecord>();
 
+/** Every open voice socket and its connection metadata (the relay is a singleton). */
+const clientMeta = new Map<WebSocket, ClientMeta>();
+
 /** Composite channel key namespacing a normalized channel under its agency. */
 function channelKey(agencyId: number, channelNorm: string): string {
   return `${agencyId} ${channelNorm}`;
+}
+
+/**
+ * Forcibly closes every open voice socket belonging to an agency. Called when
+ * the owner disables the agency, rotates its radio key, or deletes it, so live
+ * voice cannot outlast the tenant's access. Returns the number of sockets closed.
+ */
+export function dropAgencyVoiceConnections(agencyId: number): number {
+  let closed = 0;
+  for (const [ws, meta] of clientMeta) {
+    if (meta.agencyId !== agencyId) {
+      continue;
+    }
+    try {
+      ws.close(1008, "agency access revoked");
+    } catch {
+      /* ignore a socket already gone */
+    }
+    closed++;
+  }
+  return closed;
 }
 
 /**
@@ -154,7 +178,6 @@ export function attachVoiceRelay(
   const requiredKey = options.radioApiKey?.trim();
 
   const wss = new WebSocketServer({ noServer: true });
-  const clientMeta = new Map<WebSocket, ClientMeta>();
 
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     void (async () => {
