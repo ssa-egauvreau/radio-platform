@@ -4,6 +4,7 @@ import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ConsolePage } from "./pages/ConsolePage";
 import { AdminPage } from "./pages/admin/AdminPage";
+import { LegalPage } from "./pages/legal/LegalPage";
 
 export function App() {
   const { ready, user } = useAuth();
@@ -32,6 +33,9 @@ export function App() {
           )
         }
       />
+      <Route path="/legal/terms" element={<LegalPage doc="terms" />} />
+      <Route path="/legal/privacy" element={<LegalPage doc="privacy" />} />
+      <Route path="/legal/eula" element={<LegalPage doc="eula" />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
