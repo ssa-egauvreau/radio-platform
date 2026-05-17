@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, raw } from "express";
 import type { NextFunction, Request, Response } from "express";
 import {
   requireAdmin,
@@ -41,6 +41,12 @@ import {
   listUnitAliases,
   listUsers,
   PERMISSIONS,
+  deleteAgencySound,
+  getAgencySound,
+  isSoundKind,
+  listAgencySounds,
+  resolveAgencyByKey,
+  setAgencySound,
   removeMembership,
   setMembership,
   setUnitAlias,
@@ -53,6 +59,12 @@ import {
   type Permission,
   type TransmissionSort,
 } from "./store.js";
+
+/** Legacy global radio key — lets a handset fetch its agency's custom tones. */
+const radioApiKey = process.env.RADIO_API_KEY?.trim();
+
+/** Upper bound for an uploaded tone (short clips; keeps a clip well under this). */
+const SOUND_MAX_BYTES = "1mb";
 
 function clientIp(req: Request): string {
   const fwd = req.headers["x-forwarded-for"];
@@ -714,6 +726,112 @@ export function createApiRouter(): Router {
         ip: clientIp(req),
       });
       res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- agency sounds (custom radio tones) --------------------------------
+
+  router.get("/admin/sounds", requireAdmin, async (req, res) => {
+    try {
+      res.json({ sounds: await listAgencySounds(req.authUser!.agencyId!) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.put(
+    "/admin/sounds/:kind",
+    requireAdmin,
+    raw({ type: () => true, limit: SOUND_MAX_BYTES }),
+    async (req, res) => {
+      try {
+        const kind = String(req.params.kind);
+        if (!isSoundKind(kind)) {
+          res.status(404).json({ error: "unknown_sound" });
+          return;
+        }
+        const mime = (req.header("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+        if (!mime.startsWith("audio/") && mime !== "application/octet-stream") {
+          res.status(415).json({ error: "bad_audio_type" });
+          return;
+        }
+        const body: unknown = req.body;
+        if (!Buffer.isBuffer(body) || body.length === 0) {
+          res.status(400).json({ error: "missing_audio" });
+          return;
+        }
+        const agencyId = req.authUser!.agencyId!;
+        await setAgencySound(agencyId, kind, body, mime);
+        await writeAudit({
+          agencyId,
+          actorUserId: req.authUser!.id,
+          actorName: req.authUser!.username,
+          action: "sound_set",
+          target: kind,
+          detail: { mime, bytes: body.length },
+          ip: clientIp(req),
+        });
+        res.json({ ok: true, kind, mime, byte_size: body.length });
+      } catch (error) {
+        fail(res, error);
+      }
+    },
+  );
+
+  router.delete("/admin/sounds/:kind", requireAdmin, async (req, res) => {
+    try {
+      const kind = String(req.params.kind);
+      const agencyId = req.authUser!.agencyId!;
+      const ok = await deleteAgencySound(agencyId, kind);
+      if (!ok) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "sound_clear",
+        target: kind,
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // Serves an agency's custom tone to consoles (JWT) and handsets (radio key).
+  // A 404 simply means "no custom tone" — the client falls back to its bundled one.
+  router.get("/sounds/:kind", async (req, res) => {
+    try {
+      const kind = String(req.params.kind);
+      if (!isSoundKind(kind)) {
+        res.status(404).json({ error: "unknown_sound" });
+        return;
+      }
+      let agencyId = req.authUser?.agencyId ?? null;
+      if (agencyId == null) {
+        const headerRaw = req.headers["x-radio-key"];
+        const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
+        const key = headerVal ?? (typeof req.query.key === "string" ? req.query.key : null);
+        const agency = await resolveAgencyByKey(key ?? null, radioApiKey).catch(() => null);
+        agencyId = agency?.id ?? null;
+      }
+      if (agencyId == null) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      const sound = await getAgencySound(agencyId, kind);
+      if (!sound) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.setHeader("Content-Type", sound.mime);
+      res.setHeader("Cache-Control", "no-cache");
+      res.send(sound.audio);
     } catch (error) {
       fail(res, error);
     }

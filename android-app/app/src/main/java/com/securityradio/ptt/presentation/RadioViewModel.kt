@@ -11,6 +11,7 @@ import com.securityradio.ptt.data.remote.RadioApi
 import com.securityradio.ptt.data.remote.TalkActivityDto
 import com.securityradio.ptt.data.remote.TalkerSnapshotDto
 import com.securityradio.ptt.device.ChannelSpeechHelper
+import com.securityradio.ptt.device.CustomSoundDownloader
 import com.securityradio.ptt.device.HardwareAction
 import com.securityradio.ptt.device.HardwareButtonEvent
 import com.securityradio.ptt.device.HardwareButtonRelay
@@ -53,6 +54,7 @@ class RadioViewModel(
     private val speechHelper: ChannelSpeechHelper,
     private val voiceRelay: VoiceRelayTransport,
     private val locationReporter: LocationReporter,
+    private val customSoundDownloader: CustomSoundDownloader,
 ) : ViewModel() {
 
     @Volatile
@@ -291,6 +293,8 @@ class RadioViewModel(
                 // REST picks up the key per request; voice must drop its socket
                 // to stop using the previous agency's key on the live stream.
                 voiceRelay.reconnect()
+                // The new agency has its own tone set — pull it now.
+                customSoundDownloader.refreshAsync()
                 _uiState.update {
                     it.copy(
                         agencyRadioKey = key,

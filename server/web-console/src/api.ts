@@ -126,6 +126,13 @@ export interface UnitAlias {
   updated_at: string;
 }
 
+export interface AgencySound {
+  kind: string;
+  mime: string;
+  byte_size: number;
+  updated_at: string;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(code: string, status: number) {
@@ -264,7 +271,34 @@ export const api = {
   ) => request<{ user: AdminUser }>("PATCH", `/v1/owner/agencies/${id}/users/${uid}`, patch),
   deleteAgencyUser: (id: number, uid: number) =>
     request<{ ok: boolean }>("DELETE", `/v1/owner/agencies/${id}/users/${uid}`),
+
+  // --- custom radio tones ------------------------------------------------
+  listSounds: () => request<{ sounds: AgencySound[] }>("GET", "/v1/admin/sounds"),
+  deleteSound: (kind: string) =>
+    request<{ ok: boolean }>("DELETE", `/v1/admin/sounds/${encodeURIComponent(kind)}`),
 };
+
+/** Uploads a custom tone for one sound kind (raw audio body — not JSON). */
+export async function uploadSound(kind: string, file: File): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": file.type || "audio/wav" };
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  const res = await fetch(`/v1/admin/sounds/${encodeURIComponent(kind)}`, {
+    method: "PUT",
+    headers,
+    body: file,
+  });
+  if (!res.ok) {
+    let code = `http_${res.status}`;
+    try {
+      code = (JSON.parse(await res.text()) as { error?: string }).error ?? code;
+    } catch {
+      /* keep the generic code */
+    }
+    throw new ApiError(code, res.status);
+  }
+}
 
 /** Fetches a transmission's WAV audio as a Blob (a bearer header cannot ride on <audio src>). */
 export async function fetchTransmissionAudio(id: number): Promise<Blob> {
