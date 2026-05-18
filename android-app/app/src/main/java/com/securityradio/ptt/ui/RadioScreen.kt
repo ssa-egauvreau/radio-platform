@@ -220,7 +220,7 @@ private fun LcdStatusBar(
             .padding(horizontal = 8.dp, vertical = 6.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        if (!ultraCompact) Row(
+        Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -234,37 +234,44 @@ private fun LcdStatusBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                LcdGpsIcon(
-                    active = p.statusGreen,
-                    muted = p.textMuted,
-                    locked = true, // GPS reporting is always on
-                    modifier = Modifier.size(14.dp),
-                )
-                LcdScanIcon(
-                    active = p.statusAmber,
-                    muted = p.textMuted,
-                    on = state.scanActive,
-                    modifier = Modifier.size(16.dp, 12.dp),
-                )
-                val online = state.networkLabel == "ONLINE"
-                Text(
-                    text = if (online) "NET" else "OFF",
-                    style = styles.status,
-                    color = if (online) p.statusGreen else p.statusAmber,
-                )
-                if (state.channelsLoading) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(14.dp),
-                        strokeWidth = 2.dp,
-                        color = p.materialPrimary,
+                if (ultraCompact) {
+                    Text(
+                        text = "MAP",
+                        style = styles.softKey,
+                        color = p.statusBlue,
+                        modifier = Modifier.clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
                     )
-                }
-                Text(
-                    text = "BAT ${state.batteryPercent}%",
-                    style = styles.status,
-                    color = p.textSecondary,
-                )
-                if (!ultraCompact) {
+                } else {
+                    LcdGpsIcon(
+                        active = p.statusGreen,
+                        muted = p.textMuted,
+                        locked = true, // GPS reporting is always on
+                        modifier = Modifier.size(14.dp),
+                    )
+                    LcdScanIcon(
+                        active = p.statusAmber,
+                        muted = p.textMuted,
+                        on = state.scanActive,
+                        modifier = Modifier.size(16.dp, 12.dp),
+                    )
+                    val online = state.networkLabel == "ONLINE"
+                    Text(
+                        text = if (online) "NET" else "OFF",
+                        style = styles.status,
+                        color = if (online) p.statusGreen else p.statusAmber,
+                    )
+                    if (state.channelsLoading) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(14.dp),
+                            strokeWidth = 2.dp,
+                            color = p.materialPrimary,
+                        )
+                    }
+                    Text(
+                        text = "BAT ${state.batteryPercent}%",
+                        style = styles.status,
+                        color = p.textSecondary,
+                    )
                     Box(
                         modifier = Modifier
                             .size(22.dp)
