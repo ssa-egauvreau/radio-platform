@@ -931,12 +931,14 @@ class RadioViewModel(
     }
 
     override fun onCleared() {
-        // Voice and GPS intentionally keep running after the UI is gone: the
-        // foreground service holds the process so the handset still receives
-        // its channel and reports position, like a real radio in a pocket.
+        // Voice and GPS intentionally keep running after the UI is gone — a
+        // foreground service holds the process, like a radio left in a pocket.
+        // pttMicCapture and soundPlayer are process-scoped singletons whose
+        // release() permanently cancels a coroutine scope; calling it here
+        // left a later Activity unable to capture or transmit. Only stop any
+        // in-progress capture — never tear the shared singletons down.
         pttToneJob?.cancel()
-        pttMicCapture.release()
-        soundPlayer.release()
+        pttMicCapture.stopCapture()
         super.onCleared()
     }
 
