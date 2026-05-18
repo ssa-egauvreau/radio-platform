@@ -1,7 +1,6 @@
 package com.securityradio.ptt.data.remote
 
 import com.securityradio.ptt.BuildConfig
-import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -10,24 +9,6 @@ import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
 object NetworkModule {
-
-    /**
-     * API root only — strips accidental `/login` paths and ensures a trailing slash.
-     * Retrofit paths must start with `/` (e.g. `/v1/auth/login`) so they resolve from the host root.
-     */
-    fun normalizeApiBaseUrl(raw: String): String {
-        val trimmed = raw.trim()
-        if (trimmed.isEmpty()) return trimmed
-        val parsed = trimmed.toHttpUrlOrNull()
-            ?: return if (trimmed.endsWith("/")) trimmed else "$trimmed/"
-        val root = parsed.newBuilder()
-            .encodedPath("/")
-            .query(null)
-            .fragment(null)
-            .build()
-            .toString()
-        return if (root.endsWith("/")) root else "$root/"
-    }
 
     private fun buildRetrofit(
         baseUrl: String,

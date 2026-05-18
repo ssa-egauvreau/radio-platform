@@ -1,5 +1,6 @@
 package com.securityradio.ptt.device
 
+import com.securityradio.ptt.data.remote.normalizeApiBaseUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -14,7 +15,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 fun httpApiBaseUrlToVoiceWebSocketUrl(httpBaseUrl: String): String {
-    val u = NetworkModule.normalizeApiBaseUrl(httpBaseUrl).trimEnd('/')
+    val u = normalizeApiBaseUrl(httpBaseUrl).trimEnd('/')
     val https = "https://"
     val http = "http://"
     val (scheme, remainder) = when {

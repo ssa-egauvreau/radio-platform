@@ -124,12 +124,16 @@ This file is **not** committed to git (it is machine-specific).
 
 ### B2. Add your Railway URL and optional API key
 
-Add these lines (use your real URL and key):
+Copy `android-app/local.properties.example` to `android-app/local.properties` (same folder), then edit `sdk.dir` for your PC.
+
+Or add these lines manually:
 
 ```properties
 radio.api.base.url=https://safet.up.railway.app/
 radio.api.key=YOUR_RAILWAY_RADIO_API_KEY
 ```
+
+**Do not** use the old `radio-platform-production.up.railway.app` host — it returns 404.
 
 Rules:
 
