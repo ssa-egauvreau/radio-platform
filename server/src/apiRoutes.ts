@@ -697,6 +697,11 @@ export function createApiRouter(): Router {
           res.status(400).json({ error: "missing_name" });
           return;
         }
+        // A channel name must not collide with a simulcast (relay resolves by name).
+        if (await getSimulcastByName(agencyId, name)) {
+          res.status(409).json({ error: "duplicate" });
+          return;
+        }
         patch.name = name;
       }
       if (req.body?.color !== undefined) {
