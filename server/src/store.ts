@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import type { PoolClient } from "pg";
 import { getPool, requirePool, DEFAULT_AGENCY_SLUG } from "./db.js";
 import { hashPassword, type Role } from "./auth.js";
 
@@ -464,6 +465,135 @@ export async function getChannelByName(agencyId: number, name: string): Promise<
     [agencyId, name.trim()],
   );
   return res.rows[0] ?? null;
+}
+
+// --- simulcast channels --------------------------------------------------
+
+export interface SimulcastRow {
+  id: number;
+  name: string;
+  member_channel_ids: number[];
+}
+
+/** Simulcast channels for one agency, each with the real channels it fans out to. */
+export async function listSimulcasts(agencyId: number): Promise<SimulcastRow[]> {
+  const res = await requirePool().query<SimulcastRow>(
+    `SELECT s.id, s.name,
+            COALESCE(array_agg(m.channel_id) FILTER (WHERE m.channel_id IS NOT NULL), '{}') AS member_channel_ids
+     FROM simulcast_channels s
+     LEFT JOIN simulcast_members m ON m.simulcast_id = s.id
+     WHERE s.agency_id = $1
+     GROUP BY s.id, s.name
+     ORDER BY s.name ASC;`,
+    [agencyId],
+  );
+  return res.rows;
+}
+
+/** A simulcast channel and its member channels, resolved by name (used by the voice relay). */
+export async function getSimulcastByName(
+  agencyId: number,
+  name: string,
+): Promise<{ id: number; name: string; memberChannels: { id: number; name: string }[] } | null> {
+  const p = requirePool();
+  const sim = await p.query<{ id: number; name: string }>(
+    `SELECT id, name FROM simulcast_channels WHERE agency_id = $1 AND lower(name) = lower($2);`,
+    [agencyId, name.trim()],
+  );
+  const row = sim.rows[0];
+  if (!row) {
+    return null;
+  }
+  const members = await p.query<{ id: number; name: string }>(
+    `SELECT c.id, c.name FROM simulcast_members m
+     JOIN radio_channels c ON c.id = m.channel_id
+     WHERE m.simulcast_id = $1
+     ORDER BY c.sort_order ASC, c.id ASC;`,
+    [row.id],
+  );
+  return { id: row.id, name: row.name, memberChannels: members.rows };
+}
+
+/** Replaces a simulcast's member set; only channels in the agency are kept. */
+async function setSimulcastMembers(
+  client: PoolClient,
+  simulcastId: number,
+  agencyId: number,
+  channelIds: number[],
+): Promise<void> {
+  await client.query(`DELETE FROM simulcast_members WHERE simulcast_id = $1;`, [simulcastId]);
+  for (const channelId of channelIds) {
+    await client.query(
+      `INSERT INTO simulcast_members (simulcast_id, channel_id)
+       SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM radio_channels WHERE id = $2 AND agency_id = $3)
+       ON CONFLICT DO NOTHING;`,
+      [simulcastId, channelId, agencyId],
+    );
+  }
+}
+
+export async function createSimulcast(
+  agencyId: number,
+  name: string,
+  channelIds: number[],
+): Promise<{ id: number; name: string }> {
+  const client = await requirePool().connect();
+  try {
+    await client.query("BEGIN");
+    const res = await client.query<{ id: number; name: string }>(
+      `INSERT INTO simulcast_channels (agency_id, name) VALUES ($1, $2) RETURNING id, name;`,
+      [agencyId, name.trim()],
+    );
+    const sim = res.rows[0]!;
+    await setSimulcastMembers(client, sim.id, agencyId, channelIds);
+    await client.query("COMMIT");
+    return sim;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateSimulcast(
+  id: number,
+  agencyId: number,
+  patch: { name?: string; channelIds?: number[] },
+): Promise<boolean> {
+  const client = await requirePool().connect();
+  try {
+    await client.query("BEGIN");
+    const owns = await client.query(
+      `SELECT 1 FROM simulcast_channels WHERE id = $1 AND agency_id = $2;`,
+      [id, agencyId],
+    );
+    if (owns.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    if (patch.name !== undefined) {
+      await client.query(`UPDATE simulcast_channels SET name = $2 WHERE id = $1;`, [id, patch.name.trim()]);
+    }
+    if (patch.channelIds !== undefined) {
+      await setSimulcastMembers(client, id, agencyId, patch.channelIds);
+    }
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteSimulcast(id: number, agencyId: number): Promise<boolean> {
+  const res = await requirePool().query(`DELETE FROM simulcast_channels WHERE id = $1 AND agency_id = $2;`, [
+    id,
+    agencyId,
+  ]);
+  return (res.rowCount ?? 0) > 0;
 }
 
 // --- memberships ---------------------------------------------------------

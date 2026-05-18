@@ -777,6 +777,46 @@ code.mono {
   border-radius: 4px;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.62);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px;
+  overflow-y: auto;
+  z-index: 100;
+}
+.modal {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 22px;
+  width: 100%;
+  max-width: 560px;
+}
+.sim-channels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+}
+.sim-channels label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.chan-sim-tag {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: var(--amber);
+  color: #000;
+}
+
 .tx-button {
   width: 100%;
   display: flex;

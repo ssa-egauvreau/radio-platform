@@ -233,6 +233,26 @@ export async function ensureSchema(): Promise<void> {
     );
   `);
 
+  // Simulcast channels — one transmission fanned out to several real channels.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS simulcast_channels (
+      id SERIAL PRIMARY KEY,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await p.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_simulcast_agency_name ON simulcast_channels (agency_id, lower(name));`,
+  );
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS simulcast_members (
+      simulcast_id INT NOT NULL REFERENCES simulcast_channels(id) ON DELETE CASCADE,
+      channel_id INT NOT NULL REFERENCES radio_channels(id) ON DELETE CASCADE,
+      PRIMARY KEY (simulcast_id, channel_id)
+    );
+  `);
+
   // --- migrate any pre-existing single-tenant data into the default agency ---
   const def = await p.query<{ id: number }>(
     `INSERT INTO agencies (name, slug)

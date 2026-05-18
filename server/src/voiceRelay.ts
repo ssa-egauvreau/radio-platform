@@ -22,7 +22,14 @@ import { WebSocket, WebSocketServer } from "ws";
 import { normalizedChannel } from "./presence.js";
 import { verifyToken, type AuthUser } from "./auth.js";
 import { getPool } from "./db.js";
-import { getAgencyById, getChannelByName, getMembership, resolveAgencyByKey, type Permission } from "./store.js";
+import {
+  getAgencyById,
+  getChannelByName,
+  getMembership,
+  getSimulcastByName,
+  resolveAgencyByKey,
+  type Permission,
+} from "./store.js";
 import { recordFrame } from "./recorder.js";
 
 export const VOICE_WS_PATH = "/v1/voice/stream";
@@ -36,6 +43,14 @@ const VOICE_AIR_TTL_MS = 2000;
 
 type Identity = { kind: "account"; user: AuthUser } | { kind: "legacy"; agencyId: number };
 
+/** One member channel a simulcast transmission fans out to. */
+interface SimTarget {
+  channelKey: string;
+  channelName: string;
+  channelNorm: string;
+  channelId: number | null;
+}
+
 interface ClientMeta {
   identity: Identity;
   agencyId: number;
@@ -48,6 +63,8 @@ interface ClientMeta {
   displayName: string | null;
   permission: Permission;
   joined: boolean;
+  /** Set when the client joined a simulcast channel — every frame fans to these. */
+  simulcastTargets: SimTarget[] | null;
   /** Last time a "channel busy" notice was sent to this client (throttling). */
   lastBusyMs: number;
 }
@@ -277,6 +294,7 @@ export function attachVoiceRelay(
             displayName: null,
             permission: "listen_only",
             joined: false,
+            simulcastTargets: null,
             lastBusyMs: 0,
           });
           wss.emit("connection", ws, req);
@@ -319,6 +337,17 @@ export function attachVoiceRelay(
       channelRow = null; // no database — recording/permissions degrade gracefully
     }
 
+    // When it is not a real channel, it may be a simulcast channel — only
+    // admin/dispatcher accounts may key one; handsets and radios cannot.
+    let simulcast: { id: number; name: string; memberChannels: { id: number; name: string }[] } | null = null;
+    if (!channelRow) {
+      try {
+        simulcast = await getSimulcastByName(meta.agencyId, channelName);
+      } catch {
+        simulcast = null;
+      }
+    }
+
     let unitId: string;
     let permission: Permission;
     let userId: number | null = null;
@@ -344,6 +373,11 @@ export function attachVoiceRelay(
         permission = membership;
       }
     } else {
+      // A key-authenticated handset cannot key a simulcast channel.
+      if (simulcast) {
+        ws.send(JSON.stringify({ type: "error", code: "not_a_member" }));
+        return;
+      }
       unitId = String(json.unit_id ?? "").trim().toUpperCase();
       if (!unitId) {
         ws.send(JSON.stringify({ type: "error", code: "bad_join" }));
@@ -357,10 +391,21 @@ export function attachVoiceRelay(
     meta.channelNorm = chNorm;
     meta.channelKey = chanKey;
     meta.channelName = channelName;
-    meta.channelId = channelRow?.id ?? null;
+    meta.channelId = simulcast ? null : channelRow?.id ?? null;
     meta.userId = userId;
     meta.displayName = displayName;
     meta.permission = permission;
+    meta.simulcastTargets = simulcast
+      ? simulcast.memberChannels.map((c) => {
+          const norm = normalizedChannel(c.name);
+          return {
+            channelKey: channelKey(meta.agencyId, norm),
+            channelName: c.name,
+            channelNorm: norm,
+            channelId: c.id,
+          };
+        })
+      : null;
     meta.joined = true;
     const prior = voiceRoster.get(ws);
     voiceRoster.set(ws, {
@@ -418,8 +463,33 @@ export function attachVoiceRelay(
         if (payload.length === 0) {
           return;
         }
+        const priority = meta.permission === "talk_priority";
+
+        // Simulcast — fan the frame out to every member channel it can claim.
+        if (meta.simulcastTargets) {
+          for (const target of meta.simulcastTargets) {
+            if (!claimAir(target.channelKey, ws, meta.unitId, priority).ok) {
+              continue; // a member channel held by someone else is simply skipped
+            }
+            broadcastExcept(ws, target.channelKey, payload);
+            recordFrame(
+              {
+                agencyId: meta.agencyId,
+                channelNorm: target.channelNorm,
+                channelName: target.channelName,
+                channelId: target.channelId,
+                userId: meta.userId,
+                unitId: meta.unitId,
+                displayName: meta.displayName,
+              },
+              payload,
+            );
+          }
+          return;
+        }
+
         // Strict half-duplex — only the channel holder's audio goes through.
-        const claim = claimAir(meta.channelKey, ws, meta.unitId, meta.permission === "talk_priority");
+        const claim = claimAir(meta.channelKey, ws, meta.unitId, priority);
         if (!claim.ok) {
           const now = Date.now();
           if (now - meta.lastBusyMs > BUSY_NOTICE_MS) {

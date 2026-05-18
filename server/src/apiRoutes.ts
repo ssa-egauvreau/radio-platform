@@ -26,6 +26,12 @@ import {
   generateRadioKey,
   getAgencyById,
   getChannelById,
+  getChannelByName,
+  getSimulcastByName,
+  createSimulcast,
+  deleteSimulcast,
+  listSimulcasts,
+  updateSimulcast,
   getTransmissionAudio,
   getUserById,
   getUserByUsername,
@@ -125,6 +131,22 @@ function radioAgencyId(req: Request): number {
   return req.agency?.id ?? 0;
 }
 
+/** Requires a signed-in admin or dispatcher within an agency (command-level operators). */
+function requireAgencyOperator(req: Request, res: Response, next: NextFunction): void {
+  if (!req.authUser) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  if (
+    req.authUser.agencyId == null ||
+    (req.authUser.role !== "admin" && req.authUser.role !== "dispatcher")
+  ) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  next();
+}
+
 /** Router for account/auth, admin, owner, and radio endpoints, mounted at `/v1`. */
 export function createApiRouter(): Router {
   const router = Router();
@@ -206,14 +228,28 @@ export function createApiRouter(): Router {
       const me = req.authUser!;
       if (me.role === "admin" || me.role === "dispatcher") {
         const all = await listChannels(me.agencyId!);
+        const sims = await listSimulcasts(me.agencyId!);
         res.json({
-          channels: all.map((c) => ({
-            id: c.id,
-            name: c.name,
-            color: c.color,
-            zone: c.zone,
-            permission: "talk_priority",
-          })),
+          channels: [
+            ...all.map((c) => ({
+              id: c.id,
+              name: c.name,
+              color: c.color,
+              zone: c.zone,
+              permission: "talk_priority",
+              simulcast: false,
+            })),
+            // Simulcast channels carry a negative id so they never collide with
+            // a real channel id in the console's open-channel set.
+            ...sims.map((s) => ({
+              id: -s.id,
+              name: s.name,
+              color: null,
+              zone: "Simulcast",
+              permission: "talk_priority",
+              simulcast: true,
+            })),
+          ],
         });
         return;
       }
@@ -630,6 +666,11 @@ export function createApiRouter(): Router {
         res.status(400).json({ error: "missing_name" });
         return;
       }
+      // A channel name must not collide with a simulcast channel (relay resolves by name).
+      if (await getSimulcastByName(agencyId, name)) {
+        res.status(409).json({ error: "duplicate" });
+        return;
+      }
       const channel = await createChannel(agencyId, name);
       await writeAudit({
         agencyId,
@@ -698,6 +739,112 @@ export function createApiRouter(): Router {
         actorUserId: req.authUser!.id,
         actorName: req.authUser!.username,
         action: "channel_delete",
+        target: String(id),
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- simulcast channels (admin + dispatcher) ---------------------------
+
+  router.get("/simulcast", requireAgencyOperator, async (req, res) => {
+    try {
+      res.json({ simulcasts: await listSimulcasts(req.authUser!.agencyId!) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post("/simulcast", requireAgencyOperator, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const name = String(req.body?.name ?? "").trim();
+      const channelIds = Array.isArray(req.body?.channelIds)
+        ? (req.body.channelIds as unknown[]).map((v) => Number(v)).filter((n) => Number.isFinite(n))
+        : [];
+      if (!name) {
+        res.status(400).json({ error: "missing_name" });
+        return;
+      }
+      // The relay resolves channels by name — a simulcast must not shadow a real one.
+      if (await getChannelByName(agencyId, name)) {
+        res.status(409).json({ error: "duplicate" });
+        return;
+      }
+      const simulcast = await createSimulcast(agencyId, name, channelIds);
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "simulcast_create",
+        target: name,
+        detail: { channels: channelIds.length },
+        ip: clientIp(req),
+      });
+      res.status(201).json({ simulcast });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.put("/simulcast/:id", requireAgencyOperator, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const id = Number(req.params.id);
+      const patch: { name?: string; channelIds?: number[] } = {};
+      if (req.body?.name !== undefined) {
+        const name = String(req.body.name).trim();
+        if (!name) {
+          res.status(400).json({ error: "missing_name" });
+          return;
+        }
+        if (await getChannelByName(agencyId, name)) {
+          res.status(409).json({ error: "duplicate" });
+          return;
+        }
+        patch.name = name;
+      }
+      if (Array.isArray(req.body?.channelIds)) {
+        patch.channelIds = (req.body.channelIds as unknown[])
+          .map((v) => Number(v))
+          .filter((n) => Number.isFinite(n));
+      }
+      const ok = await updateSimulcast(id, agencyId, patch);
+      if (!ok) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "simulcast_update",
+        target: String(id),
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.delete("/simulcast/:id", requireAgencyOperator, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const id = Number(req.params.id);
+      const ok = await deleteSimulcast(id, agencyId);
+      if (!ok) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "simulcast_delete",
         target: String(id),
         ip: clientIp(req),
       });

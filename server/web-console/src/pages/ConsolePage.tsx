@@ -1,6 +1,8 @@
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { api, describeError, type UserChannel } from "../api";
+import { useAuth } from "../auth";
 import { ChannelPanel } from "./ChannelPanel";
+import { SimulcastManager } from "./SimulcastManager";
 import { TransmissionLog } from "./TransmissionLog";
 import { MapPanel } from "./MapPanel";
 import { AlertsPanel } from "./AlertsPanel";
@@ -35,12 +37,23 @@ function readSavedOpen(): number[] {
 }
 
 export function ConsolePage() {
+  const { user } = useAuth();
   const [channels, setChannels] = useState<UserChannel[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [simulcastOpen, setSimulcastOpen] = useState(false);
 
   const [openIds, setOpenIds] = useState<number[]>([]);
   const [primaryId, setPrimaryId] = useState<number | null>(null);
+
+  const refreshChannels = useCallback(() => {
+    api
+      .myChannels()
+      .then((res) => setChannels(res.channels))
+      .catch(() => undefined);
+  }, []);
+
+  const canSimulcast = user?.role === "admin" || user?.role === "dispatcher";
 
   const [pttCode, setPttCode] = useState(() => localStorage.getItem(PTT_CODE_KEY) || DEFAULT_PTT_CODE);
   const [rebindingPtt, setRebindingPtt] = useState(false);
@@ -183,6 +196,7 @@ export function ConsolePage() {
                   </span>
                   <span className="perm">
                     {isPrimary && <span className="chan-primary-tag">PTT</span>}
+                    {channel.simulcast && <span className="chan-sim-tag">SIM</span>}
                     {index < 9 && <span className="chan-key">{index + 1}</span>}
                     {PERMISSION_LABEL[channel.permission]}
                   </span>
@@ -212,6 +226,15 @@ export function ConsolePage() {
                 </div>
               )}
             </div>
+          )}
+          {canSimulcast && !loading && !listError && (
+            <button
+              className="btn sm"
+              style={{ marginTop: 10, width: "100%" }}
+              onClick={() => setSimulcastOpen(true)}
+            >
+              Manage simulcast
+            </button>
           )}
         </div>
 
@@ -246,6 +269,14 @@ export function ConsolePage() {
           <AlertsPanel />
         </div>
       </div>
+
+      {simulcastOpen && (
+        <SimulcastManager
+          channels={channels}
+          onClose={() => setSimulcastOpen(false)}
+          onChanged={refreshChannels}
+        />
+      )}
     </div>
   );
 }

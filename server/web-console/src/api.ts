@@ -74,6 +74,14 @@ export interface UserChannel {
   permission: Permission;
   color: string | null;
   zone: string | null;
+  /** True for a simulcast channel — keying it transmits on several real channels. */
+  simulcast?: boolean;
+}
+
+export interface Simulcast {
+  id: number;
+  name: string;
+  member_channel_ids: number[];
 }
 
 export interface AuditEntry {
@@ -326,6 +334,14 @@ export const api = {
 
   // --- agency branding ---------------------------------------------------
   deleteAgencyLogo: () => request<{ ok: boolean }>("DELETE", "/v1/admin/agency/logo"),
+
+  // --- simulcast channels ------------------------------------------------
+  listSimulcasts: () => request<{ simulcasts: Simulcast[] }>("GET", "/v1/simulcast"),
+  createSimulcast: (name: string, channelIds: number[]) =>
+    request<{ simulcast: { id: number; name: string } }>("POST", "/v1/simulcast", { name, channelIds }),
+  updateSimulcast: (id: number, patch: { name?: string; channelIds?: number[] }) =>
+    request<{ ok: boolean }>("PUT", `/v1/simulcast/${id}`, patch),
+  deleteSimulcast: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/simulcast/${id}`),
 };
 
 /** Uploads a custom agency logo (raw image body — not JSON). */
