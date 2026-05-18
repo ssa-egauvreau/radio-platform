@@ -319,6 +319,7 @@ class RadioViewModel(
                 }
             }
             RadioUiEvent.RequestOverlayPermission -> Unit
+            RadioUiEvent.SignOut -> Unit // Handled in MainActivity (clears session and shows login)
         }
     }
 
