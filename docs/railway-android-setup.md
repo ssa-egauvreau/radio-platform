@@ -1,6 +1,6 @@
 # Railway + PostgreSQL + Android (step by step)
 
-This guide assumes you already have the `radio-platform` repository on GitHub and you are signed into [Railway](https://railway.app/).
+This guide assumes you already have the **`safeT-PTT`** repository on GitHub and you are signed into [Railway](https://railway.app/).
 
 ---
 
@@ -11,7 +11,7 @@ This guide assumes you already have the `radio-platform` repository on GitHub an
 1. Go to [railway.app](https://railway.app/) and sign in.
 2. Click **New Project**.
 3. Choose **Deploy from GitHub repo** (or **Empty Project** if you prefer uploading later).
-4. Select your **`radio-platform`** repository.
+4. Select your **`safeT-PTT`** repository.
 
 ### A2. Add the Node service (the `server` folder)
 
