@@ -716,6 +716,31 @@ export async function deleteBridge(id: number, agencyId: number): Promise<boolea
   return (res.rowCount ?? 0) > 0;
 }
 
+/** A bridge row carrying its owning agency — used by the in-process bridge worker. */
+export interface AgencyBridgeRow extends BridgeRow {
+  agency_id: number;
+}
+
+/**
+ * Every enabled stream-URL bridge across all tenants whose agency is active.
+ * The bridge worker polls this to decide which ffmpeg ingests should run.
+ */
+export async function listEnabledStreamBridges(): Promise<AgencyBridgeRow[]> {
+  const res = await requirePool().query<AgencyBridgeRow>(
+    `SELECT b.agency_id, b.id, b.name, b.source_type, b.source_url, b.device_hint,
+            b.target_channel, b.direction, b.yield_to_units, b.tx_mode,
+            b.vox_threshold, b.vox_hang_ms, b.enabled, b.created_at
+       FROM radio_bridges b
+       JOIN agencies a ON a.id = b.agency_id
+      WHERE b.enabled = TRUE
+        AND b.source_type = 'stream_url'
+        AND b.source_url IS NOT NULL
+        AND a.disabled = FALSE
+      ORDER BY b.id ASC;`,
+  );
+  return res.rows;
+}
+
 // --- memberships ---------------------------------------------------------
 
 export async function listMemberships(agencyId: number): Promise<MembershipRow[]> {

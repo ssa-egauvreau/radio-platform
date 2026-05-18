@@ -223,8 +223,9 @@ export function BridgesPanel() {
       <p className="panel-desc">
         Link an external audio source — a scanner stream URL (Broadcastify, ProScan) or a line-in /
         audio device — onto a channel. Bridges are <strong>VOX-gated</strong>: they only key the
-        channel when there is audio, and (when set to yield) any real unit pre-empts them. Live audio
-        ingestion arrives with the bridge worker — this panel configures the bridges.
+        channel when there is audio, and (when set to yield) any real unit pre-empts them. An enabled
+        stream-URL bridge begins ingesting within seconds; audio-device bridges run from the desktop
+        console on the bridge host.
       </p>
 
       {error && <div className="banner error">{error}</div>}

@@ -13,6 +13,7 @@ import { authenticate } from "./auth.js";
 import { createApiRouter } from "./apiRoutes.js";
 import { countPresence, heartbeatPresence } from "./presence.js";
 import { VOICE_WS_PATH, attachVoiceRelay, peekVoiceTransmittingUnit } from "./voiceRelay.js";
+import { startBridgeWorker } from "./bridgeWorker.js";
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
@@ -198,6 +199,8 @@ async function main(): Promise<void> {
     console.log(`RADIO_API_KEY ${radioApiKey ? "enabled" : "disabled"}`);
     console.log(`Voice relay WebSocket path ${VOICE_WS_PATH}`);
     console.log(`DATABASE_URL ${process.env.DATABASE_URL ? "configured" : "not set (in-memory defaults)"}`);
+    // The radio-bridge worker ingests stream-URL bridges onto their channels.
+    startBridgeWorker({ port });
   });
 }
 
