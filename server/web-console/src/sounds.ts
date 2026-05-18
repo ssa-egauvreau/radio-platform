@@ -31,6 +31,9 @@ const resolved: Record<SoundKey, string> = {
 const cache = new Map<string, HTMLAudioElement>();
 const active = new Set<HTMLAudioElement>();
 
+/** The single looping channel-busy clip, while an operator keys a busy channel. */
+let busyLoopClip: HTMLAudioElement | null = null;
+
 function template(url: string): HTMLAudioElement {
   let element = cache.get(url);
   if (!element) {
@@ -78,10 +81,31 @@ export const sounds = {
   channelSwitch: () => play("channelSwitch"),
   /** Emergency alert tone. */
   emergency: () => play("emergency"),
-  /** Repeater-busy tone. */
-  busy: () => play("busy"),
+  /** Starts the channel-busy tone looping — held while an operator keys a busy channel. */
+  busyLoopStart: () => {
+    if (busyLoopClip) {
+      return;
+    }
+    const clip = template(resolved.busy).cloneNode(true) as HTMLAudioElement;
+    clip.loop = true;
+    clip.volume = SOUNDS.busy.volume;
+    busyLoopClip = clip;
+    active.add(clip);
+    void clip.play().catch(() => undefined);
+  },
+  /** Stops the looping channel-busy tone (operator released the key). */
+  busyLoopStop: () => {
+    if (!busyLoopClip) {
+      return;
+    }
+    busyLoopClip.pause();
+    busyLoopClip.currentTime = 0;
+    active.delete(busyLoopClip);
+    busyLoopClip = null;
+  },
   /** Stop All Sounds — silences every alert/page tone currently playing. */
   stopAll: () => {
+    busyLoopClip = null;
     for (const clip of active) {
       clip.pause();
       clip.currentTime = 0;

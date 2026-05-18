@@ -10,11 +10,14 @@
  *   permission are taken from the token.
  * - Android handsets pass a radio key (`X-Radio-Key` header or `?key=`); the key
  *   identifies which agency the handset belongs to.
+ * - The in-process radio-bridge worker passes `?bridge=<secret>&agency=<id>` on a
+ *   loopback socket; the secret is generated fresh per server process.
  *
  * Channels are namespaced per agency, so two tenants may both run "Green 1"
  * without ever hearing each other.
  */
 
+import { randomBytes } from "node:crypto";
 import type { IncomingMessage } from "node:http";
 import type { Server as HttpServer } from "node:http";
 import type { Duplex } from "node:stream";
@@ -22,7 +25,15 @@ import { WebSocket, WebSocketServer } from "ws";
 import { normalizedChannel } from "./presence.js";
 import { verifyToken, type AuthUser } from "./auth.js";
 import { getPool } from "./db.js";
-import { getAgencyById, getChannelByName, getMembership, resolveAgencyByKey, type Permission } from "./store.js";
+import {
+  getAgencyById,
+  getBridgeById,
+  getChannelByName,
+  getMembership,
+  getSimulcastByName,
+  resolveAgencyByKey,
+  type Permission,
+} from "./store.js";
 import { recordFrame } from "./recorder.js";
 
 export const VOICE_WS_PATH = "/v1/voice/stream";
@@ -34,7 +45,33 @@ export const VOICE_WS_PATH = "/v1/voice/stream";
  */
 const VOICE_AIR_TTL_MS = 2000;
 
-type Identity = { kind: "account"; user: AuthUser } | { kind: "legacy"; agencyId: number };
+/**
+ * In-process secret the bridge worker presents on its loopback voice sockets.
+ * Overridable via env for integration tests; otherwise random per process so it
+ * is never valid across restarts and never leaves the host.
+ */
+export const BRIDGE_LOOPBACK_SECRET =
+  process.env.BRIDGE_LOOPBACK_SECRET?.trim() || randomBytes(24).toString("hex");
+
+type Identity =
+  | { kind: "account"; user: AuthUser }
+  | { kind: "legacy"; agencyId: number }
+  | {
+      kind: "bridge";
+      agencyId: number;
+      yields: boolean;
+      bridgeName: string;
+      /** When set, the bridge may only key this channel (a remote runner). */
+      forcedChannel?: string;
+    };
+
+/** One member channel a simulcast transmission fans out to. */
+interface SimTarget {
+  channelKey: string;
+  channelName: string;
+  channelNorm: string;
+  channelId: number | null;
+}
 
 interface ClientMeta {
   identity: Identity;
@@ -48,6 +85,10 @@ interface ClientMeta {
   displayName: string | null;
   permission: Permission;
   joined: boolean;
+  /** Set when the client joined a simulcast channel — every frame fans to these. */
+  simulcastTargets: SimTarget[] | null;
+  /** A yielding talker (a bridge set to yield) is pre-empted by any real unit. */
+  yields: boolean;
   /** Last time a "channel busy" notice was sent to this client (throttling). */
   lastBusyMs: number;
 }
@@ -55,7 +96,13 @@ interface ClientMeta {
 /** Throttle for the per-client "channel busy" notice. */
 const BUSY_NOTICE_MS = 750;
 
-type VoiceSlot = { ws: WebSocket; unitUpper: string; lastPcmMs: number; priority: boolean };
+type VoiceSlot = {
+  ws: WebSocket;
+  unitUpper: string;
+  lastPcmMs: number;
+  priority: boolean;
+  yields: boolean;
+};
 
 /** Who is currently keyed, keyed by `agency:channel` so tenants stay isolated. */
 const voiceAirByChannel = new Map<string, VoiceSlot>();
@@ -63,7 +110,9 @@ const voiceAirByChannel = new Map<string, VoiceSlot>();
 export interface RosterMember {
   unit_id: string;
   display_name: string | null;
-  kind: "account" | "legacy";
+  kind: "account" | "legacy" | "bridge";
+  /** Client platform reported on join: android, ios, web, desktop, bridge, or unknown. */
+  client: string;
   connected_ms: number;
 }
 
@@ -71,8 +120,17 @@ interface RosterRecord {
   channelKey: string;
   unitId: string;
   displayName: string | null;
-  kind: "account" | "legacy";
+  kind: "account" | "legacy" | "bridge";
+  client: string;
   joinedAt: number;
+}
+
+/** Client platforms the relay recognizes; anything else is recorded as "unknown". */
+const KNOWN_CLIENTS = new Set(["android", "ios", "web", "desktop", "bridge"]);
+
+function normalizeClient(raw: unknown): string {
+  const value = String(raw ?? "").trim().toLowerCase();
+  return KNOWN_CLIENTS.has(value) ? value : "unknown";
 }
 
 /** Live voice-WebSocket roster so the console can show who is on each channel. */
@@ -139,6 +197,7 @@ export function listChannelRoster(agencyId: number, channelRaw: unknown): Roster
         unit_id: record.unitId,
         display_name: record.displayName,
         kind: record.kind,
+        client: record.client,
         connected_ms: now - record.joinedAt,
       });
     }
@@ -171,18 +230,27 @@ type AirClaim = { ok: true } | { ok: false; holder: string };
  * the caller as the channel holder when it is allowed to transmit. A
  * `talk_priority` operator may take the channel from a non-priority talker, but
  * never from another priority talker — so two operators can never double up.
+ * A yielding holder (a radio bridge configured to yield) steps aside for any
+ * talker, so a real unit always wins the channel back from such a bridge.
  */
-function claimAir(chanKey: string, ws: WebSocket, unitUpper: string, priority: boolean): AirClaim {
+function claimAir(
+  chanKey: string,
+  ws: WebSocket,
+  unitUpper: string,
+  priority: boolean,
+  yields: boolean,
+): AirClaim {
   const slot = voiceAirByChannel.get(chanKey);
   const now = Date.now();
   if (slot && now - slot.lastPcmMs <= VOICE_AIR_TTL_MS && slot.ws !== ws) {
-    // A different connection is holding the channel.
-    if (!(priority && !slot.priority)) {
+    // A different connection is holding the channel. A yielding holder is
+    // pre-empted by anyone; otherwise only priority takes a non-priority holder.
+    if (!slot.yields && !(priority && !slot.priority)) {
       return { ok: false, holder: slot.unitUpper };
     }
-    // priority pre-empts a non-priority holder — fall through and take over.
+    // fall through and take over the channel.
   }
-  voiceAirByChannel.set(chanKey, { ws, unitUpper, lastPcmMs: now, priority });
+  voiceAirByChannel.set(chanKey, { ws, unitUpper, lastPcmMs: now, priority, yields });
   return { ok: true };
 }
 
@@ -214,8 +282,37 @@ export function attachVoiceRelay(
         }
 
         let identity: Identity;
+        const bridgeParam = url.searchParams.get("bridge");
         const token = url.searchParams.get("token");
-        if (token) {
+        if (bridgeParam) {
+          // Loopback connection from the in-process radio-bridge worker.
+          if (bridgeParam !== BRIDGE_LOOPBACK_SECRET) {
+            socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+            socket.destroy();
+            return;
+          }
+          const bridgeAgency = Number(url.searchParams.get("agency"));
+          if (!Number.isInteger(bridgeAgency) || bridgeAgency < 0) {
+            socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
+            socket.destroy();
+            return;
+          }
+          // A bridge must not outlive its agency being disabled.
+          if (getPool()) {
+            const agency = await getAgencyById(bridgeAgency).catch(() => null);
+            if (!agency || agency.disabled) {
+              socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+              socket.destroy();
+              return;
+            }
+          }
+          identity = {
+            kind: "bridge",
+            agencyId: bridgeAgency,
+            yields: url.searchParams.get("yields") === "1",
+            bridgeName: (url.searchParams.get("name") ?? "BRIDGE").slice(0, 64),
+          };
+        } else if (token) {
           const user = verifyToken(token);
           if (!user) {
             socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
@@ -237,7 +334,32 @@ export function attachVoiceRelay(
               return;
             }
           }
-          identity = { kind: "account", user };
+          const runBridgeRaw = url.searchParams.get("runBridge");
+          if (runBridgeRaw != null) {
+            // Remote audio-device bridge runner (the desktop console). The
+            // account's token authenticates it; the bridge row decides which
+            // channel it keys, whether it yields, and its name — the client
+            // cannot pick those, so this never grants extra channel access.
+            const bridgeId = Number(runBridgeRaw);
+            const bridge =
+              getPool() && Number.isInteger(bridgeId)
+                ? await getBridgeById(bridgeId, user.agencyId).catch(() => null)
+                : null;
+            if (!bridge || !bridge.enabled || bridge.source_type !== "audio_device") {
+              socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+              socket.destroy();
+              return;
+            }
+            identity = {
+              kind: "bridge",
+              agencyId: user.agencyId,
+              yields: bridge.yield_to_units,
+              bridgeName: bridge.name,
+              forcedChannel: bridge.target_channel,
+            };
+          } else {
+            identity = { kind: "account", user };
+          }
         } else {
           const headerRaw = req.headers["x-radio-key"];
           const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
@@ -265,6 +387,8 @@ export function attachVoiceRelay(
             displayName: null,
             permission: "listen_only",
             joined: false,
+            simulcastTargets: null,
+            yields: identity.kind === "bridge" ? identity.yields : false,
             lastBusyMs: 0,
           });
           wss.emit("connection", ws, req);
@@ -291,9 +415,13 @@ export function attachVoiceRelay(
   async function handleJoin(
     ws: WebSocket,
     meta: ClientMeta,
-    json: { channel?: string; unit_id?: string },
+    json: { channel?: string; unit_id?: string; client?: string },
   ): Promise<void> {
-    const channelName = String(json.channel ?? "").trim();
+    // A remote bridge runner keys only the channel its bridge row configures.
+    const channelName =
+      meta.identity.kind === "bridge" && meta.identity.forcedChannel
+        ? meta.identity.forcedChannel.trim()
+        : String(json.channel ?? "").trim();
     const chNorm = normalizedChannel(channelName);
     if (!chNorm || chNorm === "----") {
       ws.send(JSON.stringify({ type: "error", code: "bad_join" }));
@@ -305,6 +433,17 @@ export function attachVoiceRelay(
       channelRow = await getChannelByName(meta.agencyId, channelName);
     } catch {
       channelRow = null; // no database — recording/permissions degrade gracefully
+    }
+
+    // When it is not a real channel, it may be a simulcast channel — only
+    // admin/dispatcher accounts may key one; handsets and radios cannot.
+    let simulcast: { id: number; name: string; memberChannels: { id: number; name: string }[] } | null = null;
+    if (!channelRow) {
+      try {
+        simulcast = await getSimulcastByName(meta.agencyId, channelName);
+      } catch {
+        simulcast = null;
+      }
     }
 
     let unitId: string;
@@ -331,7 +470,18 @@ export function attachVoiceRelay(
         }
         permission = membership;
       }
+    } else if (meta.identity.kind === "bridge") {
+      // A radio bridge keys its admin-configured target like a unit. It may key
+      // a simulcast channel too, so one ingest fans out to several channels.
+      unitId = meta.identity.bridgeName.trim().toUpperCase() || "BRIDGE";
+      displayName = meta.identity.bridgeName;
+      permission = "talk";
     } else {
+      // A key-authenticated handset cannot key a simulcast channel.
+      if (simulcast) {
+        ws.send(JSON.stringify({ type: "error", code: "not_a_member" }));
+        return;
+      }
       unitId = String(json.unit_id ?? "").trim().toUpperCase();
       if (!unitId) {
         ws.send(JSON.stringify({ type: "error", code: "bad_join" }));
@@ -345,10 +495,21 @@ export function attachVoiceRelay(
     meta.channelNorm = chNorm;
     meta.channelKey = chanKey;
     meta.channelName = channelName;
-    meta.channelId = channelRow?.id ?? null;
+    meta.channelId = simulcast ? null : channelRow?.id ?? null;
     meta.userId = userId;
     meta.displayName = displayName;
     meta.permission = permission;
+    meta.simulcastTargets = simulcast
+      ? simulcast.memberChannels.map((c) => {
+          const norm = normalizedChannel(c.name);
+          return {
+            channelKey: channelKey(meta.agencyId, norm),
+            channelName: c.name,
+            channelNorm: norm,
+            channelId: c.id,
+          };
+        })
+      : null;
     meta.joined = true;
     const prior = voiceRoster.get(ws);
     voiceRoster.set(ws, {
@@ -356,6 +517,7 @@ export function attachVoiceRelay(
       unitId,
       displayName,
       kind: meta.identity.kind,
+      client: normalizeClient(json.client),
       // Keep the original join time across re-joins to the same channel
       // (Android re-sends `join` on the same socket periodically).
       joinedAt: prior && prior.channelKey === chanKey ? prior.joinedAt : Date.now(),
@@ -374,7 +536,12 @@ export function attachVoiceRelay(
           const text = Buffer.isBuffer(raw)
             ? raw.toString("utf8")
             : Buffer.from(raw as ArrayBuffer).toString("utf8");
-          const json = JSON.parse(text) as { type?: string; channel?: string; unit_id?: string };
+          const json = JSON.parse(text) as {
+            type?: string;
+            channel?: string;
+            unit_id?: string;
+            client?: string;
+          };
           if (json.type === "join") {
             void handleJoin(ws, meta, json);
           }
@@ -400,8 +567,33 @@ export function attachVoiceRelay(
         if (payload.length === 0) {
           return;
         }
+        const priority = meta.permission === "talk_priority";
+
+        // Simulcast — fan the frame out to every member channel it can claim.
+        if (meta.simulcastTargets) {
+          for (const target of meta.simulcastTargets) {
+            if (!claimAir(target.channelKey, ws, meta.unitId, priority, meta.yields).ok) {
+              continue; // a member channel held by someone else is simply skipped
+            }
+            broadcastExcept(ws, target.channelKey, payload);
+            recordFrame(
+              {
+                agencyId: meta.agencyId,
+                channelNorm: target.channelNorm,
+                channelName: target.channelName,
+                channelId: target.channelId,
+                userId: meta.userId,
+                unitId: meta.unitId,
+                displayName: meta.displayName,
+              },
+              payload,
+            );
+          }
+          return;
+        }
+
         // Strict half-duplex — only the channel holder's audio goes through.
-        const claim = claimAir(meta.channelKey, ws, meta.unitId, meta.permission === "talk_priority");
+        const claim = claimAir(meta.channelKey, ws, meta.unitId, priority, meta.yields);
         if (!claim.ok) {
           const now = Date.now();
           if (now - meta.lastBusyMs > BUSY_NOTICE_MS) {

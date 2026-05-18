@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import type { PoolClient } from "pg";
 import { getPool, requirePool, DEFAULT_AGENCY_SLUG } from "./db.js";
 import { hashPassword, type Role } from "./auth.js";
 
@@ -16,6 +17,14 @@ export type SoundKind = (typeof SOUND_KINDS)[number];
 
 export function isSoundKind(value: unknown): value is SoundKind {
   return (SOUND_KINDS as readonly string[]).includes(value as string);
+}
+
+/** Device category an agency assigns to an account. */
+export const DEVICE_TYPES = ["unit_radio", "handheld", "dispatch_console", "phone", "radio_bridge"] as const;
+export type DeviceType = (typeof DEVICE_TYPES)[number];
+
+export function isDeviceType(value: unknown): value is DeviceType {
+  return (DEVICE_TYPES as readonly string[]).includes(value as string);
 }
 
 // --- agencies (tenants) --------------------------------------------------
@@ -204,6 +213,27 @@ export async function deleteAgency(id: number): Promise<boolean> {
   return (res.rowCount ?? 0) > 0;
 }
 
+/** Agency branding logo bytes, or null when the agency has not uploaded one. */
+export async function getAgencyLogo(agencyId: number): Promise<{ logo: Buffer; mime: string } | null> {
+  const res = await requirePool().query<{ logo: Buffer | null; logo_mime: string | null }>(
+    `SELECT logo, logo_mime FROM agencies WHERE id = $1;`,
+    [agencyId],
+  );
+  const row = res.rows[0];
+  if (!row || !row.logo || !row.logo_mime) {
+    return null;
+  }
+  return { logo: row.logo, mime: row.logo_mime };
+}
+
+export async function setAgencyLogo(agencyId: number, logo: Buffer, mime: string): Promise<void> {
+  await requirePool().query(`UPDATE agencies SET logo = $2, logo_mime = $3 WHERE id = $1;`, [agencyId, logo, mime]);
+}
+
+export async function deleteAgencyLogo(agencyId: number): Promise<void> {
+  await requirePool().query(`UPDATE agencies SET logo = NULL, logo_mime = NULL WHERE id = $1;`, [agencyId]);
+}
+
 // --- users ---------------------------------------------------------------
 
 export interface UserRow {
@@ -212,6 +242,7 @@ export interface UserRow {
   display_name: string;
   role: Role;
   unit_id: string | null;
+  device_type: string | null;
   disabled: boolean;
   agency_id: number | null;
   created_at: string;
@@ -256,7 +287,7 @@ export interface AuditRow {
   ip: string | null;
 }
 
-const USER_COLS = "id, username, display_name, role, unit_id, disabled, agency_id, created_at";
+const USER_COLS = "id, username, display_name, role, unit_id, device_type, disabled, agency_id, created_at";
 
 /** Accounts within one agency. */
 export async function listUsers(agencyId: number): Promise<UserRow[]> {
@@ -282,7 +313,7 @@ export async function getUserById(id: number, agencyId?: number): Promise<UserRo
 /** Login lookup — usernames are globally unique, so this carries the agency to the token. */
 export async function getUserByUsername(username: string): Promise<UserWithHash | null> {
   const res = await requirePool().query<UserWithHash>(
-    `SELECT u.id, u.username, u.display_name, u.role, u.unit_id, u.disabled, u.agency_id,
+    `SELECT u.id, u.username, u.display_name, u.role, u.unit_id, u.device_type, u.disabled, u.agency_id,
             u.created_at, u.password_hash,
             a.name AS agency_name, a.disabled AS agency_disabled
        FROM users u
@@ -300,20 +331,36 @@ export async function createUser(input: {
   role: Role;
   unitId: string | null;
   agencyId: number | null;
+  deviceType?: string | null;
 }): Promise<UserRow> {
   const hash = await hashPassword(input.password);
   const res = await requirePool().query<UserRow>(
-    `INSERT INTO users (username, display_name, password_hash, role, unit_id, agency_id)
-     VALUES ($1, $2, $3, $4, $5, $6)
+    `INSERT INTO users (username, display_name, password_hash, role, unit_id, agency_id, device_type)
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
      RETURNING ${USER_COLS};`,
-    [input.username.trim(), input.displayName.trim(), hash, input.role, input.unitId, input.agencyId],
+    [
+      input.username.trim(),
+      input.displayName.trim(),
+      hash,
+      input.role,
+      input.unitId,
+      input.agencyId,
+      input.deviceType ?? null,
+    ],
   );
   return res.rows[0]!;
 }
 
 export async function updateUser(
   id: number,
-  patch: { displayName?: string; role?: Role; unitId?: string | null; disabled?: boolean; password?: string },
+  patch: {
+    displayName?: string;
+    role?: Role;
+    unitId?: string | null;
+    deviceType?: string | null;
+    disabled?: boolean;
+    password?: string;
+  },
 ): Promise<UserRow | null> {
   const sets: string[] = [];
   const vals: unknown[] = [];
@@ -321,6 +368,7 @@ export async function updateUser(
   if (patch.displayName !== undefined) { sets.push(`display_name = $${i++}`); vals.push(patch.displayName.trim()); }
   if (patch.role !== undefined) { sets.push(`role = $${i++}`); vals.push(patch.role); }
   if (patch.unitId !== undefined) { sets.push(`unit_id = $${i++}`); vals.push(patch.unitId); }
+  if (patch.deviceType !== undefined) { sets.push(`device_type = $${i++}`); vals.push(patch.deviceType); }
   if (patch.disabled !== undefined) { sets.push(`disabled = $${i++}`); vals.push(patch.disabled); }
   if (patch.password !== undefined) { sets.push(`password_hash = $${i++}`); vals.push(await hashPassword(patch.password)); }
   if (sets.length === 0) {
@@ -417,6 +465,289 @@ export async function getChannelByName(agencyId: number, name: string): Promise<
     [agencyId, name.trim()],
   );
   return res.rows[0] ?? null;
+}
+
+// --- simulcast channels --------------------------------------------------
+
+export interface SimulcastRow {
+  id: number;
+  name: string;
+  member_channel_ids: number[];
+}
+
+/** Simulcast channels for one agency, each with the real channels it fans out to. */
+export async function listSimulcasts(agencyId: number): Promise<SimulcastRow[]> {
+  const res = await requirePool().query<SimulcastRow>(
+    `SELECT s.id, s.name,
+            COALESCE(array_agg(m.channel_id) FILTER (WHERE m.channel_id IS NOT NULL), '{}') AS member_channel_ids
+     FROM simulcast_channels s
+     LEFT JOIN simulcast_members m ON m.simulcast_id = s.id
+     WHERE s.agency_id = $1
+     GROUP BY s.id, s.name
+     ORDER BY s.name ASC;`,
+    [agencyId],
+  );
+  return res.rows;
+}
+
+/** A simulcast channel and its member channels, resolved by name (used by the voice relay). */
+export async function getSimulcastByName(
+  agencyId: number,
+  name: string,
+): Promise<{ id: number; name: string; memberChannels: { id: number; name: string }[] } | null> {
+  const p = requirePool();
+  const sim = await p.query<{ id: number; name: string }>(
+    `SELECT id, name FROM simulcast_channels WHERE agency_id = $1 AND lower(name) = lower($2);`,
+    [agencyId, name.trim()],
+  );
+  const row = sim.rows[0];
+  if (!row) {
+    return null;
+  }
+  const members = await p.query<{ id: number; name: string }>(
+    `SELECT c.id, c.name FROM simulcast_members m
+     JOIN radio_channels c ON c.id = m.channel_id
+     WHERE m.simulcast_id = $1
+     ORDER BY c.sort_order ASC, c.id ASC;`,
+    [row.id],
+  );
+  return { id: row.id, name: row.name, memberChannels: members.rows };
+}
+
+/** Replaces a simulcast's member set; only channels in the agency are kept. */
+async function setSimulcastMembers(
+  client: PoolClient,
+  simulcastId: number,
+  agencyId: number,
+  channelIds: number[],
+): Promise<void> {
+  await client.query(`DELETE FROM simulcast_members WHERE simulcast_id = $1;`, [simulcastId]);
+  for (const channelId of channelIds) {
+    await client.query(
+      `INSERT INTO simulcast_members (simulcast_id, channel_id)
+       SELECT $1, $2 WHERE EXISTS (SELECT 1 FROM radio_channels WHERE id = $2 AND agency_id = $3)
+       ON CONFLICT DO NOTHING;`,
+      [simulcastId, channelId, agencyId],
+    );
+  }
+}
+
+export async function createSimulcast(
+  agencyId: number,
+  name: string,
+  channelIds: number[],
+): Promise<{ id: number; name: string }> {
+  const client = await requirePool().connect();
+  try {
+    await client.query("BEGIN");
+    const res = await client.query<{ id: number; name: string }>(
+      `INSERT INTO simulcast_channels (agency_id, name) VALUES ($1, $2) RETURNING id, name;`,
+      [agencyId, name.trim()],
+    );
+    const sim = res.rows[0]!;
+    await setSimulcastMembers(client, sim.id, agencyId, channelIds);
+    await client.query("COMMIT");
+    return sim;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function updateSimulcast(
+  id: number,
+  agencyId: number,
+  patch: { name?: string; channelIds?: number[] },
+): Promise<boolean> {
+  const client = await requirePool().connect();
+  try {
+    await client.query("BEGIN");
+    const owns = await client.query(
+      `SELECT 1 FROM simulcast_channels WHERE id = $1 AND agency_id = $2;`,
+      [id, agencyId],
+    );
+    if (owns.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return false;
+    }
+    if (patch.name !== undefined) {
+      await client.query(`UPDATE simulcast_channels SET name = $2 WHERE id = $1;`, [id, patch.name.trim()]);
+    }
+    if (patch.channelIds !== undefined) {
+      await setSimulcastMembers(client, id, agencyId, patch.channelIds);
+    }
+    await client.query("COMMIT");
+    return true;
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function deleteSimulcast(id: number, agencyId: number): Promise<boolean> {
+  const res = await requirePool().query(`DELETE FROM simulcast_channels WHERE id = $1 AND agency_id = $2;`, [
+    id,
+    agencyId,
+  ]);
+  return (res.rowCount ?? 0) > 0;
+}
+
+// --- radio bridges -------------------------------------------------------
+
+export const BRIDGE_SOURCE_TYPES = ["stream_url", "audio_device"] as const;
+export const BRIDGE_DIRECTIONS = ["inbound", "bidirectional"] as const;
+export const BRIDGE_TX_MODES = ["passthrough", "vocoder"] as const;
+
+export interface BridgeRow {
+  id: number;
+  name: string;
+  source_type: string;
+  source_url: string | null;
+  device_hint: string | null;
+  target_channel: string;
+  direction: string;
+  yield_to_units: boolean;
+  tx_mode: string;
+  vox_threshold: number;
+  vox_hang_ms: number;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface BridgeInput {
+  name: string;
+  sourceType: string;
+  sourceUrl: string | null;
+  deviceHint: string | null;
+  targetChannel: string;
+  direction: string;
+  yieldToUnits: boolean;
+  txMode: string;
+  voxThreshold: number;
+  voxHangMs: number;
+  enabled: boolean;
+}
+
+const BRIDGE_COLS =
+  "id, name, source_type, source_url, device_hint, target_channel, direction, " +
+  "yield_to_units, tx_mode, vox_threshold, vox_hang_ms, enabled, created_at";
+
+export async function listBridges(agencyId: number): Promise<BridgeRow[]> {
+  const res = await requirePool().query<BridgeRow>(
+    `SELECT ${BRIDGE_COLS} FROM radio_bridges WHERE agency_id = $1 ORDER BY name ASC;`,
+    [agencyId],
+  );
+  return res.rows;
+}
+
+export async function createBridge(agencyId: number, input: BridgeInput): Promise<BridgeRow> {
+  const res = await requirePool().query<BridgeRow>(
+    `INSERT INTO radio_bridges
+       (agency_id, name, source_type, source_url, device_hint, target_channel,
+        direction, yield_to_units, tx_mode, vox_threshold, vox_hang_ms, enabled)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+     RETURNING ${BRIDGE_COLS};`,
+    [
+      agencyId,
+      input.name.trim(),
+      input.sourceType,
+      input.sourceUrl,
+      input.deviceHint,
+      input.targetChannel.trim(),
+      input.direction,
+      input.yieldToUnits,
+      input.txMode,
+      input.voxThreshold,
+      input.voxHangMs,
+      input.enabled,
+    ],
+  );
+  return res.rows[0]!;
+}
+
+export async function updateBridge(
+  id: number,
+  agencyId: number,
+  patch: Partial<BridgeInput>,
+): Promise<BridgeRow | null> {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  let i = 1;
+  const col = (name: string, value: unknown) => {
+    sets.push(`${name} = $${i++}`);
+    vals.push(value);
+  };
+  if (patch.name !== undefined) col("name", patch.name.trim());
+  if (patch.sourceType !== undefined) col("source_type", patch.sourceType);
+  if (patch.sourceUrl !== undefined) col("source_url", patch.sourceUrl);
+  if (patch.deviceHint !== undefined) col("device_hint", patch.deviceHint);
+  if (patch.targetChannel !== undefined) col("target_channel", patch.targetChannel.trim());
+  if (patch.direction !== undefined) col("direction", patch.direction);
+  if (patch.yieldToUnits !== undefined) col("yield_to_units", patch.yieldToUnits);
+  if (patch.txMode !== undefined) col("tx_mode", patch.txMode);
+  if (patch.voxThreshold !== undefined) col("vox_threshold", patch.voxThreshold);
+  if (patch.voxHangMs !== undefined) col("vox_hang_ms", patch.voxHangMs);
+  if (patch.enabled !== undefined) col("enabled", patch.enabled);
+  if (sets.length === 0) {
+    const res = await requirePool().query<BridgeRow>(
+      `SELECT ${BRIDGE_COLS} FROM radio_bridges WHERE id = $1 AND agency_id = $2;`,
+      [id, agencyId],
+    );
+    return res.rows[0] ?? null;
+  }
+  vals.push(id, agencyId);
+  const res = await requirePool().query<BridgeRow>(
+    `UPDATE radio_bridges SET ${sets.join(", ")} WHERE id = $${i++} AND agency_id = $${i}
+     RETURNING ${BRIDGE_COLS};`,
+    vals,
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function deleteBridge(id: number, agencyId: number): Promise<boolean> {
+  const res = await requirePool().query(`DELETE FROM radio_bridges WHERE id = $1 AND agency_id = $2;`, [
+    id,
+    agencyId,
+  ]);
+  return (res.rowCount ?? 0) > 0;
+}
+
+/** One bridge scoped to its agency, or null. Used to authorize bridge runners. */
+export async function getBridgeById(id: number, agencyId: number): Promise<BridgeRow | null> {
+  const res = await requirePool().query<BridgeRow>(
+    `SELECT ${BRIDGE_COLS} FROM radio_bridges WHERE id = $1 AND agency_id = $2;`,
+    [id, agencyId],
+  );
+  return res.rows[0] ?? null;
+}
+
+/** A bridge row carrying its owning agency — used by the in-process bridge worker. */
+export interface AgencyBridgeRow extends BridgeRow {
+  agency_id: number;
+}
+
+/**
+ * Every enabled stream-URL bridge across all tenants whose agency is active.
+ * The bridge worker polls this to decide which ffmpeg ingests should run.
+ */
+export async function listEnabledStreamBridges(): Promise<AgencyBridgeRow[]> {
+  const res = await requirePool().query<AgencyBridgeRow>(
+    `SELECT b.agency_id, b.id, b.name, b.source_type, b.source_url, b.device_hint,
+            b.target_channel, b.direction, b.yield_to_units, b.tx_mode,
+            b.vox_threshold, b.vox_hang_ms, b.enabled, b.created_at
+       FROM radio_bridges b
+       JOIN agencies a ON a.id = b.agency_id
+      WHERE b.enabled = TRUE
+        AND b.source_type = 'stream_url'
+        AND b.source_url IS NOT NULL
+        AND a.disabled = FALSE
+      ORDER BY b.id ASC;`,
+  );
+  return res.rows;
 }
 
 // --- memberships ---------------------------------------------------------

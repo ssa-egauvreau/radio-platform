@@ -16,6 +16,15 @@ function formatConnected(ms: number): string {
   return rest > 0 ? `${hours}h ${rest}m` : `${hours}h`;
 }
 
+/** Friendly label for a member's client platform. */
+const CLIENT_LABEL: Record<string, string> = {
+  android: "Android",
+  ios: "iOS",
+  web: "Web",
+  desktop: "Desktop",
+  bridge: "Bridge",
+};
+
 /** Connection-age tier — drives the status dot colour. */
 function tier(ms: number): string {
   if (ms < 60_000) {
@@ -67,6 +76,9 @@ export function ChannelRoster({ channelName }: { channelName: string }) {
             <span className={`roster-dot ${tier(member.connected_ms)}`} title="Connected" />
             <span className="roster-name">{member.display_name || aliasFor(member.unit_id)}</span>
             {member.kind === "legacy" && <span className="roster-tag">radio</span>}
+            {CLIENT_LABEL[member.client] && (
+              <span className="roster-tag">{CLIENT_LABEL[member.client]}</span>
+            )}
             <span className="roster-time">{formatConnected(member.connected_ms)}</span>
           </div>
         ))

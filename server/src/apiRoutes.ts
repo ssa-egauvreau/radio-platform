@@ -26,6 +26,21 @@ import {
   generateRadioKey,
   getAgencyById,
   getChannelById,
+  getChannelByName,
+  getSimulcastByName,
+  createSimulcast,
+  deleteSimulcast,
+  listSimulcasts,
+  updateSimulcast,
+  BRIDGE_SOURCE_TYPES,
+  BRIDGE_DIRECTIONS,
+  BRIDGE_TX_MODES,
+  createBridge,
+  deleteBridge,
+  getBridgeById,
+  listBridges,
+  updateBridge,
+  type BridgeInput,
   getTransmissionAudio,
   getUserById,
   getUserByUsername,
@@ -41,11 +56,15 @@ import {
   listUnitAliases,
   listUsers,
   PERMISSIONS,
+  deleteAgencyLogo,
   deleteAgencySound,
+  getAgencyLogo,
   getAgencySound,
+  isDeviceType,
   isSoundKind,
   listAgencySounds,
   resolveAgencyByKey,
+  setAgencyLogo,
   setAgencySound,
   removeMembership,
   setMembership,
@@ -65,6 +84,25 @@ const radioApiKey = process.env.RADIO_API_KEY?.trim();
 
 /** Upper bound for an uploaded tone (short clips; keeps a clip well under this). */
 const SOUND_MAX_BYTES = "1mb";
+
+/** Upper bound for an uploaded agency logo. */
+const LOGO_MAX_BYTES = "512kb";
+
+/** Reads a device-category value from request input, or null when absent/invalid. */
+function asDeviceType(value: unknown): string | null {
+  return isDeviceType(value) ? value : null;
+}
+
+/** Picks `value` when it is one of `allowed`, else `fallback`. */
+function oneOf<T extends string>(value: unknown, allowed: readonly T[], fallback: T): T {
+  return allowed.includes(value as T) ? (value as T) : fallback;
+}
+
+/** Clamps request input to a numeric range, falling back when it is not a number. */
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.min(Math.max(n, min), max) : fallback;
+}
 
 function clientIp(req: Request): string {
   const fwd = req.headers["x-forwarded-for"];
@@ -111,6 +149,22 @@ function requireAgencyMember(req: Request, res: Response, next: NextFunction): v
 /** Agency a key-authenticated handset request belongs to (0 only in DB-less local dev). */
 function radioAgencyId(req: Request): number {
   return req.agency?.id ?? 0;
+}
+
+/** Requires a signed-in admin or dispatcher within an agency (command-level operators). */
+function requireAgencyOperator(req: Request, res: Response, next: NextFunction): void {
+  if (!req.authUser) {
+    res.status(401).json({ error: "unauthorized" });
+    return;
+  }
+  if (
+    req.authUser.agencyId == null ||
+    (req.authUser.role !== "admin" && req.authUser.role !== "dispatcher")
+  ) {
+    res.status(403).json({ error: "forbidden" });
+    return;
+  }
+  next();
 }
 
 /** Router for account/auth, admin, owner, and radio endpoints, mounted at `/v1`. */
@@ -194,14 +248,28 @@ export function createApiRouter(): Router {
       const me = req.authUser!;
       if (me.role === "admin" || me.role === "dispatcher") {
         const all = await listChannels(me.agencyId!);
+        const sims = await listSimulcasts(me.agencyId!);
         res.json({
-          channels: all.map((c) => ({
-            id: c.id,
-            name: c.name,
-            color: c.color,
-            zone: c.zone,
-            permission: "talk_priority",
-          })),
+          channels: [
+            ...all.map((c) => ({
+              id: c.id,
+              name: c.name,
+              color: c.color,
+              zone: c.zone,
+              permission: "talk_priority",
+              simulcast: false,
+            })),
+            // Simulcast channels carry a negative id so they never collide with
+            // a real channel id in the console's open-channel set.
+            ...sims.map((s) => ({
+              id: -s.id,
+              name: s.name,
+              color: null,
+              zone: "Simulcast",
+              permission: "talk_priority",
+              simulcast: true,
+            })),
+          ],
         });
         return;
       }
@@ -355,6 +423,7 @@ export function createApiRouter(): Router {
       const password = String(req.body?.password ?? "");
       const role = asAgencyRole(req.body?.role) ?? "radio";
       const unitId = req.body?.unitId ? String(req.body.unitId).trim().toUpperCase() : null;
+      const deviceType = asDeviceType(req.body?.deviceType);
       if (!username || !password) {
         res.status(400).json({ error: "missing_fields" });
         return;
@@ -363,7 +432,7 @@ export function createApiRouter(): Router {
         res.status(409).json({ error: "username_taken" });
         return;
       }
-      const user = await createUser({ username, displayName, password, role, unitId, agencyId: id });
+      const user = await createUser({ username, displayName, password, role, unitId, agencyId: id, deviceType });
       await writeAudit({
         agencyId: id,
         actorUserId: req.authUser!.id,
@@ -388,7 +457,14 @@ export function createApiRouter(): Router {
         res.status(404).json({ error: "not_found" });
         return;
       }
-      const patch: { displayName?: string; role?: Role; unitId?: string | null; disabled?: boolean; password?: string } = {};
+      const patch: {
+        displayName?: string;
+        role?: Role;
+        unitId?: string | null;
+        deviceType?: string | null;
+        disabled?: boolean;
+        password?: string;
+      } = {};
       if (req.body?.displayName !== undefined) patch.displayName = String(req.body.displayName);
       if (req.body?.role !== undefined) {
         const role = asAgencyRole(req.body.role);
@@ -400,6 +476,9 @@ export function createApiRouter(): Router {
       }
       if (req.body?.unitId !== undefined) {
         patch.unitId = req.body.unitId ? String(req.body.unitId).trim().toUpperCase() : null;
+      }
+      if (req.body?.deviceType !== undefined) {
+        patch.deviceType = asDeviceType(req.body.deviceType);
       }
       if (req.body?.disabled !== undefined) patch.disabled = Boolean(req.body.disabled);
       if (req.body?.password) patch.password = String(req.body.password);
@@ -474,6 +553,7 @@ export function createApiRouter(): Router {
       const password = String(req.body?.password ?? "");
       const role = asAgencyRole(req.body?.role) ?? "radio";
       const unitId = req.body?.unitId ? String(req.body.unitId).trim().toUpperCase() : null;
+      const deviceType = asDeviceType(req.body?.deviceType);
       if (!username || !password) {
         res.status(400).json({ error: "missing_fields" });
         return;
@@ -482,7 +562,7 @@ export function createApiRouter(): Router {
         res.status(409).json({ error: "username_taken" });
         return;
       }
-      const user = await createUser({ username, displayName, password, role, unitId, agencyId });
+      const user = await createUser({ username, displayName, password, role, unitId, agencyId, deviceType });
       await writeAudit({
         agencyId,
         actorUserId: req.authUser!.id,
@@ -507,7 +587,14 @@ export function createApiRouter(): Router {
         res.status(404).json({ error: "not_found" });
         return;
       }
-      const patch: { displayName?: string; role?: Role; unitId?: string | null; disabled?: boolean; password?: string } = {};
+      const patch: {
+        displayName?: string;
+        role?: Role;
+        unitId?: string | null;
+        deviceType?: string | null;
+        disabled?: boolean;
+        password?: string;
+      } = {};
       if (req.body?.displayName !== undefined) patch.displayName = String(req.body.displayName);
       if (req.body?.role !== undefined) {
         const role = asAgencyRole(req.body.role);
@@ -519,6 +606,9 @@ export function createApiRouter(): Router {
       }
       if (req.body?.unitId !== undefined) {
         patch.unitId = req.body.unitId ? String(req.body.unitId).trim().toUpperCase() : null;
+      }
+      if (req.body?.deviceType !== undefined) {
+        patch.deviceType = asDeviceType(req.body.deviceType);
       }
       if (req.body?.disabled !== undefined) patch.disabled = Boolean(req.body.disabled);
       if (req.body?.password) patch.password = String(req.body.password);
@@ -596,6 +686,11 @@ export function createApiRouter(): Router {
         res.status(400).json({ error: "missing_name" });
         return;
       }
+      // A channel name must not collide with a simulcast channel (relay resolves by name).
+      if (await getSimulcastByName(agencyId, name)) {
+        res.status(409).json({ error: "duplicate" });
+        return;
+      }
       const channel = await createChannel(agencyId, name);
       await writeAudit({
         agencyId,
@@ -620,6 +715,11 @@ export function createApiRouter(): Router {
         const name = String(req.body.name).trim();
         if (!name) {
           res.status(400).json({ error: "missing_name" });
+          return;
+        }
+        // A channel name must not collide with a simulcast (relay resolves by name).
+        if (await getSimulcastByName(agencyId, name)) {
+          res.status(409).json({ error: "duplicate" });
           return;
         }
         patch.name = name;
@@ -668,6 +768,277 @@ export function createApiRouter(): Router {
         ip: clientIp(req),
       });
       res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- simulcast channels (admin + dispatcher) ---------------------------
+
+  router.get("/simulcast", requireAgencyOperator, async (req, res) => {
+    try {
+      res.json({ simulcasts: await listSimulcasts(req.authUser!.agencyId!) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post("/simulcast", requireAgencyOperator, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const name = String(req.body?.name ?? "").trim();
+      const channelIds = Array.isArray(req.body?.channelIds)
+        ? (req.body.channelIds as unknown[]).map((v) => Number(v)).filter((n) => Number.isFinite(n))
+        : [];
+      if (!name) {
+        res.status(400).json({ error: "missing_name" });
+        return;
+      }
+      // The relay resolves channels by name — a simulcast must not shadow a real one.
+      if (await getChannelByName(agencyId, name)) {
+        res.status(409).json({ error: "duplicate" });
+        return;
+      }
+      const simulcast = await createSimulcast(agencyId, name, channelIds);
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "simulcast_create",
+        target: name,
+        detail: { channels: channelIds.length },
+        ip: clientIp(req),
+      });
+      res.status(201).json({ simulcast });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.put("/simulcast/:id", requireAgencyOperator, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const id = Number(req.params.id);
+      const patch: { name?: string; channelIds?: number[] } = {};
+      if (req.body?.name !== undefined) {
+        const name = String(req.body.name).trim();
+        if (!name) {
+          res.status(400).json({ error: "missing_name" });
+          return;
+        }
+        if (await getChannelByName(agencyId, name)) {
+          res.status(409).json({ error: "duplicate" });
+          return;
+        }
+        patch.name = name;
+      }
+      if (Array.isArray(req.body?.channelIds)) {
+        patch.channelIds = (req.body.channelIds as unknown[])
+          .map((v) => Number(v))
+          .filter((n) => Number.isFinite(n));
+      }
+      const ok = await updateSimulcast(id, agencyId, patch);
+      if (!ok) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "simulcast_update",
+        target: String(id),
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.delete("/simulcast/:id", requireAgencyOperator, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const id = Number(req.params.id);
+      const ok = await deleteSimulcast(id, agencyId);
+      if (!ok) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "simulcast_delete",
+        target: String(id),
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- radio bridges (admin) ---------------------------------------------
+
+  router.get("/admin/bridges", requireAdmin, async (req, res) => {
+    try {
+      res.json({ bridges: await listBridges(req.authUser!.agencyId!) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post("/admin/bridges", requireAdmin, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const name = String(body.name ?? "").trim();
+      const targetChannel = String(body.targetChannel ?? "").trim();
+      if (!name || !targetChannel) {
+        res.status(400).json({ error: "missing_fields" });
+        return;
+      }
+      const sourceType = oneOf(body.sourceType, BRIDGE_SOURCE_TYPES, "stream_url");
+      // A stream URL is a listen-only feed; only an audio device can be bidirectional.
+      const direction =
+        sourceType === "stream_url"
+          ? "inbound"
+          : oneOf(body.direction, BRIDGE_DIRECTIONS, "inbound");
+      const input: BridgeInput = {
+        name,
+        sourceType,
+        sourceUrl: body.sourceUrl ? String(body.sourceUrl).trim() : null,
+        deviceHint: body.deviceHint ? String(body.deviceHint).trim() : null,
+        targetChannel,
+        direction,
+        yieldToUnits:
+          body.yieldToUnits === undefined ? direction !== "bidirectional" : Boolean(body.yieldToUnits),
+        txMode: oneOf(body.txMode, BRIDGE_TX_MODES, "passthrough"),
+        voxThreshold: clampNumber(body.voxThreshold, 0, 1, 0.02),
+        voxHangMs: Math.round(clampNumber(body.voxHangMs, 100, 10000, 1500)),
+        enabled: Boolean(body.enabled),
+      };
+      // An enabled stream bridge with no URL has nothing to ingest — the worker
+      // would skip it, leaving it "enabled" in the UI but never keying anything.
+      if (input.sourceType === "stream_url" && input.enabled && !input.sourceUrl) {
+        res.status(400).json({ error: "missing_fields" });
+        return;
+      }
+      const bridge = await createBridge(agencyId, input);
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "bridge_create",
+        target: name,
+        detail: { sourceType: input.sourceType, targetChannel },
+        ip: clientIp(req),
+      });
+      res.status(201).json({ bridge });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.patch("/admin/bridges/:id", requireAdmin, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const id = Number(req.params.id);
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const patch: Partial<BridgeInput> = {};
+      // A bridge needs a stable label and a routable target — reject blanks
+      // rather than letting updateBridge trim them to empty strings.
+      if (body.name !== undefined) {
+        const name = String(body.name).trim();
+        if (!name) {
+          res.status(400).json({ error: "missing_fields" });
+          return;
+        }
+        patch.name = name;
+      }
+      if (body.targetChannel !== undefined) {
+        const targetChannel = String(body.targetChannel).trim();
+        if (!targetChannel) {
+          res.status(400).json({ error: "missing_fields" });
+          return;
+        }
+        patch.targetChannel = targetChannel;
+      }
+      if (body.sourceType !== undefined) patch.sourceType = oneOf(body.sourceType, BRIDGE_SOURCE_TYPES, "stream_url");
+      if (body.sourceUrl !== undefined) patch.sourceUrl = body.sourceUrl ? String(body.sourceUrl).trim() : null;
+      if (body.deviceHint !== undefined) patch.deviceHint = body.deviceHint ? String(body.deviceHint).trim() : null;
+      if (body.direction !== undefined) patch.direction = oneOf(body.direction, BRIDGE_DIRECTIONS, "inbound");
+      if (body.yieldToUnits !== undefined) patch.yieldToUnits = Boolean(body.yieldToUnits);
+      if (body.txMode !== undefined) patch.txMode = oneOf(body.txMode, BRIDGE_TX_MODES, "passthrough");
+      if (body.voxThreshold !== undefined) patch.voxThreshold = clampNumber(body.voxThreshold, 0, 1, 0.02);
+      if (body.voxHangMs !== undefined) patch.voxHangMs = Math.round(clampNumber(body.voxHangMs, 100, 10000, 1500));
+      if (body.enabled !== undefined) patch.enabled = Boolean(body.enabled);
+      const current = await getBridgeById(id, agencyId);
+      if (!current) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      // Reject any patch that would leave an enabled stream bridge with no URL.
+      const effSourceType = patch.sourceType ?? current.source_type;
+      const effSourceUrl = patch.sourceUrl !== undefined ? patch.sourceUrl : current.source_url;
+      const effEnabled = patch.enabled !== undefined ? patch.enabled : current.enabled;
+      if (effSourceType === "stream_url" && effEnabled && !effSourceUrl) {
+        res.status(400).json({ error: "missing_fields" });
+        return;
+      }
+      const bridge = await updateBridge(id, agencyId, patch);
+      if (!bridge) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "bridge_update",
+        target: bridge.name,
+        detail: { fields: Object.keys(patch) },
+        ip: clientIp(req),
+      });
+      res.json({ bridge });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.delete("/admin/bridges/:id", requireAdmin, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const id = Number(req.params.id);
+      const ok = await deleteBridge(id, agencyId);
+      if (!ok) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "bridge_delete",
+        target: String(id),
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Audio-device bridges this agency can run from the desktop console. Unlike
+   * the admin CRUD above, any agency member may read this — the bridge host
+   * operator is not necessarily an admin.
+   */
+  router.get("/bridges/runnable", requireAgencyMember, async (req, res) => {
+    try {
+      const bridges = await listBridges(req.authUser!.agencyId!);
+      res.json({ bridges: bridges.filter((b) => b.enabled && b.source_type === "audio_device") });
     } catch (error) {
       fail(res, error);
     }
@@ -832,6 +1203,87 @@ export function createApiRouter(): Router {
       res.setHeader("Content-Type", sound.mime);
       res.setHeader("Cache-Control", "no-cache");
       res.send(sound.audio);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- agency logo (branding) --------------------------------------------
+
+  router.put(
+    "/admin/agency/logo",
+    requireAdmin,
+    raw({ type: () => true, limit: LOGO_MAX_BYTES }),
+    async (req, res) => {
+      try {
+        const mime = (req.header("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+        if (!mime.startsWith("image/")) {
+          res.status(415).json({ error: "bad_image_type" });
+          return;
+        }
+        const body: unknown = req.body;
+        if (!Buffer.isBuffer(body) || body.length === 0) {
+          res.status(400).json({ error: "missing_image" });
+          return;
+        }
+        const agencyId = req.authUser!.agencyId!;
+        await setAgencyLogo(agencyId, body, mime);
+        await writeAudit({
+          agencyId,
+          actorUserId: req.authUser!.id,
+          actorName: req.authUser!.username,
+          action: "agency_logo_set",
+          detail: { mime, bytes: body.length },
+          ip: clientIp(req),
+        });
+        res.json({ ok: true, mime, byte_size: body.length });
+      } catch (error) {
+        fail(res, error);
+      }
+    },
+  );
+
+  router.delete("/admin/agency/logo", requireAdmin, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      await deleteAgencyLogo(agencyId);
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "agency_logo_clear",
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // Serves an agency's logo to consoles (JWT) and handsets (radio key).
+  // 404 simply means "no logo" — the client falls back to the safeT mark.
+  router.get("/agency/logo", async (req, res) => {
+    try {
+      let agencyId = req.authUser?.agencyId ?? null;
+      if (agencyId == null) {
+        const headerRaw = req.headers["x-radio-key"];
+        const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
+        const key = headerVal ?? (typeof req.query.key === "string" ? req.query.key : null);
+        const agency = await resolveAgencyByKey(key ?? null, radioApiKey).catch(() => null);
+        agencyId = agency?.id ?? null;
+      }
+      if (agencyId == null) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      const logo = await getAgencyLogo(agencyId);
+      if (!logo) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.setHeader("Content-Type", logo.mime);
+      res.setHeader("Cache-Control", "no-cache");
+      res.send(logo.logo);
     } catch (error) {
       fail(res, error);
     }

@@ -19,10 +19,28 @@ export interface AdminUser {
   display_name: string;
   role: Role;
   unit_id: string | null;
+  device_type: string | null;
   disabled: boolean;
   agency_id: number | null;
   created_at: string;
 }
+
+/** Device categories an admin can assign to an account. */
+export const DEVICE_TYPE_OPTIONS: { value: string; label: string }[] = [
+  { value: "", label: "—" },
+  { value: "unit_radio", label: "Unit radio (in-car)" },
+  { value: "handheld", label: "Handheld (pacset)" },
+  { value: "dispatch_console", label: "Dispatch console" },
+  { value: "phone", label: "Phone" },
+  { value: "radio_bridge", label: "Radio bridge" },
+];
+
+export function deviceTypeLabel(value: string | null): string {
+  return DEVICE_TYPE_OPTIONS.find((o) => o.value === (value ?? ""))?.label ?? "—";
+}
+
+/** Window event fired when the agency logo is uploaded or removed, so the top bar can refresh. */
+export const AGENCY_LOGO_CHANGED_EVENT = "safet:agency-logo-changed";
 
 export interface Agency {
   id: number;
@@ -56,6 +74,14 @@ export interface UserChannel {
   permission: Permission;
   color: string | null;
   zone: string | null;
+  /** True for a simulcast channel — keying it transmits on several real channels. */
+  simulcast?: boolean;
+}
+
+export interface Simulcast {
+  id: number;
+  name: string;
+  member_channel_ids: number[];
 }
 
 export interface AuditEntry {
@@ -117,6 +143,8 @@ export interface ChannelMember {
   unit_id: string;
   display_name: string | null;
   kind: string;
+  /** Client platform: android, ios, web, desktop, bridge, or unknown. */
+  client: string;
   connected_ms: number;
 }
 
@@ -131,6 +159,36 @@ export interface AgencySound {
   mime: string;
   byte_size: number;
   updated_at: string;
+}
+
+export interface Bridge {
+  id: number;
+  name: string;
+  source_type: string;
+  source_url: string | null;
+  device_hint: string | null;
+  target_channel: string;
+  direction: string;
+  yield_to_units: boolean;
+  tx_mode: string;
+  vox_threshold: number;
+  vox_hang_ms: number;
+  enabled: boolean;
+  created_at: string;
+}
+
+export interface BridgeInput {
+  name: string;
+  sourceType: string;
+  sourceUrl: string | null;
+  deviceHint: string | null;
+  targetChannel: string;
+  direction: string;
+  yieldToUnits: boolean;
+  txMode: string;
+  voxThreshold: number;
+  voxHangMs: number;
+  enabled: boolean;
 }
 
 export class ApiError extends Error {
@@ -189,11 +247,24 @@ export const api = {
   myChannels: () => request<{ channels: UserChannel[] }>("GET", "/v1/me/channels"),
 
   listUsers: () => request<{ users: AdminUser[] }>("GET", "/v1/admin/users"),
-  createUser: (input: { username: string; displayName: string; password: string; role: Role; unitId: string | null }) =>
-    request<{ user: AdminUser }>("POST", "/v1/admin/users", input),
+  createUser: (input: {
+    username: string;
+    displayName: string;
+    password: string;
+    role: Role;
+    unitId: string | null;
+    deviceType: string | null;
+  }) => request<{ user: AdminUser }>("POST", "/v1/admin/users", input),
   updateUser: (
     id: number,
-    patch: Partial<{ displayName: string; role: Role; unitId: string | null; disabled: boolean; password: string }>,
+    patch: Partial<{
+      displayName: string;
+      role: Role;
+      unitId: string | null;
+      deviceType: string | null;
+      disabled: boolean;
+      password: string;
+    }>,
   ) => request<{ user: AdminUser }>("PATCH", `/v1/admin/users/${id}`, patch),
   deleteUser: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/admin/users/${id}`),
 
@@ -262,12 +333,26 @@ export const api = {
   agencyUsers: (id: number) => request<{ users: AdminUser[] }>("GET", `/v1/owner/agencies/${id}/users`),
   createAgencyUser: (
     id: number,
-    input: { username: string; displayName: string; password: string; role: Role; unitId: string | null },
+    input: {
+      username: string;
+      displayName: string;
+      password: string;
+      role: Role;
+      unitId: string | null;
+      deviceType: string | null;
+    },
   ) => request<{ user: AdminUser }>("POST", `/v1/owner/agencies/${id}/users`, input),
   updateAgencyUser: (
     id: number,
     uid: number,
-    patch: Partial<{ displayName: string; role: Role; unitId: string | null; disabled: boolean; password: string }>,
+    patch: Partial<{
+      displayName: string;
+      role: Role;
+      unitId: string | null;
+      deviceType: string | null;
+      disabled: boolean;
+      password: string;
+    }>,
   ) => request<{ user: AdminUser }>("PATCH", `/v1/owner/agencies/${id}/users/${uid}`, patch),
   deleteAgencyUser: (id: number, uid: number) =>
     request<{ ok: boolean }>("DELETE", `/v1/owner/agencies/${id}/users/${uid}`),
@@ -276,7 +361,45 @@ export const api = {
   listSounds: () => request<{ sounds: AgencySound[] }>("GET", "/v1/admin/sounds"),
   deleteSound: (kind: string) =>
     request<{ ok: boolean }>("DELETE", `/v1/admin/sounds/${encodeURIComponent(kind)}`),
+
+  // --- agency branding ---------------------------------------------------
+  deleteAgencyLogo: () => request<{ ok: boolean }>("DELETE", "/v1/admin/agency/logo"),
+
+  // --- radio bridges -----------------------------------------------------
+  listBridges: () => request<{ bridges: Bridge[] }>("GET", "/v1/admin/bridges"),
+  createBridge: (input: BridgeInput) => request<{ bridge: Bridge }>("POST", "/v1/admin/bridges", input),
+  updateBridge: (id: number, patch: Partial<BridgeInput>) =>
+    request<{ bridge: Bridge }>("PATCH", `/v1/admin/bridges/${id}`, patch),
+  deleteBridge: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/admin/bridges/${id}`),
+  /** Enabled audio-device bridges this agency can run from the desktop console. */
+  listRunnableBridges: () => request<{ bridges: Bridge[] }>("GET", "/v1/bridges/runnable"),
+
+  // --- simulcast channels ------------------------------------------------
+  listSimulcasts: () => request<{ simulcasts: Simulcast[] }>("GET", "/v1/simulcast"),
+  createSimulcast: (name: string, channelIds: number[]) =>
+    request<{ simulcast: { id: number; name: string } }>("POST", "/v1/simulcast", { name, channelIds }),
+  updateSimulcast: (id: number, patch: { name?: string; channelIds?: number[] }) =>
+    request<{ ok: boolean }>("PUT", `/v1/simulcast/${id}`, patch),
+  deleteSimulcast: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/simulcast/${id}`),
 };
+
+/** Uploads a custom agency logo (raw image body — not JSON). */
+export async function uploadAgencyLogo(file: File): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": file.type || "image/png" };
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  const res = await fetch("/v1/admin/agency/logo", { method: "PUT", headers, body: file });
+  if (!res.ok) {
+    let code = `http_${res.status}`;
+    try {
+      code = (JSON.parse(await res.text()) as { error?: string }).error ?? code;
+    } catch {
+      /* keep the generic code */
+    }
+    throw new ApiError(code, res.status);
+  }
+}
 
 /** Uploads a custom tone for one sound kind (raw audio body — not JSON). */
 export async function uploadSound(kind: string, file: File): Promise<void> {

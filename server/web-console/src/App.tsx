@@ -3,6 +3,7 @@ import { useAuth } from "./auth";
 import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ConsolePage } from "./pages/ConsolePage";
+import { BridgeRunnerPage } from "./pages/BridgeRunnerPage";
 import { AdminPage } from "./pages/admin/AdminPage";
 import { OwnerPage } from "./pages/owner/OwnerPage";
 import { LegalPage } from "./pages/legal/LegalPage";
@@ -31,6 +32,18 @@ export function App() {
             <Navigate to="/owner" replace />
           ) : (
             <ConsolePage />
+          )
+        }
+      />
+      <Route
+        path="/bridges"
+        element={
+          !user ? (
+            <Navigate to="/login" replace />
+          ) : user.role === "owner" ? (
+            <Navigate to="/owner" replace />
+          ) : (
+            <BridgeRunnerPage />
           )
         }
       />

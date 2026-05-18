@@ -83,6 +83,9 @@ export async function ensureSchema(): Promise<void> {
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
+  // Optional agency-branding logo, uploaded by an agency admin.
+  await p.query(`ALTER TABLE agencies ADD COLUMN IF NOT EXISTS logo BYTEA;`);
+  await p.query(`ALTER TABLE agencies ADD COLUMN IF NOT EXISTS logo_mime TEXT;`);
 
   await p.query(`
     CREATE TABLE IF NOT EXISTS radio_channels (
@@ -111,6 +114,8 @@ export async function ensureSchema(): Promise<void> {
   `);
   // Platform `owner` accounts have no agency, so this column stays nullable.
   await p.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS agency_id INT REFERENCES agencies(id) ON DELETE CASCADE;`);
+  // Device category the admin assigns to an account (unit_radio, handheld, …).
+  await p.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS device_type TEXT;`);
 
   await p.query(`
     CREATE TABLE IF NOT EXISTS channel_members (
@@ -225,6 +230,47 @@ export async function ensureSchema(): Promise<void> {
       byte_size INT NOT NULL,
       updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
       PRIMARY KEY (agency_id, kind)
+    );
+  `);
+
+  // Simulcast channels — one transmission fanned out to several real channels.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS simulcast_channels (
+      id SERIAL PRIMARY KEY,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  await p.query(
+    `CREATE UNIQUE INDEX IF NOT EXISTS uq_simulcast_agency_name ON simulcast_channels (agency_id, lower(name));`,
+  );
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS simulcast_members (
+      simulcast_id INT NOT NULL REFERENCES simulcast_channels(id) ON DELETE CASCADE,
+      channel_id INT NOT NULL REFERENCES radio_channels(id) ON DELETE CASCADE,
+      PRIMARY KEY (simulcast_id, channel_id)
+    );
+  `);
+
+  // Radio bridges — external audio sources (scanner stream URLs, line-in) fed
+  // onto a channel, VOX-gated so they never hold the air during silence.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS radio_bridges (
+      id SERIAL PRIMARY KEY,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      source_type TEXT NOT NULL,
+      source_url TEXT,
+      device_hint TEXT,
+      target_channel TEXT NOT NULL,
+      direction TEXT NOT NULL DEFAULT 'inbound',
+      yield_to_units BOOLEAN NOT NULL DEFAULT TRUE,
+      tx_mode TEXT NOT NULL DEFAULT 'passthrough',
+      vox_threshold DOUBLE PRECISION NOT NULL DEFAULT 0.02,
+      vox_hang_ms INT NOT NULL DEFAULT 1500,
+      enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
   `);
 

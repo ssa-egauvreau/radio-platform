@@ -54,6 +54,8 @@ export function ChannelPanel({
   const [receiving, setReceiving] = useState(false);
 
   const clientRef = useRef<VoiceChannelClient | null>(null);
+  /** Whether the operator is currently holding PTT — gates the looping busy tone. */
+  const pttHeldRef = useRef(false);
 
   const connect = useCallback(() => {
     const client = new VoiceChannelClient(channel.name, {
@@ -64,7 +66,10 @@ export function ChannelPanel({
       onPermission: (perm) => setPermission(perm),
       onReceiving: (rx) => setReceiving(rx),
       onBusy: (unit) => {
-        sounds.busy();
+        // Keep the busy tone going while the operator still holds the key.
+        if (pttHeldRef.current) {
+          sounds.busyLoopStart();
+        }
         setVoiceDetail(
           unit ? `Channel busy — ${unit} is transmitting.` : "Channel busy — another unit is transmitting.",
         );
@@ -82,6 +87,7 @@ export function ChannelPanel({
     return () => {
       clientRef.current?.close();
       clientRef.current = null;
+      sounds.busyLoopStop();
     };
   }, [connect]);
 
@@ -90,13 +96,17 @@ export function ChannelPanel({
     if (!client) {
       return;
     }
+    pttHeldRef.current = true;
     try {
       await client.startTransmit();
       sounds.permit();
     } catch (err) {
       const code = err instanceof Error ? err.message : "";
       if (code === "channel_busy") {
-        sounds.busy();
+        // Loop the busy tone for as long as the operator holds the key.
+        if (pttHeldRef.current) {
+          sounds.busyLoopStart();
+        }
         setVoiceDetail("Channel busy — another unit is transmitting.");
       } else if (code === "listen_only") {
         setVoiceDetail("You have listen-only access on this channel.");
@@ -107,7 +117,9 @@ export function ChannelPanel({
   }, []);
 
   const stopTx = useCallback(() => {
+    pttHeldRef.current = false;
     clientRef.current?.stopTransmit();
+    sounds.busyLoopStop();
   }, []);
 
   // Keyboard hold-to-talk — only while this panel is the primary one.
@@ -293,7 +305,7 @@ export function ChannelPanel({
       </button>
 
       <button className="txmode-btn" onClick={toggleTxMode}>
-        TX MODE: <strong>{txDigital ? "DIGITAL · P25" : "ANALOG"}</strong>
+        TX MODE: <strong>{txDigital ? "COMPRESSED · FAST" : "HIGH QUALITY · NORMAL SPEED"}</strong>
       </button>
 
       <button
