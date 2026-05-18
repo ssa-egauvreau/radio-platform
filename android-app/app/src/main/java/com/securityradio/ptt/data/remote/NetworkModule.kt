@@ -10,7 +10,11 @@ import java.util.concurrent.TimeUnit
 
 object NetworkModule {
 
-    private fun buildRetrofit(baseUrl: String, apiKeyProvider: () -> String): Retrofit {
+    private fun buildRetrofit(
+        baseUrl: String,
+        authTokenProvider: () -> String,
+        apiKeyProvider: () -> String,
+    ): Retrofit {
         val logging = HttpLoggingInterceptor().apply {
             level = if (BuildConfig.DEBUG) {
                 HttpLoggingInterceptor.Level.BASIC
@@ -19,22 +23,22 @@ object NetworkModule {
             }
         }
 
-        // The key is resolved per request so an on-device agency key change
-        // takes effect immediately, without rebuilding or restarting the app.
-        val apiKeyInterceptor = Interceptor { chain ->
+        val authInterceptor = Interceptor { chain ->
+            val token = authTokenProvider().trim()
             val apiKey = apiKeyProvider().trim()
-            val request = if (apiKey.isNotBlank()) {
-                chain.request().newBuilder().header("X-Radio-Key", apiKey).build()
-            } else {
-                chain.request()
+            val builder = chain.request().newBuilder()
+            if (token.isNotBlank()) {
+                builder.header("Authorization", "Bearer $token")
+            } else if (apiKey.isNotBlank()) {
+                builder.header("X-Radio-Key", apiKey)
             }
-            chain.proceed(request)
+            chain.proceed(builder.build())
         }
 
         val client = OkHttpClient.Builder()
             .connectTimeout(10, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
-            .addInterceptor(apiKeyInterceptor)
+            .addInterceptor(authInterceptor)
             .addInterceptor(logging)
             .build()
 
@@ -45,9 +49,18 @@ object NetworkModule {
             .build()
     }
 
-    fun channelsApi(baseUrl: String, apiKeyProvider: () -> String): ChannelsApi =
-        buildRetrofit(baseUrl, apiKeyProvider).create(ChannelsApi::class.java)
+    fun channelsApi(
+        baseUrl: String,
+        authTokenProvider: () -> String,
+        apiKeyProvider: () -> String,
+    ): ChannelsApi = buildRetrofit(baseUrl, authTokenProvider, apiKeyProvider).create(ChannelsApi::class.java)
 
-    fun radioApi(baseUrl: String, apiKeyProvider: () -> String): RadioApi =
-        buildRetrofit(baseUrl, apiKeyProvider).create(RadioApi::class.java)
+    fun radioApi(
+        baseUrl: String,
+        authTokenProvider: () -> String,
+        apiKeyProvider: () -> String,
+    ): RadioApi = buildRetrofit(baseUrl, authTokenProvider, apiKeyProvider).create(RadioApi::class.java)
+
+    fun authApi(baseUrl: String): AuthApi =
+        buildRetrofit(baseUrl, authTokenProvider = { "" }, apiKeyProvider = { "" }).create(AuthApi::class.java)
 }

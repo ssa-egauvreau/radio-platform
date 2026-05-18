@@ -44,4 +44,6 @@ sealed interface RadioUiEvent {
     data class SetDeviceProfilePreference(val preference: com.securityradio.ptt.device.DeviceProfilePreference) : RadioUiEvent
 
     data object RequestOverlayPermission : RadioUiEvent
+
+    data object SignOut : RadioUiEvent
 }

@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import { DEFAULT_GREEN_CHANNELS } from "./defaultChannels.js";
 import { ensureSchema, getPool, listChannelsFromDb } from "./db.js";
-import { resolveAgencyByKey, seedInitialAccounts } from "./store.js";
+import { getAgencyById, resolveAgencyByKey, seedInitialAccounts } from "./store.js";
 import { startRecorder } from "./recorder.js";
 import { recoverPendingTranscriptions } from "./transcribe.js";
 import { initServerImbe } from "./imbeServerCodec.js";
@@ -44,6 +44,16 @@ app.use(async (req, res, next) => {
     return;
   }
   try {
+    // Signed-in handset or console bearer token — agency comes from the account.
+    if (req.authUser?.agencyId != null) {
+      const fromToken = await getAgencyById(req.authUser.agencyId).catch(() => null);
+      if (fromToken && !fromToken.disabled) {
+        req.agency = { id: fromToken.id, name: fromToken.name, slug: fromToken.slug };
+        next();
+        return;
+      }
+    }
+
     const headerRaw = req.headers["x-radio-key"];
     const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
     const key = headerVal ?? (typeof req.query.key === "string" ? req.query.key : null);

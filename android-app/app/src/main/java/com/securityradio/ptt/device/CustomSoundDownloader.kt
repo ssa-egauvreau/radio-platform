@@ -14,6 +14,7 @@ import java.util.concurrent.TimeUnit
  */
 class CustomSoundDownloader(
     httpApiBaseUrl: String,
+    private val authTokenProvider: () -> String,
     private val apiKeyProvider: () -> String,
     private val store: CustomSoundStore,
 ) {
@@ -35,12 +36,14 @@ class CustomSoundDownloader(
 
     /** Blocking refresh of every custom tone — call off the main thread. */
     fun refresh() {
+        val token = authTokenProvider().trim()
         val key = apiKeyProvider().trim()
         for ((kind, fileName) in kinds) {
             try {
                 val builder = Request.Builder().url("$baseUrl/v1/sounds/$kind")
-                if (key.isNotEmpty()) {
-                    builder.header("X-Radio-Key", key)
+                when {
+                    token.isNotEmpty() -> builder.header("Authorization", "Bearer $token")
+                    key.isNotEmpty() -> builder.header("X-Radio-Key", key)
                 }
                 client.newCall(builder.build()).execute().use { response ->
                     when {

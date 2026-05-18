@@ -977,15 +977,31 @@ fun HardwareMappingDialog(
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(
-                            text = "SITE — AGENCY RADIO KEY",
+                            text = "ACCOUNT",
+                            style = styles.body.copy(fontWeight = FontWeight.Bold),
+                            color = p.textPrimary,
+                        )
+                        TextButton(
+                            onClick = { onEvent(RadioUiEvent.SignOut) },
+                            modifier = Modifier.fillMaxWidth(),
+                            colors = ButtonDefaults.textButtonColors(
+                                containerColor = p.softKeyInactiveFill,
+                                contentColor = p.statusAmber,
+                            ),
+                        ) {
+                            Text("SIGN OUT".uppercase(Locale.US))
+                        }
+                        HorizontalDivider(color = p.divider)
+                        Text(
+                            text = "LEGACY RADIO KEY (OPTIONAL)",
                             style = styles.body.copy(fontWeight = FontWeight.Bold),
                             color = p.textPrimary,
                         )
                         Text(
                             text = if (state.agencyRadioKey.isBlank()) {
-                                "Using the built-in key. Paste the radio key from your agency owner to bind this handset to that agency."
+                                "Not used while signed in. Only needed for older setups without username/password."
                             } else {
-                                "Bound to a custom agency key. Clear the field and save to fall back to the built-in key."
+                                "Legacy override — sign out to use key-based access instead of your account."
                             },
                             style = styles.status,
                             color = p.textMuted,

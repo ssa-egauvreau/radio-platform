@@ -5,6 +5,7 @@ import { SafetMark } from "../icons";
 
 export function LoginPage() {
   const { login } = useAuth();
+  const [agencySlug, setAgencySlug] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -15,7 +16,7 @@ export function LoginPage() {
     setError(null);
     setBusy(true);
     try {
-      await login(username.trim(), password);
+      await login(username.trim(), password, agencySlug.trim() || undefined);
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -36,6 +37,18 @@ export function LoginPage() {
           </div>
         </div>
         {error && <div className="banner error">{error}</div>}
+        <label htmlFor="agency-slug">Agency / network (optional)</label>
+        <input
+          id="agency-slug"
+          autoComplete="organization"
+          placeholder="e.g. default or sunset-security"
+          value={agencySlug}
+          onChange={(e) => setAgencySlug(e.target.value)}
+        />
+        <p className="login-hint">
+          If your company gave you a network code, enter it here. Leave blank if you only have one agency or
+          you use a platform owner account.
+        </p>
         <label htmlFor="username">Username</label>
         <input
           id="username"

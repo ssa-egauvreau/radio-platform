@@ -39,11 +39,12 @@ fun httpApiBaseUrlToVoiceWebSocketUrl(httpBaseUrl: String): String {
  */
 class VoiceRelayTransport(
     httpApiBaseUrl: String,
+    private val authTokenProvider: () -> String,
     private val apiKeyProvider: () -> String,
     private val inbound: InboundVoicePlayer,
 ) : StreamingPcmSink {
 
-    private val wsUrl = httpApiBaseUrlToVoiceWebSocketUrl(httpApiBaseUrl)
+    private val wsBaseUrl = httpApiBaseUrlToVoiceWebSocketUrl(httpApiBaseUrl)
 
     private val client = OkHttpClient.Builder()
         .pingInterval(25L, TimeUnit.SECONDS)
@@ -272,11 +273,19 @@ class VoiceRelayTransport(
     }
 
     private fun openSocketLocked() {
-        val rb = Request.Builder().url(wsUrl)
-        // Resolved per connection so an agency key change applies on the next reconnect.
-        val key = apiKeyProvider().trim()
-        if (key.isNotEmpty()) {
-            rb.header("X-Radio-Key", key)
+        val token = authTokenProvider().trim()
+        val url = if (token.isNotEmpty()) {
+            val sep = if (wsBaseUrl.contains("?")) "&" else "?"
+            "$wsBaseUrl${sep}token=${java.net.URLEncoder.encode(token, Charsets.UTF_8.name())}"
+        } else {
+            wsBaseUrl
+        }
+        val rb = Request.Builder().url(url)
+        if (token.isEmpty()) {
+            val key = apiKeyProvider().trim()
+            if (key.isNotEmpty()) {
+                rb.header("X-Radio-Key", key)
+            }
         }
         val ws = client.newWebSocket(rb.build(), listener)
         webSocketRef.set(ws)

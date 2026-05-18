@@ -6,7 +6,7 @@ const TOKEN_KEY = "securityradio.token";
 interface AuthState {
   user: SessionUser | null;
   ready: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string, agencySlug?: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -37,8 +37,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     () => ({
       user,
       ready,
-      async login(username, password) {
-        const res = await api.login(username, password);
+      async login(username, password, agencySlug) {
+        const res = await api.login(username, password, agencySlug);
         localStorage.setItem(TOKEN_KEY, res.token);
         setToken(res.token);
         setUser(res.user);

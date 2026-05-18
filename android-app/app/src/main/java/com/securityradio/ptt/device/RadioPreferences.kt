@@ -44,12 +44,43 @@ class RadioPreferences(context: Context) {
         prefs.edit().putString(KEY_DEVICE_PROFILE, preference.name).apply()
     }
 
+    fun getAuthToken(): String = prefs.getString(KEY_AUTH_TOKEN, "").orEmpty()
+
+    fun setAuthToken(token: String) {
+        prefs.edit().putString(KEY_AUTH_TOKEN, token.trim()).apply()
+    }
+
+    fun clearAuthSession() {
+        prefs.edit()
+            .remove(KEY_AUTH_TOKEN)
+            .remove(KEY_SESSION_USERNAME)
+            .remove(KEY_SESSION_AGENCY_SLUG)
+            .apply()
+    }
+
+    fun getSessionAgencySlug(): String = prefs.getString(KEY_SESSION_AGENCY_SLUG, "").orEmpty()
+
+    fun setSessionAgencySlug(slug: String) {
+        prefs.edit().putString(KEY_SESSION_AGENCY_SLUG, slug.trim().lowercase()).apply()
+    }
+
+    fun getSessionUsername(): String = prefs.getString(KEY_SESSION_USERNAME, "").orEmpty()
+
+    fun setSessionUsername(username: String) {
+        prefs.edit().putString(KEY_SESSION_USERNAME, username.trim()).apply()
+    }
+
+    fun isLoggedIn(): Boolean = getAuthToken().isNotBlank()
+
     private companion object {
         const val PREFS_NAME = "security_radio_prefs"
         const val KEY_THEME = "theme_mode"
         const val KEY_VOICE_ANNOUNCE_TUNING = "voice_announce_tune"
         const val KEY_AGENCY_RADIO_KEY = "agency_radio_key"
         const val KEY_DEVICE_PROFILE = "device_profile_preference"
+        const val KEY_AUTH_TOKEN = "auth_token"
+        const val KEY_SESSION_AGENCY_SLUG = "session_agency_slug"
+        const val KEY_SESSION_USERNAME = "session_username"
         const val DEFAULT_VOICE_ANNOUNCE = true
     }
 }

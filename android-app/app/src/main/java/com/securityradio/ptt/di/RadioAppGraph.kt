@@ -4,6 +4,7 @@ import android.app.Application
 import com.securityradio.ptt.BuildConfig
 import com.securityradio.ptt.data.RadioChannelGateway
 import com.securityradio.ptt.data.StubChannelRepository
+import com.securityradio.ptt.data.remote.AuthApi
 import com.securityradio.ptt.data.remote.ChannelsApi
 import com.securityradio.ptt.data.remote.NetworkModule
 import com.securityradio.ptt.data.remote.RadioApi
@@ -43,23 +44,32 @@ class RadioAppGraph(application: Application) {
 
     private val inboundVoicePlayer = InboundVoicePlayer()
 
+    private val authTokenProvider: () -> String = { radioPreferences.getAuthToken() }
+
     /**
-     * Effective radio key: an agency key configured on the device wins, so one
-     * APK can serve any agency; otherwise the build-time [BuildConfig.RADIO_API_KEY].
+     * Legacy handset key when not signed in. After login, [authTokenProvider] is used instead.
      */
     private val radioApiKeyProvider: () -> String = {
-        radioPreferences.getAgencyRadioKey().ifBlank { BuildConfig.RADIO_API_KEY }
+        if (radioPreferences.getAuthToken().isNotBlank()) {
+            ""
+        } else {
+            radioPreferences.getAgencyRadioKey().ifBlank { BuildConfig.RADIO_API_KEY }
+        }
     }
+
+    val authApi: AuthApi = NetworkModule.authApi(BuildConfig.API_BASE_URL)
 
     /** Pulls the agency's custom radio tones; refreshed at startup and on key change. */
     val customSoundDownloader = CustomSoundDownloader(
         httpApiBaseUrl = BuildConfig.API_BASE_URL,
+        authTokenProvider = authTokenProvider,
         apiKeyProvider = radioApiKeyProvider,
         store = customSoundStore,
     )
 
     val voiceRelay: VoiceRelayTransport = VoiceRelayTransport(
         httpApiBaseUrl = BuildConfig.API_BASE_URL,
+        authTokenProvider = authTokenProvider,
         apiKeyProvider = radioApiKeyProvider,
         inbound = inboundVoicePlayer,
     )
@@ -74,13 +84,25 @@ class RadioAppGraph(application: Application) {
 
     val channelsApi: ChannelsApi = NetworkModule.channelsApi(
         baseUrl = BuildConfig.API_BASE_URL,
+        authTokenProvider = authTokenProvider,
         apiKeyProvider = radioApiKeyProvider,
     )
 
     val radioApi: RadioApi = NetworkModule.radioApi(
         baseUrl = BuildConfig.API_BASE_URL,
+        authTokenProvider = authTokenProvider,
         apiKeyProvider = radioApiKeyProvider,
     )
+
+    fun onAuthSessionChanged() {
+        voiceRelay.reconnect()
+        customSoundDownloader.refreshAsync()
+    }
+
+    fun signOut() {
+        radioPreferences.clearAuthSession()
+        voiceRelay.disconnect()
+    }
 
     val locationReporter: LocationReporter = LocationReporter(application, radioApi)
 

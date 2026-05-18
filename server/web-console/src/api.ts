@@ -241,8 +241,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  login: (username: string, password: string) =>
-    request<{ token: string; user: SessionUser }>("POST", "/v1/auth/login", { username, password }),
+  login: (username: string, password: string, agencySlug?: string) =>
+    request<{ token: string; user: SessionUser }>("POST", "/v1/auth/login", {
+      username,
+      password,
+      ...(agencySlug?.trim() ? { agency_slug: agencySlug.trim().toLowerCase() } : {}),
+    }),
   me: () => request<{ user: SessionUser }>("GET", "/v1/auth/me"),
   myChannels: () => request<{ channels: UserChannel[] }>("GET", "/v1/me/channels"),
 
@@ -441,6 +445,7 @@ export function describeError(error: unknown): string {
   if (error instanceof ApiError) {
     const map: Record<string, string> = {
       invalid_login: "Incorrect username or password.",
+      owner_use_platform_portal: "Platform owner accounts sign in without an agency code, from the Platform portal.",
       missing_credentials: "Enter a username and password.",
       missing_fields: "Fill in every required field.",
       missing_name: "Enter a name.",

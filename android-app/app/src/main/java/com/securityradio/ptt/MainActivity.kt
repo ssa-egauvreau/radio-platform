@@ -17,30 +17,38 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.securityradio.ptt.device.HardwareAction
 import com.securityradio.ptt.device.HardwareButtonEvent
 import com.securityradio.ptt.device.HardwareButtonRelay
 import com.securityradio.ptt.device.HardwareMappingRepository
 import com.securityradio.ptt.device.InricoHardwareService
 import com.securityradio.ptt.device.RadioPresenceService
+import com.securityradio.ptt.presentation.LoginViewModel
+import com.securityradio.ptt.presentation.LoginViewModelFactory
 import com.securityradio.ptt.presentation.RadioUiEvent
 import com.securityradio.ptt.presentation.RadioViewModel
 import com.securityradio.ptt.presentation.RadioViewModelFactory
+import com.securityradio.ptt.ui.LoginScreen
 import com.securityradio.ptt.ui.RadioShell
 import com.securityradio.ptt.ui.theme.RadioTheme
 
 class MainActivity : ComponentActivity() {
 
-    private lateinit var radioViewModel: RadioViewModel
+    private var radioViewModel: RadioViewModel? = null
     private lateinit var repository: HardwareMappingRepository
+    private lateinit var appGraph: com.securityradio.ptt.di.RadioAppGraph
 
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
-        radioViewModel.onMicPermissionResult(granted)
+        radioViewModel?.onMicPermissionResult(granted)
         checkAllPermissions()
     }
 
@@ -56,7 +64,7 @@ class MainActivity : ComponentActivity() {
     ) { result ->
         val granted = result[Manifest.permission.ACCESS_FINE_LOCATION] == true ||
             result[Manifest.permission.ACCESS_COARSE_LOCATION] == true
-        radioViewModel.onLocationPermissionResult(granted)
+        radioViewModel?.onLocationPermissionResult(granted)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -64,46 +72,63 @@ class MainActivity : ComponentActivity() {
         runCatching { enableEdgeToEdge() }.onFailure {
             Log.w("MainActivity", "enableEdgeToEdge unsupported; continuing without edge-to-edge", it)
         }
-        val graph = (application as RadioApplication).graph
-        repository = graph.hardwareMappingRepository
-        val factory = RadioViewModelFactory(graph)
-        radioViewModel = ViewModelProvider(this, factory)[RadioViewModel::class.java]
+        appGraph = (application as RadioApplication).graph
+        repository = appGraph.hardwareMappingRepository
 
         setContent {
             RadioTheme {
-                val state by radioViewModel.uiState.collectAsStateWithLifecycle()
+                var showRadio by remember { mutableStateOf(appGraph.radioPreferences.isLoggedIn()) }
 
-                LaunchedEffect(Unit) {
-                    checkAllPermissions()
-                }
-
-                LaunchedEffect(radioViewModel) {
-                    radioViewModel.wakeUiSignals.collect {
-                        bringRadioToForeground()
+                if (!showRadio) {
+                    val loginVm: LoginViewModel = viewModel(factory = LoginViewModelFactory(appGraph))
+                    LoginScreen(
+                        viewModel = loginVm,
+                        onSignedIn = { showRadio = true },
+                    )
+                } else {
+                    val radioVm: RadioViewModel = viewModel(factory = RadioViewModelFactory(appGraph))
+                    LaunchedEffect(radioVm) {
+                        radioViewModel = radioVm
                     }
-                }
+                    val state by radioVm.uiState.collectAsStateWithLifecycle()
 
-                RadioShell(
-                    state = state,
-                    onEvent = { event ->
-                        when (event) {
-                            RadioUiEvent.RequestAudioPermission -> {
-                                micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                            }
-                            RadioUiEvent.RequestIgnoreBatteryOptimizations -> requestIgnoreBatteryOptimizations()
-                            RadioUiEvent.OpenAccessibilitySettings -> {
-                                val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                                startActivity(intent)
-                            }
-                            RadioUiEvent.RequestOverlayPermission -> requestOverlayPermission()
-                            else -> radioViewModel.onEvent(event)
+                    LaunchedEffect(Unit) {
+                        checkAllPermissions()
+                    }
+
+                    LaunchedEffect(radioVm) {
+                        radioVm.wakeUiSignals.collect {
+                            bringRadioToForeground()
                         }
-                    },
-                    onRequestMicPermission = {
-                        radioViewModel.playUiMenuSound()
-                        micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    },
-                )
+                    }
+
+                    RadioShell(
+                        state = state,
+                        onEvent = { event ->
+                            when (event) {
+                                RadioUiEvent.RequestAudioPermission -> {
+                                    micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                }
+                                RadioUiEvent.RequestIgnoreBatteryOptimizations -> requestIgnoreBatteryOptimizations()
+                                RadioUiEvent.OpenAccessibilitySettings -> {
+                                    val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                    startActivity(intent)
+                                }
+                                RadioUiEvent.RequestOverlayPermission -> requestOverlayPermission()
+                                RadioUiEvent.SignOut -> {
+                                    appGraph.signOut()
+                                    radioViewModel = null
+                                    showRadio = false
+                                }
+                                else -> radioVm.onEvent(event)
+                            }
+                        },
+                        onRequestMicPermission = {
+                            radioVm.playUiMenuSound()
+                            micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                        },
+                    )
+                }
             }
         }
 
@@ -112,24 +137,18 @@ class MainActivity : ComponentActivity() {
 
     override fun onStart() {
         super.onStart()
-        if (::radioViewModel.isInitialized) {
-            radioViewModel.setMainRadioScreenVisible(true)
-        }
+        radioViewModel?.setMainRadioScreenVisible(true)
     }
 
     override fun onStop() {
-        if (::radioViewModel.isInitialized) {
-            radioViewModel.setMainRadioScreenVisible(false)
-        }
+        radioViewModel?.setMainRadioScreenVisible(false)
         super.onStop()
     }
 
     override fun onResume() {
         super.onResume()
         checkAllPermissions()
-        if (::radioViewModel.isInitialized) {
-            radioViewModel.onOverlayPermissionResult(canDrawOverlays())
-        }
+        radioViewModel?.onOverlayPermissionResult(canDrawOverlays())
     }
 
     private fun bringRadioToForeground() {
@@ -168,8 +187,8 @@ class MainActivity : ComponentActivity() {
 
         val accessibilityEnabled = isAccessibilityServiceEnabled(this, InricoHardwareService::class.java)
 
-        radioViewModel.onMicPermissionResult(audioGranted)
-        radioViewModel.onEvent(
+        radioViewModel?.onMicPermissionResult(audioGranted)
+        radioViewModel?.onEvent(
             RadioUiEvent.UpdatePermissionState(
                 needsAudio = !audioGranted,
                 needsAccessibility = !accessibilityEnabled,
@@ -199,7 +218,7 @@ class MainActivity : ComponentActivity() {
                 this,
                 Manifest.permission.ACCESS_COARSE_LOCATION,
             ) == PackageManager.PERMISSION_GRANTED
-        radioViewModel.onLocationPermissionResult(locationGranted)
+        radioViewModel?.onLocationPermissionResult(locationGranted)
         if (!locationGranted) {
             val prefs = getSharedPreferences("radio_startup_prefs", MODE_PRIVATE)
             val key = "requested_location_v1"
@@ -215,7 +234,7 @@ class MainActivity : ComponentActivity() {
         }
 
         val overlayGranted = canDrawOverlays()
-        radioViewModel.onOverlayPermissionResult(overlayGranted)
+        radioViewModel?.onOverlayPermissionResult(overlayGranted)
         if (!overlayGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val prefs = getSharedPreferences("radio_startup_prefs", MODE_PRIVATE)
             val key = "requested_overlay_v1"

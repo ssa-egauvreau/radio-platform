@@ -25,6 +25,7 @@ import {
   deleteUser,
   generateRadioKey,
   getAgencyById,
+  getAgencyBySlug,
   getChannelById,
   getChannelByName,
   getSimulcastByName,
@@ -198,6 +199,7 @@ export function createApiRouter(): Router {
     try {
       const username = String(req.body?.username ?? "").trim();
       const password = String(req.body?.password ?? "");
+      const agencySlugRaw = String(req.body?.agency_slug ?? "").trim().toLowerCase();
       if (!username || !password) {
         res.status(400).json({ error: "missing_credentials" });
         return;
@@ -214,6 +216,24 @@ export function createApiRouter(): Router {
         });
         res.status(401).json({ error: "invalid_login" });
         return;
+      }
+      if (user!.role === "owner") {
+        res.status(403).json({ error: "owner_use_platform_portal" });
+        return;
+      }
+      if (agencySlugRaw) {
+        const agency = await getAgencyBySlug(agencySlugRaw);
+        if (!agency || agency.disabled || user!.agency_id !== agency.id) {
+          await writeAudit({
+            agencyId: user?.agency_id ?? null,
+            actorUserId: user?.id ?? null,
+            actorName: username,
+            action: "login_failed",
+            ip: clientIp(req),
+          });
+          res.status(401).json({ error: "invalid_login" });
+          return;
+        }
       }
       const authUser: AuthUser = {
         id: user!.id,
