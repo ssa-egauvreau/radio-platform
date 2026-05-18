@@ -27,6 +27,7 @@ import { verifyToken, type AuthUser } from "./auth.js";
 import { getPool } from "./db.js";
 import {
   getAgencyById,
+  getBridgeById,
   getChannelByName,
   getMembership,
   getSimulcastByName,
@@ -55,7 +56,14 @@ export const BRIDGE_LOOPBACK_SECRET =
 type Identity =
   | { kind: "account"; user: AuthUser }
   | { kind: "legacy"; agencyId: number }
-  | { kind: "bridge"; agencyId: number; yields: boolean; bridgeName: string };
+  | {
+      kind: "bridge";
+      agencyId: number;
+      yields: boolean;
+      bridgeName: string;
+      /** When set, the bridge may only key this channel (a remote runner). */
+      forcedChannel?: string;
+    };
 
 /** One member channel a simulcast transmission fans out to. */
 interface SimTarget {
@@ -326,7 +334,32 @@ export function attachVoiceRelay(
               return;
             }
           }
-          identity = { kind: "account", user };
+          const runBridgeRaw = url.searchParams.get("runBridge");
+          if (runBridgeRaw != null) {
+            // Remote audio-device bridge runner (the desktop console). The
+            // account's token authenticates it; the bridge row decides which
+            // channel it keys, whether it yields, and its name — the client
+            // cannot pick those, so this never grants extra channel access.
+            const bridgeId = Number(runBridgeRaw);
+            const bridge =
+              getPool() && Number.isInteger(bridgeId)
+                ? await getBridgeById(bridgeId, user.agencyId).catch(() => null)
+                : null;
+            if (!bridge || !bridge.enabled || bridge.source_type !== "audio_device") {
+              socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+              socket.destroy();
+              return;
+            }
+            identity = {
+              kind: "bridge",
+              agencyId: user.agencyId,
+              yields: bridge.yield_to_units,
+              bridgeName: bridge.name,
+              forcedChannel: bridge.target_channel,
+            };
+          } else {
+            identity = { kind: "account", user };
+          }
         } else {
           const headerRaw = req.headers["x-radio-key"];
           const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
@@ -384,7 +417,11 @@ export function attachVoiceRelay(
     meta: ClientMeta,
     json: { channel?: string; unit_id?: string; client?: string },
   ): Promise<void> {
-    const channelName = String(json.channel ?? "").trim();
+    // A remote bridge runner keys only the channel its bridge row configures.
+    const channelName =
+      meta.identity.kind === "bridge" && meta.identity.forcedChannel
+        ? meta.identity.forcedChannel.trim()
+        : String(json.channel ?? "").trim();
     const chNorm = normalizedChannel(channelName);
     if (!chNorm || chNorm === "----") {
       ws.send(JSON.stringify({ type: "error", code: "bad_join" }));

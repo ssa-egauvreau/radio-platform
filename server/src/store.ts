@@ -716,6 +716,15 @@ export async function deleteBridge(id: number, agencyId: number): Promise<boolea
   return (res.rowCount ?? 0) > 0;
 }
 
+/** One bridge scoped to its agency, or null. Used to authorize bridge runners. */
+export async function getBridgeById(id: number, agencyId: number): Promise<BridgeRow | null> {
+  const res = await requirePool().query<BridgeRow>(
+    `SELECT ${BRIDGE_COLS} FROM radio_bridges WHERE id = $1 AND agency_id = $2;`,
+    [id, agencyId],
+  );
+  return res.rows[0] ?? null;
+}
+
 /** A bridge row carrying its owning agency — used by the in-process bridge worker. */
 export interface AgencyBridgeRow extends BridgeRow {
   agency_id: number;

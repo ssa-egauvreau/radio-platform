@@ -37,6 +37,7 @@ import {
   BRIDGE_TX_MODES,
   createBridge,
   deleteBridge,
+  getBridgeById,
   listBridges,
   updateBridge,
   type BridgeInput,
@@ -918,6 +919,12 @@ export function createApiRouter(): Router {
         voxHangMs: Math.round(clampNumber(body.voxHangMs, 100, 10000, 1500)),
         enabled: Boolean(body.enabled),
       };
+      // An enabled stream bridge with no URL has nothing to ingest — the worker
+      // would skip it, leaving it "enabled" in the UI but never keying anything.
+      if (input.sourceType === "stream_url" && input.enabled && !input.sourceUrl) {
+        res.status(400).json({ error: "missing_fields" });
+        return;
+      }
       const bridge = await createBridge(agencyId, input);
       await writeAudit({
         agencyId,
@@ -967,6 +974,19 @@ export function createApiRouter(): Router {
       if (body.voxThreshold !== undefined) patch.voxThreshold = clampNumber(body.voxThreshold, 0, 1, 0.02);
       if (body.voxHangMs !== undefined) patch.voxHangMs = Math.round(clampNumber(body.voxHangMs, 100, 10000, 1500));
       if (body.enabled !== undefined) patch.enabled = Boolean(body.enabled);
+      const current = await getBridgeById(id, agencyId);
+      if (!current) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      // Reject any patch that would leave an enabled stream bridge with no URL.
+      const effSourceType = patch.sourceType ?? current.source_type;
+      const effSourceUrl = patch.sourceUrl !== undefined ? patch.sourceUrl : current.source_url;
+      const effEnabled = patch.enabled !== undefined ? patch.enabled : current.enabled;
+      if (effSourceType === "stream_url" && effEnabled && !effSourceUrl) {
+        res.status(400).json({ error: "missing_fields" });
+        return;
+      }
       const bridge = await updateBridge(id, agencyId, patch);
       if (!bridge) {
         res.status(404).json({ error: "not_found" });
@@ -1005,6 +1025,20 @@ export function createApiRouter(): Router {
         ip: clientIp(req),
       });
       res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * Audio-device bridges this agency can run from the desktop console. Unlike
+   * the admin CRUD above, any agency member may read this — the bridge host
+   * operator is not necessarily an admin.
+   */
+  router.get("/bridges/runnable", requireAgencyMember, async (req, res) => {
+    try {
+      const bridges = await listBridges(req.authUser!.agencyId!);
+      res.json({ bridges: bridges.filter((b) => b.enabled && b.source_type === "audio_device") });
     } catch (error) {
       fail(res, error);
     }

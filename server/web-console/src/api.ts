@@ -371,6 +371,8 @@ export const api = {
   updateBridge: (id: number, patch: Partial<BridgeInput>) =>
     request<{ bridge: Bridge }>("PATCH", `/v1/admin/bridges/${id}`, patch),
   deleteBridge: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/admin/bridges/${id}`),
+  /** Enabled audio-device bridges this agency can run from the desktop console. */
+  listRunnableBridges: () => request<{ bridges: Bridge[] }>("GET", "/v1/bridges/runnable"),
 
   // --- simulcast channels ------------------------------------------------
   listSimulcasts: () => request<{ simulcasts: Simulcast[] }>("GET", "/v1/simulcast"),
