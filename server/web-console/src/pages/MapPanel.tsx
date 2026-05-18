@@ -9,6 +9,8 @@ const OSM_ATTRIBUTION = "&copy; OpenStreetMap contributors";
 const POLL_MS = 5000;
 /** A radio that has not reported within this window is shown faded. */
 const STALE_MS = 5 * 60_000;
+/** Zoom level the map flies to when a radio goes into emergency. */
+const EMERGENCY_ZOOM = 16;
 
 type MarkerState = "live" | "stale" | "emergency";
 
@@ -56,6 +58,8 @@ export function MapPanel() {
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, { marker: L.Marker; iconKey: string }>>(new Map());
   const fittedRef = useRef(false);
+  // Units already auto-zoomed to, so a standing emergency only pulls the map once.
+  const emergencyZoomedRef = useRef<Set<string>>(new Set());
   const [stats, setStats] = useState({ total: 0, emergency: 0 });
   const [error, setError] = useState<string | null>(null);
 
@@ -112,6 +116,7 @@ export function MapPanel() {
 
         const seen = new Set<string>();
         let emergencyCount = 0;
+        let flewToEmergency = false;
         for (const p of locs.positions) {
           seen.add(p.unit_id);
           const inEmergency = emergencyUnits.has(p.unit_id.toUpperCase());
@@ -122,6 +127,12 @@ export function MapPanel() {
           const heading =
             typeof p.heading === "number" && Number.isFinite(p.heading) ? p.heading : null;
           const latlng: L.LatLngExpression = [p.lat, p.lon];
+          // Pull the map to a radio the moment it goes into emergency.
+          if (inEmergency && !emergencyZoomedRef.current.has(p.unit_id) && !flewToEmergency) {
+            emergencyZoomedRef.current.add(p.unit_id);
+            flewToEmergency = true;
+            map.flyTo(latlng, Math.max(map.getZoom(), EMERGENCY_ZOOM));
+          }
           const label = p.display_name || aliasRef.current(p.unit_id);
           const speed =
             typeof p.speed_mps === "number" && p.speed_mps > 0.5
@@ -161,8 +172,14 @@ export function MapPanel() {
             markersRef.current.delete(unit);
           }
         }
+        // Forget emergencies that have cleared, so a later re-trigger zooms again.
+        for (const unit of [...emergencyZoomedRef.current]) {
+          if (!emergencyUnits.has(unit.toUpperCase())) {
+            emergencyZoomedRef.current.delete(unit);
+          }
+        }
         setStats({ total: locs.positions.length, emergency: emergencyCount });
-        if (!fittedRef.current && markersRef.current.size > 0) {
+        if (!fittedRef.current && !flewToEmergency && markersRef.current.size > 0) {
           fittedRef.current = true;
           map.fitBounds(
             L.featureGroup([...markersRef.current.values()].map((e) => e.marker))
