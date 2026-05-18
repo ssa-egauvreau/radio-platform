@@ -95,6 +95,7 @@ class MainActivity : ComponentActivity() {
                                 val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                                 startActivity(intent)
                             }
+                            RadioUiEvent.RequestOverlayPermission -> requestOverlayPermission()
                             else -> radioViewModel.onEvent(event)
                         }
                     },
@@ -126,6 +127,9 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         checkAllPermissions()
+        if (::radioViewModel.isInitialized) {
+            radioViewModel.onOverlayPermissionResult(canDrawOverlays())
+        }
     }
 
     private fun bringRadioToForeground() {
@@ -210,7 +214,38 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        val overlayGranted = canDrawOverlays()
+        radioViewModel.onOverlayPermissionResult(overlayGranted)
+        if (!overlayGranted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val prefs = getSharedPreferences("radio_startup_prefs", MODE_PRIVATE)
+            val key = "requested_overlay_v1"
+            if (!prefs.getBoolean(key, false)) {
+                prefs.edit().putBoolean(key, true).apply()
+                requestOverlayPermission()
+            }
+        }
+
         RadioPresenceService.start(this)
+    }
+
+    private fun canDrawOverlays(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return true
+        return Settings.canDrawOverlays(this)
+    }
+
+    private fun requestOverlayPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
+        try {
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName"),
+            )
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+            })
+        }
     }
 
     private fun isAccessibilityServiceEnabled(context: Context, service: Class<*>): Boolean {

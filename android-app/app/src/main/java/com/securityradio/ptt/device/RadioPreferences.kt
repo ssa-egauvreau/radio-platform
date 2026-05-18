@@ -35,11 +35,21 @@ class RadioPreferences(context: Context) {
         prefs.edit().putString(KEY_AGENCY_RADIO_KEY, key.trim()).apply()
     }
 
+    fun getDeviceProfilePreference(): DeviceProfilePreference =
+        prefs.getString(KEY_DEVICE_PROFILE, null)?.let { stored ->
+            DeviceProfilePreference.entries.find { it.name == stored }
+        } ?: DeviceProfilePreference.AUTO
+
+    fun setDeviceProfilePreference(preference: DeviceProfilePreference) {
+        prefs.edit().putString(KEY_DEVICE_PROFILE, preference.name).apply()
+    }
+
     private companion object {
         const val PREFS_NAME = "security_radio_prefs"
         const val KEY_THEME = "theme_mode"
         const val KEY_VOICE_ANNOUNCE_TUNING = "voice_announce_tune"
         const val KEY_AGENCY_RADIO_KEY = "agency_radio_key"
+        const val KEY_DEVICE_PROFILE = "device_profile_preference"
         const val DEFAULT_VOICE_ANNOUNCE = true
     }
 }

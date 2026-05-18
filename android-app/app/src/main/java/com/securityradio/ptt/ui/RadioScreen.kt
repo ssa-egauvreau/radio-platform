@@ -55,8 +55,12 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.securityradio.ptt.device.DeviceProfilePreference
+import com.securityradio.ptt.device.DeviceProfileResolver
 import com.securityradio.ptt.device.HardwareAction
 import com.securityradio.ptt.device.P25ImbeNative
+import com.securityradio.ptt.device.RadioLayoutPolicy
+import com.securityradio.ptt.device.ResolvedDeviceProfile
 import com.securityradio.ptt.presentation.RadioUiEvent
 import com.securityradio.ptt.presentation.RadioUiState
 import com.securityradio.ptt.presentation.ThemeMode
@@ -136,10 +140,22 @@ fun RadioScreen(
     val tunerEnabled = !state.channelsLoading && state.totalChannels > 0
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
-        val isCompact = maxWidth < 420.dp
-        val isUltraCompact = maxWidth < 300.dp
-        val gap = if (isCompact) 6.dp else 8.dp
-        val pttHeight = if (isCompact) 52.dp else 58.dp
+        val isCompactWidth = maxWidth < 420.dp
+        val isUltraCompactWidth = maxWidth < 300.dp
+        val layout = remember(state.resolvedDeviceProfile, isCompactWidth, isUltraCompactWidth) {
+            if (state.resolvedDeviceProfile == ResolvedDeviceProfile.RESPONSIVE) {
+                DeviceProfileResolver.responsivePolicy(isCompactWidth, isUltraCompactWidth)
+            } else {
+                DeviceProfileResolver.layoutPolicy(state.resolvedDeviceProfile)
+            }
+        }
+        val gap = if (layout.compactSpacing) 4.dp else if (isCompactWidth) 6.dp else 8.dp
+        val pttHeight = when {
+            layout.compactPtt -> 44.dp
+            isCompactWidth -> 52.dp
+            else -> 58.dp
+        }
+        val emergencyHeight = if (layout.compactSpacing) 38.dp else 44.dp
 
         Column(
             modifier = Modifier.fillMaxSize(),
@@ -151,7 +167,7 @@ fun RadioScreen(
                 onEvent = onEvent,
                 onRequestMicPermission = onRequestMicPermission,
                 styles = styles,
-                ultraCompact = isUltraCompact,
+                layout = layout,
             )
             LcdDivider()
             Box(
@@ -164,12 +180,12 @@ fun RadioScreen(
                     onEvent = onEvent,
                     tunerEnabled = tunerEnabled,
                     styles = styles,
-                    ultraCompact = isUltraCompact,
+                    layout = layout,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
             LcdDivider()
-            if (!isUltraCompact) {
+            if (layout.showStateBanner) {
                 LcdStateBanner(state = state, styles = styles)
             }
             LcdPttBar(
@@ -178,10 +194,31 @@ fun RadioScreen(
                 onEvent = onEvent,
                 height = pttHeight,
                 styles = styles,
+                compact = layout.compactPtt,
             )
-            LcdEmergencyRow(state = state, onEvent = onEvent, styles = styles)
-            if (!isUltraCompact) {
-                LcdSoftKeyRow(labels = state.softKeyLabels, state = state, onEvent = onEvent, styles = styles)
+            LcdEmergencyRow(
+                state = state,
+                onEvent = onEvent,
+                styles = styles,
+                height = emergencyHeight,
+            )
+            if (layout.showSoftKeyRow) {
+                if (layout.softKeysTwoRows) {
+                    LcdSoftKeyTwoRowStrip(
+                        labels = state.softKeyLabels,
+                        state = state,
+                        onEvent = onEvent,
+                        styles = styles,
+                    )
+                } else {
+                    LcdSoftKeyRow(
+                        labels = state.softKeyLabels,
+                        state = state,
+                        onEvent = onEvent,
+                        styles = styles,
+                        rowHeight = if (layout.compactSpacing) 40.dp else 46.dp,
+                    )
+                }
             }
         }
         ScanChannelPickerDialog(state = state, onEvent = onEvent)
@@ -208,7 +245,7 @@ private fun LcdStatusBar(
     onEvent: (RadioUiEvent) -> Unit,
     onRequestMicPermission: () -> Unit,
     styles: LcdTextStyles,
-    ultraCompact: Boolean,
+    layout: RadioLayoutPolicy,
 ) {
     val p = RadioLcdTheme.palette
     Column(
@@ -234,9 +271,9 @@ private fun LcdStatusBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
-                if (ultraCompact) {
+                if (layout.minimalStatusBar) {
                     Text(
-                        text = "MAP",
+                        text = "SET",
                         style = styles.softKey,
                         color = p.statusBlue,
                         modifier = Modifier.clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
@@ -299,7 +336,7 @@ private fun LcdStatusBar(
                 }
             }
         }
-        if (!ultraCompact) Row(
+        if (layout.showFullStatusBar) Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -351,7 +388,7 @@ private fun LcdMainChannelBlock(
     onEvent: (RadioUiEvent) -> Unit,
     tunerEnabled: Boolean,
     styles: LcdTextStyles,
-    ultraCompact: Boolean,
+    layout: RadioLayoutPolicy,
     modifier: Modifier = Modifier,
 ) {
     val p = RadioLcdTheme.palette
@@ -398,7 +435,7 @@ private fun LcdMainChannelBlock(
                 .padding(horizontal = 10.dp, vertical = 8.dp),
             verticalArrangement = Arrangement.spacedBy(6.dp),
         ) {
-            if (!ultraCompact) Row(
+            if (layout.showChannelTunerButtons) Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -408,6 +445,7 @@ private fun LcdMainChannelBlock(
                     enabled = tunerEnabled,
                     onClick = { onEvent(RadioUiEvent.ChannelDown) },
                     styles = styles,
+                    compact = layout.compactSpacing,
                 )
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -432,9 +470,10 @@ private fun LcdMainChannelBlock(
                     enabled = tunerEnabled,
                     onClick = { onEvent(RadioUiEvent.ChannelUp) },
                     styles = styles,
+                    compact = layout.compactSpacing,
                 )
             }
-            if (ultraCompact) {
+            if (!layout.showChannelTunerButtons) {
                 Text(
                     text = "${state.zoneLabel} · ${state.channelPosition}".uppercase(Locale.US),
                     style = styles.status,
@@ -454,7 +493,7 @@ private fun LcdMainChannelBlock(
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center,
             )
-            if (!ultraCompact) {
+            if (layout.showRadiosOnlineLine) {
                 val radiosLine = state.radiosOnlineOnChannel?.let { n ->
                     "RADIOS ONLINE · $n"
                 } ?: "RADIOS ONLINE —"
@@ -478,7 +517,7 @@ private fun LcdMainChannelBlock(
                     textAlign = TextAlign.Center,
                 )
             }
-            if (!ultraCompact) {
+            if (layout.showMainDetailLines) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
                     LcdBodyLine(text = state.displayLine1, styles = styles)
                     LcdBodyLine(text = state.displayLine2, styles = styles)
@@ -492,7 +531,7 @@ private fun LcdMainChannelBlock(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            if (!ultraCompact && state.scanActive && state.channelCatalog.size > 1) {
+            if (layout.showScanConfigureLink && state.scanActive && state.channelCatalog.size > 1) {
                 Text(
                     text = "CONFIGURE SCAN LIST",
                     style = styles.body,
@@ -528,6 +567,7 @@ private fun LcdSegmentButton(
     enabled: Boolean,
     onClick: () -> Unit,
     styles: LcdTextStyles,
+    compact: Boolean = false,
 ) {
     val p = RadioLcdTheme.palette
     val interaction = remember { MutableInteractionSource() }
@@ -535,8 +575,8 @@ private fun LcdSegmentButton(
         onClick = { if (enabled) onClick() },
         enabled = enabled,
         modifier = Modifier
-            .width(52.dp)
-            .height(36.dp),
+            .width(if (compact) 44.dp else 52.dp)
+            .height(if (compact) 30.dp else 36.dp),
         shape = RoundedCornerShape(2.dp),
         color = if (enabled) p.softKeyInactiveFill else p.softKeyInactiveFill.copy(alpha = 0.35f),
         border = BorderStroke(1.dp, p.divider),
@@ -635,6 +675,7 @@ private fun LcdPttBar(
     onEvent: (RadioUiEvent) -> Unit,
     height: Dp,
     styles: LcdTextStyles,
+    compact: Boolean = false,
 ) {
     val p = RadioLcdTheme.palette
     val fill = when {
@@ -694,16 +735,18 @@ private fun LcdPttBar(
                     else -> p.textOnButton
                 },
             )
-            Text(
-                text = "HOLD TO TRANSMIT",
-                style = styles.status,
-                color = when {
-                    state.isPttPressed && state.pttBusyTone -> p.textOnButton.copy(alpha = 0.85f)
-                    state.isPttPressed && lcdNightEffective -> Color.White.copy(alpha = 0.72f)
-                    state.isPttPressed -> Color.Black.copy(alpha = 0.65f)
-                    else -> p.textOnButton.copy(alpha = 0.9f)
-                },
-            )
+            if (!compact) {
+                Text(
+                    text = "HOLD TO TRANSMIT",
+                    style = styles.status,
+                    color = when {
+                        state.isPttPressed && state.pttBusyTone -> p.textOnButton.copy(alpha = 0.85f)
+                        state.isPttPressed && lcdNightEffective -> Color.White.copy(alpha = 0.72f)
+                        state.isPttPressed -> Color.Black.copy(alpha = 0.65f)
+                        else -> p.textOnButton.copy(alpha = 0.9f)
+                    },
+                )
+            }
         }
     }
 }
@@ -713,6 +756,7 @@ private fun LcdEmergencyRow(
     state: RadioUiState,
     onEvent: (RadioUiEvent) -> Unit,
     styles: LcdTextStyles,
+    height: Dp = 44.dp,
 ) {
     val p = RadioLcdTheme.palette
     val interaction = remember { MutableInteractionSource() }
@@ -720,7 +764,7 @@ private fun LcdEmergencyRow(
         onClick = { onEvent(RadioUiEvent.EmergencyToggle) },
         modifier = Modifier
             .fillMaxWidth()
-            .height(44.dp),
+            .height(height),
         shape = RoundedCornerShape(2.dp),
         color = if (state.isEmergencyActive) {
             p.statusEmergency.copy(alpha = 0.95f)
@@ -742,15 +786,38 @@ private fun LcdEmergencyRow(
         ) {
             LcdEmergencyGlyphIcon(
                 color = if (state.isEmergencyActive) Color.White else p.textOnButton,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(if (height < 42.dp) 16.dp else 18.dp),
             )
             Spacer(modifier = Modifier.width(10.dp))
             Text(
-                text = if (state.isEmergencyActive) "EMERGENCY LATCHED" else "EMERGENCY (TAP)",
+                text = if (state.isEmergencyActive) {
+                    "EMERGENCY LATCHED"
+                } else if (height < 42.dp) {
+                    "EMERGENCY"
+                } else {
+                    "EMERGENCY (TAP)"
+                },
                 style = styles.softKey,
                 color = if (state.isEmergencyActive) Color.White else p.textOnButton,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
+    }
+}
+
+@Composable
+private fun LcdSoftKeyTwoRowStrip(
+    labels: List<String>,
+    state: RadioUiState,
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+) {
+    val top = labels.take(3)
+    val bottom = labels.drop(3)
+    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        LcdSoftKeyRow(labels = top, state = state, onEvent = onEvent, styles = styles, rowHeight = 36.dp)
+        LcdSoftKeyRow(labels = bottom, state = state, onEvent = onEvent, styles = styles, rowHeight = 36.dp, indexOffset = 3)
     }
 }
 
@@ -760,12 +827,14 @@ private fun LcdSoftKeyRow(
     state: RadioUiState,
     onEvent: (RadioUiEvent) -> Unit,
     styles: LcdTextStyles,
+    rowHeight: Dp = 46.dp,
+    indexOffset: Int = 0,
 ) {
     val p = RadioLcdTheme.palette
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(46.dp)
+            .height(rowHeight)
             .clip(RoundedCornerShape(2.dp))
             .border(1.dp, p.divider, RoundedCornerShape(2.dp))
             .background(p.lcdSection),
@@ -779,14 +848,15 @@ private fun LcdSoftKeyRow(
                         .background(p.divider),
                 )
             }
-            val active = when (index) {
+            val globalIndex = index + indexOffset
+            val active = when (globalIndex) {
                 1 -> state.mappingSettingsVisible
                 2 -> state.scanActive
                 else -> false
             }
             val interaction = remember { MutableInteractionSource() }
             Surface(
-                onClick = { onEvent(RadioUiEvent.SoftKeyPressed(index)) },
+                onClick = { onEvent(RadioUiEvent.SoftKeyPressed(globalIndex)) },
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxHeight(),
@@ -940,6 +1010,62 @@ fun HardwareMappingDialog(
                             ),
                         ) {
                             Text("SAVE AGENCY KEY".uppercase(Locale.US))
+                        }
+                        HorizontalDivider(color = p.divider)
+                        Text(
+                            text = "HANDSET LAYOUT",
+                            style = styles.body.copy(fontWeight = FontWeight.Bold),
+                            color = p.textPrimary,
+                        )
+                        Text(
+                            text = "ACTIVE: ${state.resolvedDeviceProfile.label.uppercase(Locale.US)} · " +
+                                "OVERRIDE: ${state.deviceProfilePreference.label.uppercase(Locale.US)}",
+                            style = styles.status,
+                            color = p.textMuted,
+                        )
+                        DeviceProfilePreference.entries.forEach { preference ->
+                            val selected = state.deviceProfilePreference == preference
+                            TextButton(
+                                onClick = { onEvent(RadioUiEvent.SetDeviceProfilePreference(preference)) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.textButtonColors(
+                                    containerColor = if (selected) {
+                                        p.statusBlue.copy(alpha = 0.16f)
+                                    } else {
+                                        p.softKeyInactiveFill
+                                    },
+                                    contentColor = if (selected) p.statusGreen else p.textPrimary,
+                                ),
+                            ) {
+                                Text(preference.label.uppercase(Locale.US))
+                            }
+                        }
+                        HorizontalDivider(color = p.divider)
+                        Text(
+                            text = "DISPLAY OVER OTHER APPS",
+                            style = styles.body.copy(fontWeight = FontWeight.Bold),
+                            color = p.textPrimary,
+                        )
+                        Text(
+                            text = if (state.needsOverlayPermission) {
+                                "Required on some rugged radios so the tactical screen can return on top after PTT."
+                            } else {
+                                "Granted — the radio UI can draw over other apps when needed."
+                            },
+                            style = styles.status,
+                            color = p.textMuted,
+                        )
+                        if (state.needsOverlayPermission) {
+                            TextButton(
+                                onClick = { onEvent(RadioUiEvent.RequestOverlayPermission) },
+                                modifier = Modifier.fillMaxWidth(),
+                                colors = ButtonDefaults.textButtonColors(
+                                    containerColor = p.softKeyInactiveFill,
+                                    contentColor = p.textOnButton,
+                                ),
+                            ) {
+                                Text("OPEN OVERLAY PERMISSION".uppercase(Locale.US))
+                            }
                         }
                         HorizontalDivider(color = p.divider)
                         Text(

@@ -40,4 +40,8 @@ sealed interface RadioUiEvent {
 
     /** Bind this handset to an agency (tenant) by its radio key; blank clears the override. */
     data class SaveAgencyRadioKey(val key: String) : RadioUiEvent
+
+    data class SetDeviceProfilePreference(val preference: com.securityradio.ptt.device.DeviceProfilePreference) : RadioUiEvent
+
+    data object RequestOverlayPermission : RadioUiEvent
 }

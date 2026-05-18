@@ -12,6 +12,8 @@ import com.securityradio.ptt.data.remote.TalkActivityDto
 import com.securityradio.ptt.data.remote.TalkerSnapshotDto
 import com.securityradio.ptt.device.ChannelSpeechHelper
 import com.securityradio.ptt.device.CustomSoundDownloader
+import com.securityradio.ptt.device.DeviceProfilePreference
+import com.securityradio.ptt.device.DeviceProfileResolver
 import com.securityradio.ptt.device.HardwareAction
 import com.securityradio.ptt.device.HardwareButtonEvent
 import com.securityradio.ptt.device.HardwareButtonRelay
@@ -95,6 +97,8 @@ class RadioViewModel(
                 themeMode = radioPreferences.getThemeMode(),
                 announceChannelNameOnTune = radioPreferences.isAnnounceChannelOnTuneEnabled(),
                 agencyRadioKey = radioPreferences.getAgencyRadioKey(),
+                deviceProfilePreference = radioPreferences.getDeviceProfilePreference(),
+                resolvedDeviceProfile = DeviceProfileResolver.resolve(radioPreferences.getDeviceProfilePreference()),
             )
         }
         viewModelScope.launch {
@@ -303,7 +307,23 @@ class RadioViewModel(
                 }
                 soundPlayer.playChannelSwitch()
             }
+            is RadioUiEvent.SetDeviceProfilePreference -> {
+                soundPlayer.playChannelSwitch()
+                radioPreferences.setDeviceProfilePreference(event.preference)
+                _uiState.update {
+                    it.copy(
+                        deviceProfilePreference = event.preference,
+                        resolvedDeviceProfile = DeviceProfileResolver.resolve(event.preference),
+                        hardwareMappings = hardwareMappingRepository.getAllMappings(),
+                    )
+                }
+            }
+            RadioUiEvent.RequestOverlayPermission -> Unit
         }
+    }
+
+    fun onOverlayPermissionResult(granted: Boolean) {
+        _uiState.update { it.copy(needsOverlayPermission = !granted) }
     }
 
     private fun playLastTransmission() {

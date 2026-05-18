@@ -10,16 +10,26 @@ import com.securityradio.ptt.MainActivity
  */
 class RadioBootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
-        if (intent?.action != Intent.ACTION_BOOT_COMPLETED &&
-            intent?.action != Intent.ACTION_LOCKED_BOOT_COMPLETED &&
-            intent?.action != "android.intent.action.QUICKBOOT_POWERON"
-        ) {
-            return
+        when (intent?.action) {
+            Intent.ACTION_BOOT_COMPLETED,
+            Intent.ACTION_LOCKED_BOOT_COMPLETED,
+            "android.intent.action.QUICKBOOT_POWERON",
+            Intent.ACTION_MY_PACKAGE_REPLACED,
+            Intent.ACTION_USER_PRESENT,
+            -> launchRadio(context)
+            else -> return
         }
+    }
+
+    private fun launchRadio(context: Context) {
         RadioPresenceService.start(context)
         try {
             val launch = Intent(context, MainActivity::class.java).apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+                addFlags(
+                    Intent.FLAG_ACTIVITY_NEW_TASK or
+                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                        Intent.FLAG_ACTIVITY_SINGLE_TOP,
+                )
             }
             context.startActivity(launch)
         } catch (_: Throwable) {

@@ -33,7 +33,7 @@ class RadioAppGraph(application: Application) {
 
     val speechHelper = ChannelSpeechHelper(application, radioPreferences)
 
-    val hardwareMappingRepository = HardwareMappingRepository(application)
+    val hardwareMappingRepository = HardwareMappingRepository(application, radioPreferences)
 
     val customSoundStore = CustomSoundStore(application)
 

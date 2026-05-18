@@ -1,5 +1,8 @@
 package com.securityradio.ptt.presentation
 
+import com.securityradio.ptt.device.DeviceProfilePreference
+import com.securityradio.ptt.device.ResolvedDeviceProfile
+
 /**
  * Immutable snapshot of the radio shell. The [RadioViewModel] is the single source of truth.
  */
@@ -63,6 +66,14 @@ data class RadioUiState(
     val lastRxReplayCaption: String,
     /** Agency radio key configured on this device; blank means use the build-time key. */
     val agencyRadioKey: String,
+
+    /** Settings override for rugged handset layouts. */
+    val deviceProfilePreference: DeviceProfilePreference,
+    /** Effective profile after auto-detect (when preference is [DeviceProfilePreference.AUTO]). */
+    val resolvedDeviceProfile: ResolvedDeviceProfile,
+
+    /** Android "display over other apps" — needed on some OEMs to return the radio UI to the front. */
+    val needsOverlayPermission: Boolean,
 ) {
     init {
         require(softKeyLabels.size == SOFT_KEY_COUNT) {
@@ -111,6 +122,9 @@ data class RadioUiState(
             announceChannelNameOnTune = true,
             lastRxReplayCaption = "",
             agencyRadioKey = "",
+            deviceProfilePreference = DeviceProfilePreference.AUTO,
+            resolvedDeviceProfile = ResolvedDeviceProfile.RESPONSIVE,
+            needsOverlayPermission = false,
         )
     }
 }
