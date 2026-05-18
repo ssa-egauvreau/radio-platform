@@ -176,6 +176,10 @@ class AssetRadioUiSoundPlayer(
         playOneShot(FILE_EMERGENCY)
     }
 
+    override fun playVolumeCheck() {
+        playOneShot(FILE_TALK_PERMIT)
+    }
+
     override fun release() {
         main.post {
             stopTalkPermitLoopInternal()

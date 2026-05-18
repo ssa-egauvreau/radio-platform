@@ -135,6 +135,7 @@ class RadioViewModel(
                         _uiState.update { s -> onScanSoftKeyToggle(s) }
                     }
                     HardwareButtonEvent.PlayLastTransmissionPressed -> playLastTransmission()
+                    HardwareButtonEvent.VolumeCheckPressed -> soundPlayer.playVolumeCheck()
                 }
             }
         }
@@ -748,10 +749,28 @@ class RadioViewModel(
         val from = alert.fromUnit?.trim()?.takeIf { it.isNotEmpty() }
             ?: alert.fromName?.trim()?.takeIf { it.isNotEmpty() }
             ?: "DISPATCH"
+        val fromUpper = from.uppercase(Locale.US)
         if (alert.kind.equals("emergency", ignoreCase = true)) {
-            soundPlayer.playEmergencyAlert()
-            _uiState.update { it.copy(statusMessage = "EMERGENCY • ${from.uppercase(Locale.US)}") }
-            enqueueBackgroundWakeIfNeeded("inbox_emergency")
+            if (alert.active) {
+                soundPlayer.playEmergencyAlert()
+                _uiState.update {
+                    it.copy(
+                        statusMessage = "EMERGENCY • $fromUpper",
+                        remoteEmergencyUnit = fromUpper,
+                    )
+                }
+                enqueueBackgroundWakeIfNeeded("inbox_emergency")
+            } else {
+                _uiState.update { state ->
+                    val clearedRemote =
+                        if (state.remoteEmergencyUnit?.equals(fromUpper, ignoreCase = true) == true) {
+                            null
+                        } else {
+                            state.remoteEmergencyUnit
+                        }
+                    state.copy(remoteEmergencyUnit = clearedRemote)
+                }
+            }
         } else {
             soundPlayer.playChannelSwitch()
             val message = alert.message?.trim()?.takeIf { it.isNotEmpty() }

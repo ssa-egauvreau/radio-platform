@@ -37,6 +37,8 @@ data class RadioUiState(
     val localShortUnitId: String,
     /** Server hint: formatted RX attribution when someone else is keyed (main channel wins over scan). */
     val rxAttributedLine: String,
+    /** Another unit's emergency on this channel (from inbox); shown in orange on the main LCD. */
+    val remoteEmergencyUnit: String?,
     /** UI toggle for the scan row (soft key). */
     val scanActive: Boolean,
 
@@ -110,6 +112,7 @@ data class RadioUiState(
             micHint = "MIC: ALLOW ACCESS",
             localShortUnitId = "",
             rxAttributedLine = "",
+            remoteEmergencyUnit = null,
             scanActive = false,
             themeMode = ThemeMode.AUTO,
             mappingSettingsVisible = false,

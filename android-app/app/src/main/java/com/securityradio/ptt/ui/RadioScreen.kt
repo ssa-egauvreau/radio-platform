@@ -1,6 +1,10 @@
 package com.securityradio.ptt.ui
 
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -188,20 +192,24 @@ fun RadioScreen(
             if (layout.showStateBanner) {
                 LcdStateBanner(state = state, styles = styles)
             }
-            LcdPttBar(
-                state = state,
-                lcdNightEffective = lcdNightEffective,
-                onEvent = onEvent,
-                height = pttHeight,
-                styles = styles,
-                compact = layout.compactPtt,
-            )
-            LcdEmergencyRow(
-                state = state,
-                onEvent = onEvent,
-                styles = styles,
-                height = emergencyHeight,
-            )
+            if (layout.showOnScreenPtt) {
+                LcdPttBar(
+                    state = state,
+                    lcdNightEffective = lcdNightEffective,
+                    onEvent = onEvent,
+                    height = pttHeight,
+                    styles = styles,
+                    compact = layout.compactPtt,
+                )
+            }
+            if (layout.showOnScreenEmergency) {
+                LcdEmergencyRow(
+                    state = state,
+                    onEvent = onEvent,
+                    styles = styles,
+                    height = emergencyHeight,
+                )
+            }
             if (layout.showSoftKeyRow) {
                 if (layout.softKeysTwoRows) {
                     LcdSoftKeyTwoRowStrip(
@@ -392,48 +400,55 @@ private fun LcdMainChannelBlock(
     modifier: Modifier = Modifier,
 ) {
     val p = RadioLcdTheme.palette
-    val txBorder = when {
-        state.isPttPressed && state.pttBusyTone -> p.txOverlayBusy
-        state.isPttPressed -> p.txOverlayClear
-        else -> p.divider
+    val emergencyFlash = if (state.isEmergencyActive) {
+        val transition = rememberInfiniteTransition(label = "local_emergency_flash")
+        transition.animateFloat(
+            initialValue = 0.28f,
+            targetValue = 0.72f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(durationMillis = 550),
+                repeatMode = RepeatMode.Reverse,
+            ),
+            label = "emergency_flash_alpha",
+        ).value
+    } else {
+        0f
     }
-    val borderW = if (state.isPttPressed) 3.dp else 1.dp
-    val txWash = when {
-        state.isPttPressed && state.pttBusyTone -> p.txOverlayBusy.copy(alpha = 0.18f)
-        state.isPttPressed -> p.txOverlayClear.copy(alpha = 0.16f)
-        else -> Color.Transparent
+    val chrome = channelDisplayChrome(state, p, emergencyFlash)
+    val talkLine = channelTalkLine(state)
+    val channelStyle = if (layout.handsetStatusDisplay) {
+        styles.channel.copy(fontSize = 42.sp, lineHeight = 44.sp)
+    } else {
+        styles.channel
     }
-    val talkLine = when {
-        state.isPttPressed -> {
-            val id = state.localShortUnitId.trim()
-            if (id.isNotEmpty()) "TX: UNIT $id • YOU" else "TX: LOCAL MIC"
-        }
-        else -> state.rxAttributedLine
-    }
-    val talkColor = when {
-        state.isPttPressed && state.pttBusyTone -> p.statusAmber
-        state.isPttPressed -> p.statusGreen
-        else -> p.statusBlue
+    val talkStyle = if (layout.handsetStatusDisplay) {
+        styles.body.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp)
+    } else {
+        styles.body.copy(fontWeight = FontWeight.Bold)
     }
     Box(
         modifier = modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(2.dp))
-            .border(borderW, txBorder, RoundedCornerShape(2.dp))
+            .border(chrome.borderWidth, chrome.borderColor, RoundedCornerShape(2.dp))
             .background(p.lcdAlt),
     ) {
-        if (txWash != Color.Transparent) {
+        if (chrome.washColor != Color.Transparent) {
             Box(
                 modifier = Modifier
                     .matchParentSize()
-                    .background(txWash),
+                    .background(chrome.washColor),
             )
         }
         Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 8.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+                .fillMaxSize()
+                .padding(horizontal = 10.dp, vertical = if (layout.handsetStatusDisplay) 12.dp else 8.dp),
+            verticalArrangement = if (layout.handsetStatusDisplay) {
+                Arrangement.Center
+            } else {
+                Arrangement.spacedBy(6.dp)
+            },
         ) {
             if (layout.showChannelTunerButtons) Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -486,13 +501,27 @@ private fun LcdMainChannelBlock(
             }
             Text(
                 text = state.channelLabel.uppercase(Locale.US),
-                style = styles.channel,
-                color = p.textPrimary,
+                style = channelStyle,
+                color = chrome.channelTextColor,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.fillMaxWidth(),
                 textAlign = TextAlign.Center,
             )
+            val remoteEmergency = state.remoteEmergencyUnit?.trim()?.takeIf { it.isNotEmpty() }
+            if (remoteEmergency != null && !state.isEmergencyActive) {
+                Text(
+                    text = "EMERGENCY • UNIT $remoteEmergency",
+                    style = talkStyle,
+                    color = p.statusEmergency,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = if (layout.handsetStatusDisplay) 10.dp else 4.dp),
+                    textAlign = TextAlign.Center,
+                )
+            }
             if (layout.showRadiosOnlineLine) {
                 val radiosLine = state.radiosOnlineOnChannel?.let { n ->
                     "RADIOS ONLINE · $n"
@@ -509,11 +538,13 @@ private fun LcdMainChannelBlock(
             if (talkLine.isNotBlank()) {
                 Text(
                     text = talkLine.uppercase(Locale.US),
-                    style = styles.body.copy(fontWeight = FontWeight.Bold),
-                    color = talkColor,
+                    style = talkStyle,
+                    color = chrome.talkLineColor,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = if (layout.handsetStatusDisplay) 12.dp else 0.dp),
                     textAlign = TextAlign.Center,
                 )
             }
@@ -543,6 +574,79 @@ private fun LcdMainChannelBlock(
                 )
             }
         }
+    }
+}
+
+private data class ChannelDisplayChrome(
+    val borderColor: Color,
+    val borderWidth: Dp,
+    val washColor: Color,
+    val channelTextColor: Color,
+    val talkLineColor: Color,
+)
+
+private fun channelDisplayChrome(
+    state: RadioUiState,
+    p: RadioLcdPalette,
+    emergencyFlashAlpha: Float,
+): ChannelDisplayChrome {
+    return when {
+        state.isEmergencyActive -> ChannelDisplayChrome(
+            borderColor = p.statusEmergency,
+            borderWidth = 3.dp,
+            washColor = p.statusEmergency.copy(alpha = emergencyFlashAlpha.coerceIn(0.2f, 0.75f)),
+            channelTextColor = p.statusEmergency,
+            talkLineColor = p.statusEmergency,
+        )
+        state.isPttPressed && state.pttBusyTone -> ChannelDisplayChrome(
+            borderColor = p.statusRed,
+            borderWidth = 3.dp,
+            washColor = p.statusRed.copy(alpha = 0.2f),
+            channelTextColor = p.statusRed,
+            talkLineColor = p.statusRed,
+        )
+        state.isPttPressed -> ChannelDisplayChrome(
+            borderColor = p.statusGreen,
+            borderWidth = 3.dp,
+            washColor = p.statusGreen.copy(alpha = 0.18f),
+            channelTextColor = p.statusGreen,
+            talkLineColor = p.statusGreen,
+        )
+        state.rxAttributedLine.isNotBlank() -> ChannelDisplayChrome(
+            borderColor = p.rxHighlight,
+            borderWidth = 2.dp,
+            washColor = p.rxHighlight.copy(alpha = 0.14f),
+            channelTextColor = p.textPrimary,
+            talkLineColor = p.rxHighlight,
+        )
+        state.remoteEmergencyUnit != null -> ChannelDisplayChrome(
+            borderColor = p.statusEmergency.copy(alpha = 0.65f),
+            borderWidth = 2.dp,
+            washColor = p.statusEmergency.copy(alpha = 0.1f),
+            channelTextColor = p.textPrimary,
+            talkLineColor = p.statusEmergency,
+        )
+        else -> ChannelDisplayChrome(
+            borderColor = p.divider,
+            borderWidth = 1.dp,
+            washColor = Color.Transparent,
+            channelTextColor = p.textPrimary,
+            talkLineColor = p.textSecondary,
+        )
+    }
+}
+
+private fun channelTalkLine(state: RadioUiState): String {
+    return when {
+        state.isEmergencyActive -> {
+            val id = state.localShortUnitId.trim()
+            if (id.isNotEmpty()) "EMERGENCY • UNIT $id • YOU" else "EMERGENCY • YOU"
+        }
+        state.isPttPressed -> {
+            val id = state.localShortUnitId.trim()
+            if (id.isNotEmpty()) "TX: UNIT $id • YOU" else "TX: LOCAL MIC"
+        }
+        else -> state.rxAttributedLine
     }
 }
 
@@ -647,7 +751,7 @@ private fun deriveBanner(state: RadioUiState, p: RadioLcdPalette): Triple<String
         state.isPttPressed && state.pttBusyTone -> Triple(
             state.statusMessage.uppercase(Locale.US),
             if (state.micPermissionGranted) "MIC ON" else "MIC OFF",
-            p.statusAmber,
+            p.statusRed,
         )
         state.isPttPressed -> Triple(
             "TRANSMITTING",
@@ -679,7 +783,7 @@ private fun LcdPttBar(
 ) {
     val p = RadioLcdTheme.palette
     val fill = when {
-        state.isPttPressed && state.pttBusyTone -> p.pttBusyFill
+        state.isPttPressed && state.pttBusyTone -> p.statusRed
         state.isPttPressed -> p.pttTransmitFill
         else -> p.pttIdleFill
     }

@@ -14,5 +14,7 @@ interface RadioUiSoundPlayer {
     fun startBusyLoop()
     fun stopBusyLoop()
     fun playEmergencyAlert()
+    /** One-shot beep at the current volume level (volume check key). */
+    fun playVolumeCheck()
     fun release()
 }

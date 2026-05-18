@@ -36,6 +36,12 @@ data class RadioLayoutPolicy(
     val compactSpacing: Boolean,
     val compactPtt: Boolean,
     val minimalStatusBar: Boolean,
+    /** Touch PTT bar (hardware PTT handsets hide this). */
+    val showOnScreenPtt: Boolean = true,
+    /** Touch emergency row (hardware emergency key handsets hide this). */
+    val showOnScreenEmergency: Boolean = true,
+    /** Large channel + talk line; minimal chrome (IRC590). */
+    val handsetStatusDisplay: Boolean = false,
 )
 
 object DeviceProfileResolver {
@@ -63,6 +69,9 @@ object DeviceProfileResolver {
             compactSpacing = true,
             compactPtt = true,
             minimalStatusBar = false,
+            showOnScreenPtt = true,
+            showOnScreenEmergency = true,
+            handsetStatusDisplay = false,
         )
         ResolvedDeviceProfile.TM7_PLUS -> RadioLayoutPolicy(
             showSoftKeyRow = true,
@@ -76,6 +85,9 @@ object DeviceProfileResolver {
             compactSpacing = true,
             compactPtt = true,
             minimalStatusBar = false,
+            showOnScreenPtt = true,
+            showOnScreenEmergency = true,
+            handsetStatusDisplay = false,
         )
         ResolvedDeviceProfile.IRC590 -> RadioLayoutPolicy(
             showSoftKeyRow = false,
@@ -89,6 +101,9 @@ object DeviceProfileResolver {
             compactSpacing = true,
             compactPtt = true,
             minimalStatusBar = true,
+            showOnScreenPtt = false,
+            showOnScreenEmergency = false,
+            handsetStatusDisplay = true,
         )
         ResolvedDeviceProfile.RESPONSIVE -> responsivePolicy(isCompact = false, isUltraCompact = false)
     }
@@ -150,15 +165,17 @@ object DeviceProfileResolver {
         HardwareAction.CHANNEL_DOWN -> setOf(232)
         HardwareAction.SCAN_TOGGLE -> setOf(137)
         HardwareAction.PLAY_LAST_TRANSMISSION -> emptySet()
+        HardwareAction.VOLUME_CHECK -> emptySet()
     }
 
     /** IRC590 physical side keys (programmable 1/2 → scan / replay). */
     private fun irc590Defaults(action: HardwareAction): Set<Int> = when (action) {
+        HardwareAction.PTT -> setOf(229)
         HardwareAction.EMERGENCY -> setOf(233)
         HardwareAction.CHANNEL_UP -> setOf(235)
         HardwareAction.CHANNEL_DOWN -> setOf(234)
         HardwareAction.SCAN_TOGGLE -> setOf(230)
         HardwareAction.PLAY_LAST_TRANSMISSION -> setOf(232)
-        HardwareAction.PTT -> emptySet()
+        HardwareAction.VOLUME_CHECK -> setOf(231)
     }
 }
