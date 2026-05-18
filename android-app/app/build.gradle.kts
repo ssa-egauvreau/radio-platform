@@ -29,7 +29,7 @@ private val normalizedRadioApiBaseUrl: String = when {
  * Default backend when [radio.api.base.url] is not set in local.properties.
  * Override per machine with local.properties — never commit secrets there.
  */
-private val defaultRailwayApiBaseUrl = "https://radio-platform-production.up.railway.app/"
+private val defaultRailwayApiBaseUrl = "https://safet.up.railway.app/"
 private val radioApiKeyRaw = localProps.getProperty("radio.api.key")?.trim().orEmpty()
 
 android {

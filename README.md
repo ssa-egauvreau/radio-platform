@@ -30,6 +30,8 @@ boot. Handsets bind to an agency with a per-agency radio key (the legacy global
 
 Step-by-step Railway + Android configuration: `docs/railway-android-setup.md`.
 
+**Production API / web console:** `https://safet.up.railway.app/`
+
 ## Architecture rules
 - Keep UI, ViewModel, domain logic, data access, and device integration separate.
 - Use a state-driven Compose architecture.

@@ -11,9 +11,9 @@ If a file is missing, that cue is skipped (the UI still updates).
 
 Configure the API in `android-app/local.properties` (same folder as this module’s Gradle project root):
 
-  radio.api.base.url=https://YOUR_SERVICE.up.railway.app/
+  radio.api.base.url=https://safet.up.railway.app/
   radio.api.key=YOUR_SHARED_SECRET
 
-If `radio.api.base.url` is omitted, debug builds default to `http://10.0.2.2:8080/` (emulator → your PC). Release builds default to a placeholder Railway URL until you set the property.
+If `radio.api.base.url` is omitted, debug builds default to `http://10.0.2.2:8080/` (emulator → your PC). Release builds default to `https://safet.up.railway.app/`.
 
 See `docs/railway-android-setup.md` for full Railway + Android steps.

@@ -64,9 +64,9 @@ The Android app sends this header when you set `radio.api.key` in `local.propert
 1. Open the API service → **Settings** → **Networking**.
 2. Under **Public Networking**, click **Generate Domain** (or attach a custom domain).
 
-Copy the HTTPS URL, for example:
+Copy the HTTPS URL. Production is:
 
-`https://your-service-name.up.railway.app/`
+`https://safet.up.railway.app/`
 
 Keep the trailing slash out of your copy if you like; the Android Gradle snippet normalizes it.
 
@@ -74,19 +74,19 @@ Keep the trailing slash out of your copy if you like; the Android Gradle snippet
 
 Open:
 
-`https://your-service-name.up.railway.app/health`
+`https://safet.up.railway.app/health`
 
 You should see JSON like `{ "status": "ok", ... }`.
 
 Then open:
 
-`https://your-service-name.up.railway.app/v1/air`
+`https://safet.up.railway.app/v1/air`
 
 You should see `{"occupied":false}` unless you set **`AIR_OCCUPIED=1`**.
 
 Then open:
 
-`https://your-service-name.up.railway.app/v1/channels`
+`https://safet.up.railway.app/v1/channels`
 
 You should see:
 
@@ -103,7 +103,7 @@ If you enabled `RADIO_API_KEY`, use a REST client (or `curl`) to add the header 
 The API also exposes a **voice bridge** used by Android for live half-duplex audio on the tuned channel:
 
 - Path: **`/v1/voice/stream`**
-- URL example: **`wss://your-service.up.railway.app/v1/voice/stream`** (HTTPS base → **`wss://`**)
+- URL example: **`wss://safet.up.railway.app/v1/voice/stream`** (HTTPS base → **`wss://`**)
 - Upgrade uses the **same optional** header **`X-Radio-Key`** as REST when `RADIO_API_KEY` is set.
 
 Protocol:
@@ -127,7 +127,7 @@ This file is **not** committed to git (it is machine-specific).
 Add these lines (use your real URL and key):
 
 ```properties
-radio.api.base.url=https://your-service-name.up.railway.app/
+radio.api.base.url=https://safet.up.railway.app/
 radio.api.key=YOUR_RAILWAY_RADIO_API_KEY
 ```
 
@@ -147,9 +147,9 @@ Rules:
 
 - If you **do not** set `radio.api.base.url`:
   - **Debug** builds default to `http://10.0.2.2:8080/` (emulator only; points at your PC).
-  - **Release** builds default to a placeholder `https://CHANGE_ME.up.railway.app/` until you set the property.
+  - **Release** builds default to `https://safet.up.railway.app/` when the property is omitted.
 
-If you omit `radio.api.base.url`, **debug and release builds** fall back to the production Railway host baked into `android-app/app/build.gradle.kts` (`defaultRailwayApiBaseUrl`). Override that constant or use `local.properties` if you deploy a different backend.
+If you omit `radio.api.base.url`, **debug and release builds** fall back to the production Railway host baked into `android-app/app/build.gradle.kts` (`https://safet.up.railway.app/`). Override that constant or use `local.properties` if you deploy a different backend.
 
 ---
 
