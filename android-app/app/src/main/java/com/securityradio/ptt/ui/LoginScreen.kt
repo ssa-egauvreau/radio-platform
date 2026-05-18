@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.securityradio.ptt.BuildConfig
 import com.securityradio.ptt.presentation.LoginViewModel
 
 @Composable
@@ -65,6 +66,13 @@ fun LoginScreen(
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+        if (BuildConfig.DEBUG) {
+            Text(
+                text = "Server: ${BuildConfig.API_BASE_URL}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
 
         OutlinedTextField(
             value = state.username,

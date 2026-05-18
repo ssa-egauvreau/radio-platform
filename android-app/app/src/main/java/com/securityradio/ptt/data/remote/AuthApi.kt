@@ -25,6 +25,6 @@ data class LoginResponseDto(
 )
 
 interface AuthApi {
-    @POST("v1/auth/login")
+    @POST("/v1/auth/login")
     suspend fun login(@Body body: LoginRequestDto): LoginResponseDto
 }

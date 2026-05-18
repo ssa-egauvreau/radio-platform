@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 
 fun httpApiBaseUrlToVoiceWebSocketUrl(httpBaseUrl: String): String {
-    val u = httpBaseUrl.trim().trimEnd('/')
+    val u = NetworkModule.normalizeApiBaseUrl(httpBaseUrl).trimEnd('/')
     val https = "https://"
     val http = "http://"
     val (scheme, remainder) = when {

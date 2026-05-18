@@ -93,6 +93,8 @@ class LoginViewModel(
                     else -> when (http.code()) {
                         401 -> "Sign-in failed. Check agency code, username, and password."
                         403 -> "This account cannot use the radio app."
+                        404 -> "Wrong server address (404). In android-app/local.properties set " +
+                            "radio.api.base.url=https://safet.up.railway.app/ then Sync Gradle and rebuild."
                         else -> "Sign-in failed (${http.code()})."
                     }
                 }

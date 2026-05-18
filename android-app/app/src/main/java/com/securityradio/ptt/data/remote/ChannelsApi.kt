@@ -7,22 +7,22 @@ import retrofit2.http.POST
 import retrofit2.http.Query
 
 interface ChannelsApi {
-    @GET("v1/channels")
+    @GET("/v1/channels")
     suspend fun channels(): ChannelsResponseDto
 
-    @GET("v1/air")
+    @GET("/v1/air")
     suspend fun airState(@Query("channel") channel: String? = null): AirStateDto
 
     /** Optional telemetry for who is keyed on primary vs scan channels (mock via Railway env vars). */
-    @GET("v1/talk-activity")
+    @GET("/v1/talk-activity")
     suspend fun talkActivity(): TalkActivityDto
 
     /** Register this handset on its tuned channel so the server can approximate channel population. */
-    @POST("v1/presence/heartbeat")
+    @POST("/v1/presence/heartbeat")
     suspend fun presenceHeartbeat(@Body body: PresenceHeartbeatDto): PresenceHeartbeatResponseDto
 
     /** Returns how many unique unit identifiers have heartbeated onto this channel lately. */
-    @GET("v1/presence/count")
+    @GET("/v1/presence/count")
     suspend fun presenceCount(@Query("channel") channel: String): PresenceCountDto
 }
 

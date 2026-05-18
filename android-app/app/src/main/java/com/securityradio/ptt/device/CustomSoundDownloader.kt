@@ -1,6 +1,7 @@
 package com.securityradio.ptt.device
 
 import android.util.Log
+import com.securityradio.ptt.data.remote.NetworkModule
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.util.concurrent.TimeUnit
@@ -19,7 +20,7 @@ class CustomSoundDownloader(
     private val store: CustomSoundStore,
 ) {
 
-    private val baseUrl = httpApiBaseUrl.trim().trimEnd('/')
+    private val baseUrl = NetworkModule.normalizeApiBaseUrl(httpApiBaseUrl).trimEnd('/')
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)

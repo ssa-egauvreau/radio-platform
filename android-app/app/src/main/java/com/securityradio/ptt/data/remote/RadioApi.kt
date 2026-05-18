@@ -8,17 +8,17 @@ import retrofit2.http.Query
 
 /** Handset-facing endpoints: GPS reporting and emergency / page alerts. */
 interface RadioApi {
-    @POST("v1/radio/location")
+    @POST("/v1/radio/location")
     suspend fun reportLocation(@Body body: LocationReportDto): RadioOkDto
 
-    @GET("v1/radio/inbox")
+    @GET("/v1/radio/inbox")
     suspend fun inbox(
         @Query("unit") unit: String,
         @Query("channel") channel: String?,
         @Query("since") since: Long,
     ): InboxResponseDto
 
-    @POST("v1/radio/emergency")
+    @POST("/v1/radio/emergency")
     suspend fun emergency(@Body body: EmergencyDto): RadioOkDto
 }
 
