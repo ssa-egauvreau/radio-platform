@@ -13,4 +13,11 @@ object VoiceAudioSpecs {
      * because newer platform stubs sometimes omit the `AudioManager` constant for Kotlin callers.
      */
     const val LEGACY_STREAM_VOICE_COMMUNICATION: Int = 11
+
+    /**
+     * Legacy [AudioTrack] stream type for received-voice playback on API < 23: the music stream
+     * (`AudioManager.STREAM_MUSIC`, i.e. 3). Inbound voice plays on the media path because the
+     * voice-communication route is inaudible on many rugged LTE handset loudspeakers.
+     */
+    const val LEGACY_STREAM_MUSIC: Int = 3
 }
