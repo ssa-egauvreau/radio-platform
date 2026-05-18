@@ -41,8 +41,11 @@ class InboundVoicePlayer {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                 AudioTrack.Builder()
                     .setAudioAttributes(
+                        // USAGE_MEDIA, not USAGE_VOICE_COMMUNICATION: the voice-communication
+                        // route is inaudible on the loudspeaker of many rugged LTE handsets,
+                        // which left received voice silent. The media path is reliably audible.
                         AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_VOICE_COMMUNICATION)
+                            .setUsage(AudioAttributes.USAGE_MEDIA)
                             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
                             .build(),
                     )
@@ -59,7 +62,7 @@ class InboundVoicePlayer {
             } else {
                 @Suppress("DEPRECATION")
                 AudioTrack(
-                    VoiceAudioSpecs.LEGACY_STREAM_VOICE_COMMUNICATION,
+                    VoiceAudioSpecs.LEGACY_STREAM_MUSIC,
                     VoiceAudioSpecs.SAMPLE_RATE_HZ,
                     AudioFormat.CHANNEL_OUT_MONO,
                     VoiceAudioSpecs.PCM_ENCODING,
