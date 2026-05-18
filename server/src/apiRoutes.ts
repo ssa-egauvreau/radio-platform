@@ -217,11 +217,7 @@ export function createApiRouter(): Router {
         res.status(401).json({ error: "invalid_login" });
         return;
       }
-      if (user!.role === "owner") {
-        res.status(403).json({ error: "owner_use_platform_portal" });
-        return;
-      }
-      if (agencySlugRaw) {
+      if (agencySlugRaw && user!.role !== "owner") {
         const agency = await getAgencyBySlug(agencySlugRaw);
         if (!agency || agency.disabled || user!.agency_id !== agency.id) {
           await writeAudit({
