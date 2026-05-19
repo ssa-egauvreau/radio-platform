@@ -459,3 +459,57 @@ fun LcdGlobeIcon(
         )
     }
 }
+
+/** Horizontal battery: outline, terminal nub, charge bar that fills with [percent]. */
+@Composable
+fun LcdBatteryIcon(
+    percent: Int,
+    outline: Color,
+    fillHigh: Color,
+    fillLow: Color,
+    fillCritical: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier) {
+        val stroke = lcdStroke(STATUS_STROKE)
+        val w = size.width
+        val h = size.height
+        val pct = percent.coerceIn(0, 100)
+        val bodyRight = w * 0.86f
+        val bodyTop = h * 0.1f
+        val bodyBottom = h * 0.9f
+        val cornerR = h * 0.16f
+        drawRoundRect(
+            color = outline,
+            topLeft = Offset(0f, bodyTop),
+            size = Size(bodyRight, bodyBottom - bodyTop),
+            cornerRadius = CornerRadius(cornerR, cornerR),
+            style = stroke,
+        )
+        drawRoundRect(
+            color = outline,
+            topLeft = Offset(bodyRight, h * 0.3f),
+            size = Size(w - bodyRight, h * 0.4f),
+            cornerRadius = CornerRadius(cornerR * 0.5f, cornerR * 0.5f),
+        )
+        val inset = stroke.width
+        val innerLeft = inset
+        val innerTop = bodyTop + inset
+        val innerRight = bodyRight - inset
+        val innerBottom = bodyBottom - inset
+        val span = (innerRight - innerLeft) * (pct / 100f)
+        if (span > 0f) {
+            val fillColor = when {
+                pct < 10 -> fillCritical
+                pct < 25 -> fillLow
+                else -> fillHigh
+            }
+            drawRoundRect(
+                color = fillColor,
+                topLeft = Offset(innerLeft, innerTop),
+                size = Size(span, innerBottom - innerTop),
+                cornerRadius = CornerRadius(cornerR * 0.45f, cornerR * 0.45f),
+            )
+        }
+    }
+}

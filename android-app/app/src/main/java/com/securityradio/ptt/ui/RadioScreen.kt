@@ -75,6 +75,7 @@ import com.securityradio.ptt.presentation.RadioUiEvent
 import com.securityradio.ptt.presentation.RadioUiState
 import com.securityradio.ptt.presentation.ThemeMode
 import com.securityradio.ptt.presentation.isLcdNight
+import com.securityradio.ptt.ui.lcd.LcdBatteryIcon
 import com.securityradio.ptt.ui.lcd.LcdBluetoothIcon
 import com.securityradio.ptt.ui.lcd.LcdDayNightIcon
 import com.securityradio.ptt.ui.lcd.LcdEmergencyGlyphIcon
@@ -386,7 +387,7 @@ private fun LcdStatusBar(
             } else {
                 Text(
                     text = state.systemTime.uppercase(Locale.US),
-                    style = styles.status,
+                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
                     color = p.textPrimary,
                 )
                 Row(
@@ -418,11 +419,24 @@ private fun LcdStatusBar(
                             color = p.materialPrimary,
                         )
                     }
-                    Text(
-                        text = "BAT ${state.batteryPercent}%",
-                        style = styles.status,
-                        color = p.textSecondary,
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        LcdBatteryIcon(
+                            percent = state.batteryPercent,
+                            outline = p.textSecondary,
+                            fillHigh = p.statusGreen,
+                            fillLow = p.statusAmber,
+                            fillCritical = p.statusRed,
+                            modifier = Modifier.size(width = 24.dp, height = 12.dp),
+                        )
+                        Text(
+                            text = "${state.batteryPercent}%",
+                            style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
+                            color = p.textSecondary,
+                        )
+                    }
                     Box(
                         modifier = Modifier
                             .size(22.dp)
@@ -457,14 +471,27 @@ private fun LcdStatusBar(
         ) {
             Text(
                 text = state.systemTime.uppercase(Locale.US),
-                style = styles.status,
+                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 20.sp),
                 color = p.textPrimary,
             )
-            Text(
-                text = "BAT ${state.batteryPercent}%",
-                style = styles.status,
-                color = p.textSecondary,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp),
+            ) {
+                LcdBatteryIcon(
+                    percent = state.batteryPercent,
+                    outline = p.textSecondary,
+                    fillHigh = p.statusGreen,
+                    fillLow = p.statusAmber,
+                    fillCritical = p.statusRed,
+                    modifier = Modifier.size(width = 28.dp, height = 14.dp),
+                )
+                Text(
+                    text = "${state.batteryPercent}%",
+                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 20.sp),
+                    color = p.textSecondary,
+                )
+            }
         }
         if (layout.showFullStatusBar) Row(
             modifier = Modifier.fillMaxWidth(),
@@ -976,14 +1003,27 @@ private fun LcdHandsetToolbar(
         ) {
             Text(
                 text = state.systemTime.uppercase(Locale.US),
-                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
+                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 28.sp),
                 color = p.textPrimary,
             )
-            Text(
-                text = "BAT ${state.batteryPercent}%",
-                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
-                color = p.textSecondary,
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                LcdBatteryIcon(
+                    percent = state.batteryPercent,
+                    outline = p.textSecondary,
+                    fillHigh = p.statusGreen,
+                    fillLow = p.statusAmber,
+                    fillCritical = p.statusRed,
+                    modifier = Modifier.size(width = 42.dp, height = 22.dp),
+                )
+                Text(
+                    text = "${state.batteryPercent}%",
+                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 28.sp),
+                    color = p.textSecondary,
+                )
+            }
             Text(
                 text = "SET",
                 style = styles.softKey.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
