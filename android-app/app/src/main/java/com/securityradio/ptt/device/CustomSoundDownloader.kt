@@ -4,6 +4,7 @@ import android.util.Log
 import com.securityradio.ptt.data.remote.normalizeApiBaseUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
@@ -65,6 +66,32 @@ class CustomSoundDownloader(
     /** Refreshes the custom tones on a background thread. */
     fun refreshAsync() {
         Thread({ refresh() }, "custom-sound-refresh").start()
+    }
+
+    /**
+     * Reads the agency's current tone-set version, or null when it can't be
+     * determined (offline, server error, no agency). A change in this value
+     * between calls means [refresh] should run to pull the updated tones.
+     * Blocking — call off the main thread.
+     */
+    fun fetchVersion(): String? {
+        val token = authTokenProvider().trim()
+        val key = apiKeyProvider().trim()
+        return try {
+            val builder = Request.Builder().url("$baseUrl/v1/sounds")
+            when {
+                token.isNotEmpty() -> builder.header("Authorization", "Bearer $token")
+                key.isNotEmpty() -> builder.header("X-Radio-Key", key)
+            }
+            client.newCall(builder.build()).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                JSONObject(body).optString("version").takeIf { it.isNotEmpty() }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "custom tone version check failed", e)
+            null
+        }
     }
 
     private companion object {

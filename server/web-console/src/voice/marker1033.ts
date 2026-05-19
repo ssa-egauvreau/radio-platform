@@ -75,3 +75,9 @@ export async function loadMarker1033Pcm(): Promise<Int16Array> {
   }
   return loadPromise;
 }
+
+/** Drops the cached marker PCM so the next play re-fetches the current tone. */
+export function resetMarker1033Cache(): void {
+  cachedPcm = null;
+  loadPromise = null;
+}

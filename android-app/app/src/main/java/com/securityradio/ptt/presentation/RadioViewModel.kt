@@ -35,6 +35,7 @@ import android.os.SystemClock
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -47,6 +48,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class RadioViewModel(
     private val application: Application,
@@ -79,6 +81,9 @@ class RadioViewModel(
 
     private var channelNames: List<String> = emptyList()
     private var channelIndex: Int = 0
+
+    /** Agency tone-set version last seen; a change triggers a custom-tone re-pull. */
+    private var lastSoundsVersion: String? = null
 
     private var pttToneJob: Job? = null
     private var mappingJob: Job? = null
@@ -137,6 +142,9 @@ class RadioViewModel(
         }
         viewModelScope.launch {
             pollInbox()
+        }
+        viewModelScope.launch {
+            pollSoundsVersion()
         }
         viewModelScope.launch {
             syncCatalog(playConnectSoundIfNetwork = true)
@@ -358,7 +366,9 @@ class RadioViewModel(
                 // REST picks up the key per request; voice must drop its socket
                 // to stop using the previous agency's key on the live stream.
                 voiceRelay.reconnect()
-                // The new agency has its own tone set — pull it now.
+                // The new agency has its own tone set — pull it now, and forget
+                // the previous agency's version so the next poll re-baselines.
+                lastSoundsVersion = null
                 customSoundDownloader.refreshAsync()
                 _uiState.update {
                     it.copy(
@@ -795,6 +805,26 @@ class RadioViewModel(
      * Polls the server for pages and dispatch emergencies addressed to this unit/channel.
      * The first batch is consumed silently to prime the cursor — only later alerts notify.
      */
+    /**
+     * Watches the agency's tone-set version and re-pulls the custom tones when
+     * an admin uploads or removes one, so a running handset never keeps stale
+     * tones until the next restart. The first reading just sets the baseline —
+     * startup already pulls the tones once.
+     */
+    private suspend fun pollSoundsVersion() {
+        while (currentCoroutineContext().isActive) {
+            delay(SOUNDS_VERSION_POLL_MS)
+            val version = withContext(Dispatchers.IO) {
+                runCatching { customSoundDownloader.fetchVersion() }.getOrNull()
+            } ?: continue
+            val previous = lastSoundsVersion
+            lastSoundsVersion = version
+            if (previous != null && previous != version) {
+                customSoundDownloader.refreshAsync()
+            }
+        }
+    }
+
     private suspend fun pollInbox() {
         var since = 0L
         var primed = false
@@ -1135,5 +1165,6 @@ class RadioViewModel(
         const val PRESENCE_POLL_MS = 12_000L
         const val INBOX_POLL_MS = 5_000L
         const val STATUS_REFRESH_MS = 2_000L
+        const val SOUNDS_VERSION_POLL_MS = 60_000L
     }
 }
