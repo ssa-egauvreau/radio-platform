@@ -187,6 +187,7 @@ class RadioViewModel(
                     HardwareButtonEvent.PlayLastTransmissionPressed -> playLastTransmission()
                     HardwareButtonEvent.VolumeCheckPressed -> soundPlayer.startVolumeCheckLoop()
                     HardwareButtonEvent.VolumeCheckReleased -> soundPlayer.stopVolumeCheckLoop()
+                    HardwareButtonEvent.VolumeCheckTapped -> soundPlayer.playVolumeCheck()
                     HardwareButtonEvent.ToggleDayNightPressed -> onEvent(RadioUiEvent.ToggleDayNight)
                 }
             }

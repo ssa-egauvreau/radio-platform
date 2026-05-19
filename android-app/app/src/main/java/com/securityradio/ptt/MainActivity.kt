@@ -320,6 +320,15 @@ class MainActivity : ComponentActivity() {
         val isVolumeCheck = repository.getMapping(HardwareAction.VOLUME_CHECK).contains(keyCode)
         val isToggleDayNight = repository.getMapping(HardwareAction.TOGGLE_DAY_NIGHT).contains(keyCode)
 
+        // The hardware volume knob plays the volume-check tone once per turn but
+        // is never consumed, so the OS still raises and lowers the volume.
+        if (isVolumeCheck && isSystemVolumeKey(keyCode)) {
+            if (event?.repeatCount == 0) {
+                HardwareButtonRelay.sendEvent(HardwareButtonEvent.VolumeCheckTapped)
+            }
+            return super.onKeyDown(keyCode, event)
+        }
+
         if (isPtt || isEmergency || isChanUp || isChanDown || isScanToggle || isPlayLast || isVolumeCheck ||
             isToggleDayNight
         ) {
@@ -346,11 +355,16 @@ class MainActivity : ComponentActivity() {
                 HardwareButtonRelay.sendEvent(HardwareButtonEvent.PttReleased)
                 return true
             }
-            repository.getMapping(HardwareAction.VOLUME_CHECK).contains(keyCode) -> {
+            !isSystemVolumeKey(keyCode) &&
+                repository.getMapping(HardwareAction.VOLUME_CHECK).contains(keyCode) -> {
                 HardwareButtonRelay.sendEvent(HardwareButtonEvent.VolumeCheckReleased)
                 return true
             }
         }
         return super.onKeyUp(keyCode, event)
     }
+
+    /** KEYCODE_VOLUME_UP / KEYCODE_VOLUME_DOWN — the OS volume rocker/knob. */
+    private fun isSystemVolumeKey(keyCode: Int): Boolean =
+        keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
 }
