@@ -57,6 +57,20 @@ android {
         }
     }
 
+    // A stable debug keystore is committed in app/debug.keystore so every build
+    // — local or CI — signs APKs with the same key. Sideloaded fleet APKs can
+    // then update over previous installs without an uninstall, the way a Play
+    // Store update would. For Play Store distribution use a separate, real
+    // release signing key.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         debug {
             // Optional shared secret (not from any third-party site): if RADIO_API_KEY is set on the
