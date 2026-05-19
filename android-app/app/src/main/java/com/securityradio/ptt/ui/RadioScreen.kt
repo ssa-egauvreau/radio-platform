@@ -172,15 +172,19 @@ fun RadioScreen(
             modifier = Modifier.fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(gap),
         ) {
-            LcdStatusBar(
-                state = state,
-                lcdNightEffective = lcdNightEffective,
-                onEvent = onEvent,
-                onRequestMicPermission = onRequestMicPermission,
-                styles = styles,
-                layout = layout,
-            )
-            LcdDivider()
+            // Handset profiles (IRC590) merge the status icons into the main
+            // channel box, so the separate top status bar is omitted here.
+            if (!layout.handsetStatusDisplay) {
+                LcdStatusBar(
+                    state = state,
+                    lcdNightEffective = lcdNightEffective,
+                    onEvent = onEvent,
+                    onRequestMicPermission = onRequestMicPermission,
+                    styles = styles,
+                    layout = layout,
+                )
+                LcdDivider()
+            }
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -189,13 +193,16 @@ fun RadioScreen(
                 LcdMainChannelBlock(
                     state = state,
                     onEvent = onEvent,
+                    onRequestMicPermission = onRequestMicPermission,
                     tunerEnabled = tunerEnabled,
                     styles = styles,
                     layout = layout,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
-            LcdDivider()
+            if (!layout.handsetStatusDisplay) {
+                LcdDivider()
+            }
             if (layout.showStateBanner) {
                 LcdStateBanner(state = state, styles = styles)
             }
@@ -454,6 +461,7 @@ private fun LcdStatusBar(
 private fun LcdMainChannelBlock(
     state: RadioUiState,
     onEvent: (RadioUiEvent) -> Unit,
+    onRequestMicPermission: () -> Unit,
     tunerEnabled: Boolean,
     styles: LcdTextStyles,
     layout: RadioLayoutPolicy,
@@ -479,6 +487,8 @@ private fun LcdMainChannelBlock(
         LcdHandsetFillChannelBlock(
             state = state,
             chrome = chrome,
+            onEvent = onEvent,
+            onRequestMicPermission = onRequestMicPermission,
             styles = styles,
             modifier = modifier,
         )
@@ -650,6 +660,8 @@ private fun LcdMainChannelBlock(
 private fun LcdHandsetFillChannelBlock(
     state: RadioUiState,
     chrome: ChannelDisplayChrome,
+    onEvent: (RadioUiEvent) -> Unit,
+    onRequestMicPermission: () -> Unit,
     styles: LcdTextStyles,
     modifier: Modifier = Modifier,
 ) {
@@ -689,15 +701,31 @@ private fun LcdHandsetFillChannelBlock(
             )
         }
         val hasTalk = talkUnit.isNotEmpty()
+        val showWarnings = !state.micPermissionGranted || state.channelSyncError != null
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 14.dp),
         ) {
+            LcdHandsetToolbar(
+                state = state,
+                onEvent = onEvent,
+                styles = styles,
+            )
+            if (showWarnings) {
+                Spacer(modifier = Modifier.height(4.dp))
+                LcdHandsetWarningRow(
+                    state = state,
+                    onEvent = onEvent,
+                    onRequestMicPermission = onRequestMicPermission,
+                    styles = styles,
+                )
+            }
+            Spacer(modifier = Modifier.height(6.dp))
+            LcdDivider()
+            Spacer(modifier = Modifier.height(6.dp))
             Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .then(if (hasTalk) Modifier.weight(0.2f) else Modifier.weight(0.24f)),
+                modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -763,6 +791,106 @@ private fun LcdHandsetFillChannelBlock(
                         .fillMaxWidth(),
                 )
             }
+        }
+    }
+}
+
+/** Status icon strip + SET button merged into the top of the handset channel box. */
+@Composable
+private fun LcdHandsetToolbar(
+    state: RadioUiState,
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+    modifier: Modifier = Modifier,
+) {
+    val p = RadioLcdTheme.palette
+    val online = state.networkLabel == "ONLINE"
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 32.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
+    ) {
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            LcdSignalBarsIcon(
+                bars = if (online) 4 else 1,
+                maxBars = 4,
+                colorActive = if (online) p.statusGreen else p.statusAmber,
+                colorInactive = p.textMuted,
+                modifier = Modifier.size(26.dp, 18.dp),
+            )
+            LcdBluetoothIcon(
+                on = state.bluetoothOn,
+                active = p.statusBlue,
+                muted = p.textMuted,
+                modifier = Modifier.size(24.dp),
+            )
+            LcdGpsIcon(
+                active = p.statusGreen,
+                muted = p.textMuted,
+                locked = true,
+                modifier = Modifier.size(22.dp),
+            )
+            LcdReplayIcon(
+                ready = p.statusAmber,
+                muted = p.textMuted,
+                hasBuffer = state.hasReplayBuffer,
+                modifier = Modifier
+                    .size(24.dp)
+                    .clickable { onEvent(RadioUiEvent.PlayLastTransmission) },
+            )
+            LcdVolumeIcon(
+                muted = p.textMuted,
+                active = p.statusGreen,
+                isMuted = state.listenVolumeMuted,
+                modifier = Modifier
+                    .size(26.dp)
+                    .clickable { onEvent(RadioUiEvent.ToggleListenVolume) },
+            )
+        }
+        Text(
+            text = "SET",
+            style = styles.softKey.copy(fontSize = 13.sp),
+            color = p.statusBlue,
+            modifier = Modifier.clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
+        )
+    }
+}
+
+@Composable
+private fun LcdHandsetWarningRow(
+    state: RadioUiState,
+    onEvent: (RadioUiEvent) -> Unit,
+    onRequestMicPermission: () -> Unit,
+    styles: LcdTextStyles,
+    modifier: Modifier = Modifier,
+) {
+    val p = RadioLcdTheme.palette
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (!state.micPermissionGranted) {
+            Text(
+                text = "ALLOW MIC",
+                style = styles.softKey,
+                color = p.statusBlue,
+                modifier = Modifier.clickable { onRequestMicPermission() },
+            )
+        }
+        if (state.channelSyncError != null) {
+            Text(
+                text = "RETRY SYNC",
+                style = styles.softKey,
+                color = p.statusAmber,
+                modifier = Modifier.clickable { onEvent(RadioUiEvent.RetryChannelSync) },
+            )
         }
     }
 }
