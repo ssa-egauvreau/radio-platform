@@ -23,6 +23,13 @@ class InricoHardwareService : AccessibilityService() {
             HardwareButtonRelay.sendRawKeyCode(keyCode)
         }
 
+        // Never intercept the hardware volume knob — it must reach the OS so it
+        // still adjusts the volume. The foreground activity plays the one-shot
+        // volume-check tone for it.
+        if (keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN) {
+            return super.onKeyEvent(event)
+        }
+
         val isPtt = repository.getMapping(HardwareAction.PTT).contains(keyCode)
         val isEmergency = repository.getMapping(HardwareAction.EMERGENCY).contains(keyCode)
         val isChanUp = repository.getMapping(HardwareAction.CHANNEL_UP).contains(keyCode)
