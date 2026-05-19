@@ -8,6 +8,7 @@ import com.securityradio.ptt.data.remote.EmergencyDto
 import com.securityradio.ptt.data.remote.InboxAlertDto
 import com.securityradio.ptt.data.remote.PresenceHeartbeatDto
 import com.securityradio.ptt.data.remote.RadioApi
+import com.securityradio.ptt.data.remote.SessionUserDto
 import com.securityradio.ptt.data.remote.TalkActivityDto
 import com.securityradio.ptt.data.remote.TalkerSnapshotDto
 import com.securityradio.ptt.device.ChannelSpeechHelper
@@ -175,6 +176,9 @@ class RadioViewModel(
         }
         viewModelScope.launch {
             pollChannelCatalog()
+        }
+        viewModelScope.launch {
+            pollProfile()
         }
         viewModelScope.launch {
             pollTalkHints()
@@ -977,6 +981,49 @@ class RadioViewModel(
         }
     }
 
+    /**
+     * Picks up display-name and unit-id edits made on the portal — handsets
+     * stay in sync without a sign-out / sign-in. A disabled or deleted account
+     * comes back as 401 from this endpoint and the existing authExpired flow
+     * then signs the radio out for us.
+     */
+    private suspend fun pollProfile() {
+        while (currentCoroutineContext().isActive) {
+            delay(PROFILE_POLL_MS)
+            val me = try {
+                radioApi.me()
+            } catch (_: Exception) {
+                null
+            } ?: continue
+            applyProfileUpdate(me.user)
+        }
+    }
+
+    /** Apply a portal-side profile change to local prefs and downstream services. */
+    private fun applyProfileUpdate(user: SessionUserDto) {
+        val newDisplay = user.displayName.trim()
+        val newUnit = user.unitId?.trim()?.uppercase(Locale.US).orEmpty()
+        val currentDisplay = radioPreferences.getSessionDisplayName()
+        val currentUnit = radioPreferences.getSessionUnitId()
+        if (newDisplay == currentDisplay && newUnit == currentUnit) return
+        if (newDisplay.isNotEmpty()) {
+            radioPreferences.setSessionDisplayName(newDisplay)
+        }
+        if (newUnit.isNotEmpty()) {
+            radioPreferences.setSessionUnitId(newUnit)
+            localUnitIdentifier.setShortUnitId(newUnit)
+        }
+        val refreshed = unitIdUpper
+        _uiState.update {
+            it.copy(
+                localShortUnitId = refreshed,
+                sessionDisplayName = radioPreferences.getSessionDisplayName(),
+            )
+        }
+        locationReporter.configure(refreshed)
+        reconcileVoiceTransport()
+    }
+
     /** Replace the live catalog while keeping the tuned channel if it still exists. */
     private fun applyCatalogChange(incoming: List<String>) {
         if (incoming.isEmpty()) return
@@ -1365,6 +1412,7 @@ class RadioViewModel(
         const val STATUS_REFRESH_MS = 2_000L
         const val SOUNDS_VERSION_POLL_MS = 60_000L
         const val CATALOG_POLL_MS = 15_000L
+        const val PROFILE_POLL_MS = 15_000L
         const val OFFLINE_BANNER_CYCLE_MS = 2_000L
         const val OFFLINE_TONE_INTERVAL_MS = 10_000L
         const val RECONNECTED_BANNER_MS = 2_000L

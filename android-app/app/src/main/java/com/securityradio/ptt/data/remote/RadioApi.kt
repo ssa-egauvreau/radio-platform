@@ -20,6 +20,10 @@ interface RadioApi {
 
     @POST("/v1/radio/emergency")
     suspend fun emergency(@Body body: EmergencyDto): RadioOkDto
+
+    /** Live profile read — picks up display-name and unit-id changes made on the portal. */
+    @GET("/v1/auth/me")
+    suspend fun me(): MeResponseDto
 }
 
 data class LocationReportDto(

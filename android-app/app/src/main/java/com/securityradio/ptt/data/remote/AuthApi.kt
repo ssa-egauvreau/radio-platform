@@ -24,6 +24,10 @@ data class LoginResponseDto(
     val user: SessionUserDto,
 )
 
+data class MeResponseDto(
+    val user: SessionUserDto,
+)
+
 interface AuthApi {
     @POST("/v1/auth/login")
     suspend fun login(@Body body: LoginRequestDto): LoginResponseDto

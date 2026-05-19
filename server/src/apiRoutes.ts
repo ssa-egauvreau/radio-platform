@@ -209,19 +209,27 @@ export function createApiRouter(): Router {
   const router = Router();
 
   // Reject API calls from an account whose agency was disabled (or deleted)
-  // after its token was issued. Login and the radio middleware already block
-  // this, but an issued JWT stays valid until it expires.
+  // after its token was issued, or whose own account row has been disabled or
+  // removed on the portal. The JWT stays cryptographically valid until it
+  // expires, so this DB check is what actually locks a disabled radio out.
   router.use(async (req, res, next) => {
     try {
-      const agencyId = req.authUser?.agencyId;
-      if (agencyId == null) {
+      const auth = req.authUser;
+      if (auth == null) {
         next();
         return;
       }
-      const agency = await getAgencyById(agencyId);
-      if (!agency || agency.disabled) {
-        res.status(403).json({ error: "agency_disabled" });
+      const user = await getUserById(auth.id);
+      if (!user || user.disabled) {
+        res.status(401).json({ error: "account_disabled" });
         return;
+      }
+      if (auth.agencyId != null) {
+        const agency = await getAgencyById(auth.agencyId);
+        if (!agency || agency.disabled) {
+          res.status(403).json({ error: "agency_disabled" });
+          return;
+        }
       }
       next();
     } catch (error) {
@@ -293,8 +301,31 @@ export function createApiRouter(): Router {
     }
   });
 
-  router.get("/auth/me", requireAuth, (req, res) => {
-    res.json({ user: req.authUser });
+  // Live profile read for handsets — they poll this so display-name / unit-id
+  // edits made on the portal land on the radios without waiting for a restart.
+  // The auth middleware above already rejects disabled accounts.
+  router.get("/auth/me", requireAuth, async (req, res) => {
+    try {
+      const me = req.authUser!;
+      const row = await getUserById(me.id);
+      if (!row) {
+        res.status(401).json({ error: "account_disabled" });
+        return;
+      }
+      res.json({
+        user: {
+          id: row.id,
+          username: row.username,
+          displayName: row.display_name,
+          role: row.role,
+          unitId: row.unit_id,
+          agencyId: row.agency_id,
+          agencyName: me.agencyName,
+        },
+      });
+    } catch (error) {
+      fail(res, error);
+    }
   });
 
   // --- channels the caller may use (console + radios) --------------------
