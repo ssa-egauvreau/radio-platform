@@ -222,6 +222,17 @@ export interface BridgeInput {
   enabled: boolean;
 }
 
+/** Live ingest status for a stream bridge — its input level and VOX gate state. */
+export interface BridgeStatus {
+  id: number;
+  /** Normalized input level, 0–1. */
+  level: number;
+  /** Whether the VOX gate is currently keying the channel. */
+  keyed: boolean;
+  /** Whether the server is actively ingesting this bridge. */
+  running: boolean;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(code: string, status: number) {
@@ -421,6 +432,8 @@ export const api = {
 
   // --- radio bridges -----------------------------------------------------
   listBridges: () => request<{ bridges: Bridge[] }>("GET", "/v1/admin/bridges"),
+  bridgeStatuses: () =>
+    request<{ statuses: BridgeStatus[] }>("GET", "/v1/admin/bridges/status"),
   createBridge: (input: BridgeInput) => request<{ bridge: Bridge }>("POST", "/v1/admin/bridges", input),
   updateBridge: (id: number, patch: Partial<BridgeInput>) =>
     request<{ bridge: Bridge }>("PATCH", `/v1/admin/bridges/${id}`, patch),

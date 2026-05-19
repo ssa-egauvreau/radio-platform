@@ -363,7 +363,7 @@ a {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: flex-start;
 }
 .field {
   display: flex;
@@ -375,6 +375,119 @@ a {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.06em;
+}
+.field-hint {
+  margin: 0;
+  max-width: 320px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.card > .field-hint {
+  margin-top: 10px;
+  max-width: none;
+}
+
+/* --- radio bridges: setup help + audio meter --- */
+.bridge-help {
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent-2);
+  border-radius: 6px;
+  background: var(--bg-raised);
+  padding: 12px 14px;
+  margin: 0 0 18px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+}
+.bridge-help strong {
+  display: block;
+  color: var(--text);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  margin: 12px 0 4px;
+}
+.bridge-help strong:first-child {
+  margin-top: 0;
+}
+.bridge-help p {
+  margin: 4px 0;
+}
+.bridge-help ol,
+.bridge-help ul {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.bridge-help li {
+  margin: 3px 0;
+}
+.bridge-help em {
+  color: var(--text);
+  font-style: normal;
+  font-weight: 600;
+}
+.bridge-meter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+}
+.bridge-meter-bar {
+  position: relative;
+  flex: 1 1 auto;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.bridge-meter-fill {
+  height: 100%;
+  background: var(--accent-2);
+  transition: width 0.1s linear;
+}
+.bridge-meter-fill.keyed {
+  background: #22c55e;
+}
+.bridge-meter-mark {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--amber);
+}
+.bridge-meter-status {
+  flex: 0 0 auto;
+  min-width: 104px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.bridge-meter-status.keyed {
+  color: #22c55e;
+  font-weight: 600;
+}
+.bridge-meter-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0 2px;
+}
+.bridge-meter-caption {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.bridge-meter-row .bridge-meter {
+  flex: 1 1 auto;
+  margin: 0;
+}
+.bridge-status-note {
+  margin: 6px 0 10px;
 }
 
 /* --- tables --- */

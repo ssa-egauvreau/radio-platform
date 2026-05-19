@@ -10,6 +10,7 @@ import {
   type Role,
 } from "./auth.js";
 import { dropAgencyVoiceConnections, listChannelRoster } from "./voiceRelay.js";
+import { getBridgeStatus } from "./bridgeWorker.js";
 import {
   AGENCY_ROLES,
   countActiveAdmins,
@@ -924,6 +925,18 @@ export function createApiRouter(): Router {
   router.get("/admin/bridges", requireAdmin, async (req, res) => {
     try {
       res.json({ bridges: await listBridges(req.authUser!.agencyId!) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // Live ingest level + gate state per stream bridge — drives the audio meter.
+  router.get("/admin/bridges/status", requireAdmin, async (req, res) => {
+    try {
+      const bridges = await listBridges(req.authUser!.agencyId!);
+      res.json({
+        statuses: bridges.map((bridge) => ({ id: bridge.id, ...getBridgeStatus(bridge.id) })),
+      });
     } catch (error) {
       fail(res, error);
     }
