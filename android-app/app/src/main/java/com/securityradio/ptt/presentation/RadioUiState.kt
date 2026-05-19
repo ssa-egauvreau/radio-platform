@@ -82,6 +82,13 @@ data class RadioUiState(
 
     /** Android "display over other apps" — needed on some OEMs to return the radio UI to the front. */
     val needsOverlayPermission: Boolean,
+
+    /** Mutes live received voice (hardware volume icon). */
+    val listenVolumeMuted: Boolean,
+    /** Bluetooth radio enabled (status icon). */
+    val bluetoothOn: Boolean,
+    /** A completed RX clip is available for hardware replay. */
+    val hasReplayBuffer: Boolean,
 ) {
     init {
         require(softKeyLabels.size == SOFT_KEY_COUNT) {
@@ -137,6 +144,9 @@ data class RadioUiState(
             deviceProfilePreference = DeviceProfilePreference.AUTO,
             resolvedDeviceProfile = ResolvedDeviceProfile.RESPONSIVE,
             needsOverlayPermission = false,
+            listenVolumeMuted = false,
+            bluetoothOn = false,
+            hasReplayBuffer = false,
         )
     }
 }

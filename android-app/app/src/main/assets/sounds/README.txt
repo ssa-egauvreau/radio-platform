@@ -6,6 +6,9 @@ The repo ships **small default beeps** so the app plays sound immediately. Repla
   ptt_permit.wav       — played once per PTT press when air is clear (stable); not looped while holding PTT
   emergency.wav        — played once when the emergency latch is turned ON
   busy.wav             — looped while PTT is held if there is no connection (not ONLINE) or the server reports the channel occupied (`GET /v1/air`)
+  volume.wav           — IRC590 volume-check key (232); copy from your Zello/Motorola tone pack
+
+See docs/custom-radio-sounds.md for the exact source paths on your PC.
 
 If a file is missing, that cue is skipped (the UI still updates).
 

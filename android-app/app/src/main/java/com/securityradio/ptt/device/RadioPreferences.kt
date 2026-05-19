@@ -73,6 +73,12 @@ class RadioPreferences(context: Context) {
         prefs.edit().putString(KEY_SESSION_DISPLAY_NAME, name.trim()).apply()
     }
 
+    fun isListenVolumeMuted(): Boolean = prefs.getBoolean(KEY_LISTEN_VOLUME_MUTED, false)
+
+    fun setListenVolumeMuted(muted: Boolean) {
+        prefs.edit().putBoolean(KEY_LISTEN_VOLUME_MUTED, muted).apply()
+    }
+
     fun getSessionAgencySlug(): String = prefs.getString(KEY_SESSION_AGENCY_SLUG, "").orEmpty()
 
     fun setSessionAgencySlug(slug: String) {
@@ -98,6 +104,7 @@ class RadioPreferences(context: Context) {
         const val KEY_SESSION_USERNAME = "session_username"
         const val KEY_SESSION_UNIT_ID = "session_unit_id"
         const val KEY_SESSION_DISPLAY_NAME = "session_display_name"
+        const val KEY_LISTEN_VOLUME_MUTED = "listen_volume_muted"
         const val DEFAULT_VOICE_ANNOUNCE = true
     }
 }

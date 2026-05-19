@@ -25,7 +25,7 @@ import com.securityradio.ptt.device.RadioUiSoundPlayer
 import com.securityradio.ptt.device.VoiceRelayTransport
 import com.securityradio.ptt.domain.ChannelRepository
 
-class RadioAppGraph(application: Application) {
+class RadioAppGraph(val application: Application) {
 
     init {
         P25ImbeNative.tryLoadLibrary()
@@ -45,7 +45,12 @@ class RadioAppGraph(application: Application) {
 
     val lastRxAudioRecorder = LastRxAudioRecorder()
 
-    private val inboundVoicePlayer = InboundVoicePlayer(lastRxRecorder = lastRxAudioRecorder)
+    private val inboundVoicePlayer = InboundVoicePlayer(
+        lastRxRecorder = lastRxAudioRecorder,
+        listenGainProvider = {
+            if (radioPreferences.isListenVolumeMuted()) 0f else 1f
+        },
+    )
 
     private val authTokenProvider: () -> String = { radioPreferences.getAuthToken() }
 

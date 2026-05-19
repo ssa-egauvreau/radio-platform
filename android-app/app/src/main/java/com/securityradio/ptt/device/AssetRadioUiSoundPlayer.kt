@@ -177,7 +177,7 @@ class AssetRadioUiSoundPlayer(
     }
 
     override fun playVolumeCheck() {
-        playOneShot(FILE_TALK_PERMIT)
+        playOneShot(FILE_VOLUME_CHECK)
     }
 
     override fun release() {
@@ -328,5 +328,6 @@ class AssetRadioUiSoundPlayer(
         const val FILE_TALK_PERMIT = "ptt_permit.wav"
         const val FILE_EMERGENCY = "emergency.wav"
         const val FILE_BUSY = "busy.wav"
+        const val FILE_VOLUME_CHECK = "volume.wav"
     }
 }

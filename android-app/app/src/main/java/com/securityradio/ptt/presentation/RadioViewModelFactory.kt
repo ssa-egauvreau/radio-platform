@@ -12,6 +12,7 @@ class RadioViewModelFactory(
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         if (modelClass.isAssignableFrom(RadioViewModel::class.java)) {
             return RadioViewModel(
+                application = graph.application,
                 channelRepository = graph.channelRepository,
                 soundPlayer = graph.soundPlayer,
                 pttMicCapture = graph.pttMicCapture,

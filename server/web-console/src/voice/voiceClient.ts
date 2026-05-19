@@ -3,6 +3,7 @@
 
 import { getToken, type Permission } from "../api";
 import { imbeDecode, imbeEncode, imbeReady, initImbe } from "./imbeVocoder";
+import { loadMarker1033Pcm } from "./marker1033";
 
 export type VoiceState = "idle" | "connecting" | "listening" | "transmitting" | "error" | "closed";
 
@@ -302,6 +303,7 @@ export class VoiceChannelClient {
       ws.send(
         JSON.stringify({ type: "join", unit_id: "WEB", channel: this.channelName, client: consolePlatform() }),
       );
+      void loadMarker1033Pcm().catch(() => undefined);
     };
     ws.onmessage = (event: MessageEvent) => {
       if (typeof event.data === "string") {
@@ -505,9 +507,19 @@ export class VoiceChannelClient {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       return;
     }
-    const beep = markerBeepPcm();
-    ws.send(beep.buffer); // keyed onto the channel for every listener
-    this.playLocalTone(beep); // and played locally so the dispatcher hears it
+    void loadMarker1033Pcm()
+      .then((pcm) => {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          return;
+        }
+        ws.send(pcm.buffer);
+        this.playLocalTone(pcm);
+      })
+      .catch(() => {
+        const beep = markerBeepPcm();
+        ws.send(beep.buffer);
+        this.playLocalTone(beep);
+      });
   }
 
   /** Keys a police-style alert tone onto the channel and plays it locally. */

@@ -10,6 +10,7 @@ import android.os.Build
  */
 class InboundVoicePlayer(
     private val lastRxRecorder: LastRxAudioRecorder? = null,
+    private val listenGainProvider: () -> Float = { 1f },
 ) {
 
     private val lock = Any()
@@ -20,6 +21,13 @@ class InboundVoicePlayer(
     fun writePcm(chunk: ByteArray) {
         if (released || chunk.isEmpty()) return
         lastRxRecorder?.onInboundPcm(chunk)
+        val gain = listenGainProvider().coerceIn(0f, 1f)
+        if (gain <= 0f) return
+        val out = if (gain >= 0.999f) {
+            chunk
+        } else {
+            scalePcm16(chunk, gain)
+        }
         synchronized(lock) {
             if (released) return
             var t = track
@@ -27,8 +35,21 @@ class InboundVoicePlayer(
                 t = createTrack() ?: return
                 track = t
             }
-            t.write(chunk, 0, chunk.size)
+            t.write(out, 0, out.size)
         }
+    }
+
+    private fun scalePcm16(chunk: ByteArray, gain: Float): ByteArray {
+        val out = ByteArray(chunk.size)
+        var i = 0
+        while (i + 1 < chunk.size) {
+            val sample = (chunk[i].toInt() and 0xFF) or (chunk[i + 1].toInt() shl 8)
+            val scaled = (sample.toShort() * gain).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
+            out[i] = (scaled and 0xFF).toByte()
+            out[i + 1] = ((scaled shr 8) and 0xFF).toByte()
+            i += 2
+        }
+        return out
     }
 
     private fun createTrack(): AudioTrack? {

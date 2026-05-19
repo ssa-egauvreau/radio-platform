@@ -18,7 +18,9 @@ import com.securityradio.ptt.device.HardwareAction
 import com.securityradio.ptt.device.HardwareButtonEvent
 import com.securityradio.ptt.device.HardwareButtonRelay
 import com.securityradio.ptt.device.HardwareMappingRepository
+import com.securityradio.ptt.device.BluetoothStatusProbe
 import com.securityradio.ptt.device.LastRxAudioRecorder
+import android.app.Application
 import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.device.LocationReporter
 
@@ -47,6 +49,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 class RadioViewModel(
+    private val application: Application,
     private val channelRepository: ChannelRepository,
     private val soundPlayer: RadioUiSoundPlayer,
     private val pttMicCapture: PttMicCapture,
@@ -115,6 +118,9 @@ class RadioViewModel(
             it.copy(
                 localShortUnitId = unitIdUpper,
                 sessionDisplayName = radioPreferences.getSessionDisplayName(),
+                listenVolumeMuted = radioPreferences.isListenVolumeMuted(),
+                bluetoothOn = BluetoothStatusProbe.isBluetoothOn(application),
+                hasReplayBuffer = lastRxAudioRecorder.hasLastTransmission(),
                 hardwareMappings = hardwareMappingRepository.getAllMappings(),
                 themeMode = radioPreferences.getThemeMode(),
                 announceChannelNameOnTune = radioPreferences.isAnnounceChannelOnTuneEnabled(),
@@ -181,6 +187,17 @@ class RadioViewModel(
                 delay(PRESENCE_POLL_MS)
                 pulsePresenceFromCurrentState(clearWhenOffline = true)
                 reconcileVoiceTransport()
+            }
+        }
+        viewModelScope.launch {
+            while (isActive) {
+                delay(STATUS_REFRESH_MS)
+                val bt = BluetoothStatusProbe.isBluetoothOn(application)
+                val replay = lastRxAudioRecorder.hasLastTransmission()
+                val snap = _uiState.value
+                if (bt != snap.bluetoothOn || replay != snap.hasReplayBuffer) {
+                    _uiState.update { it.copy(bluetoothOn = bt, hasReplayBuffer = replay) }
+                }
             }
         }
     }
@@ -329,6 +346,11 @@ class RadioViewModel(
                 _uiState.update { it.copy(announceChannelNameOnTune = next) }
             }
             RadioUiEvent.PlayLastTransmission -> playLastTransmission()
+            RadioUiEvent.ToggleListenVolume -> {
+                val muted = !radioPreferences.isListenVolumeMuted()
+                radioPreferences.setListenVolumeMuted(muted)
+                _uiState.update { it.copy(listenVolumeMuted = muted) }
+            }
             is RadioUiEvent.SaveAgencyRadioKey -> {
                 val key = event.key.trim()
                 radioPreferences.setAgencyRadioKey(key)
@@ -367,11 +389,13 @@ class RadioViewModel(
 
     private fun playLastTransmission() {
         if (lastRxAudioRecorder.playLast()) {
-            _uiState.update { it.copy(statusMessage = "REPLAY AUDIO") }
+            _uiState.update {
+                it.copy(statusMessage = "REPLAY AUDIO", hasReplayBuffer = lastRxAudioRecorder.hasLastTransmission())
+            }
             return
         }
         soundPlayer.playChannelSwitch()
-        _uiState.update { it.copy(statusMessage = "NO LAST RX AUDIO") }
+        _uiState.update { it.copy(statusMessage = "NO LAST RX AUDIO", hasReplayBuffer = false) }
     }
 
     private fun startMappingSession(action: HardwareAction) {
@@ -949,12 +973,14 @@ class RadioViewModel(
                     enqueueBackgroundWakeIfNeeded("rx_talk_activity")
                 }
                 val replayCaption = nextReplayCaption(snap, merged)
+                val replayReady = lastRxAudioRecorder.hasLastTransmission()
                 _uiState.update {
                     it.copy(
                         rxAttributedLine = merged,
                         lastRxReplayCaption = replayCaption,
                         activeTalkUnitId = talkUnit,
                         activeTalkDisplayName = talkName,
+                        hasReplayBuffer = replayReady,
                     )
                 }
             }
@@ -1107,5 +1133,6 @@ class RadioViewModel(
         const val WAKE_DEBOUNCE_MS = 700L
         const val PRESENCE_POLL_MS = 12_000L
         const val INBOX_POLL_MS = 5_000L
+        const val STATUS_REFRESH_MS = 2_000L
     }
 }

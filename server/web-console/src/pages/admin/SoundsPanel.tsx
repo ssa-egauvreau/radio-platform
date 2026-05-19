@@ -24,15 +24,27 @@ const TONES: ToneDef[] = [
   },
   {
     kind: "emergency",
-    label: "Emergency / 10-33",
-    desc: "Emergency activation and alert tone.",
+    label: "Emergency alert",
+    desc: "Emergency button activation on handsets and alerts.",
     bundled: "/sounds/emergency.wav",
+  },
+  {
+    kind: "marker_1033",
+    label: "10-33 channel marker",
+    desc: "Looped on the dispatch console while 10-33 marker is active (~12 s).",
+    bundled: "/sounds/marker_1033.wav",
   },
   {
     kind: "busy",
     label: "Channel busy",
     desc: "Plays when the channel is already held by another unit.",
     bundled: "/sounds/busy.wav",
+  },
+  {
+    kind: "volume_check",
+    label: "Volume check (handset)",
+    desc: "IRC590 key 232 — short clip so users can check speaker level.",
+    bundled: "/sounds/volume.wav",
   },
 ];
 

@@ -195,6 +195,130 @@ fun LcdListChannelIcon(
 }
 
 @Composable
+fun LcdBluetoothIcon(
+    on: Boolean,
+    active: Color,
+    muted: Color,
+    modifier: Modifier = Modifier,
+) {
+    val stroke = iconStroke
+    val c = if (on) active else muted
+    Canvas(modifier) {
+        val cx = size.width * 0.42f
+        val cy = size.height * 0.52f
+        val r = size.minDimension * 0.22f
+        drawCircle(color = c, radius = r, center = Offset(cx, cy), style = stroke)
+        drawLine(
+            color = c,
+            start = Offset(size.width * 0.62f, size.height * 0.28f),
+            end = Offset(size.width * 0.88f, size.height * 0.72f),
+            strokeWidth = stroke.width * 1.1f,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = c,
+            start = Offset(size.width * 0.72f, size.height * 0.28f),
+            end = Offset(size.width * 0.96f, size.height * 0.72f),
+            strokeWidth = stroke.width * 0.85f,
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+@Composable
+fun LcdReplayIcon(
+    ready: Color,
+    muted: Color,
+    hasBuffer: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val stroke = iconStroke
+    val c = if (hasBuffer) ready else muted
+    Canvas(modifier) {
+        val cx = size.width * 0.55f
+        val cy = size.height * 0.5f
+        val r = size.minDimension * 0.34f
+        drawArc(
+            color = c,
+            startAngle = 130f,
+            sweepAngle = 220f,
+            useCenter = false,
+            topLeft = Offset(cx - r, cy - r),
+            size = Size(r * 2, r * 2),
+            style = stroke,
+        )
+        val tip = Offset(cx - r * 0.95f, cy - r * 0.15f)
+        drawLine(
+            color = c,
+            start = tip,
+            end = Offset(tip.x - r * 0.28f, tip.y - r * 0.22f),
+            strokeWidth = stroke.width,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = c,
+            start = tip,
+            end = Offset(tip.x - r * 0.05f, tip.y - r * 0.32f),
+            strokeWidth = stroke.width,
+            cap = StrokeCap.Round,
+        )
+    }
+}
+
+@Composable
+fun LcdVolumeIcon(
+    muted: Color,
+    active: Color,
+    isMuted: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val stroke = iconStroke
+    val c = if (isMuted) muted else active
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val speaker = Path().apply {
+            moveTo(w * 0.16f, h * 0.38f)
+            lineTo(w * 0.34f, h * 0.38f)
+            lineTo(w * 0.52f, h * 0.22f)
+            lineTo(w * 0.52f, h * 0.78f)
+            lineTo(w * 0.34f, h * 0.62f)
+            lineTo(w * 0.16f, h * 0.62f)
+            close()
+        }
+        drawPath(speaker, color = c, style = stroke)
+        if (!isMuted) {
+            drawArc(
+                color = c,
+                startAngle = -55f,
+                sweepAngle = 70f,
+                useCenter = false,
+                topLeft = Offset(w * 0.5f, h * 0.28f),
+                size = Size(w * 0.38f, h * 0.44f),
+                style = stroke,
+            )
+            drawArc(
+                color = c,
+                startAngle = -60f,
+                sweepAngle = 80f,
+                useCenter = false,
+                topLeft = Offset(w * 0.58f, h * 0.2f),
+                size = Size(w * 0.42f, h * 0.6f),
+                style = stroke,
+            )
+        } else {
+            drawLine(
+                color = c,
+                start = Offset(w * 0.62f, h * 0.3f),
+                end = Offset(w * 0.9f, h * 0.72f),
+                strokeWidth = stroke.width,
+                cap = StrokeCap.Round,
+            )
+        }
+    }
+}
+
+@Composable
 fun LcdDayNightIcon(
     night: Boolean,
     color: Color,

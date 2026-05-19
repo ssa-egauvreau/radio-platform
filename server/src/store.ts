@@ -12,7 +12,14 @@ export const AGENCY_ROLES: Role[] = ["admin", "dispatcher", "radio"];
 export const PERMISSIONS: Permission[] = ["talk_priority", "talk", "listen_only"];
 
 /** Radio tones an agency may replace with its own uploaded audio. */
-export const SOUND_KINDS = ["permit", "channel_switch", "emergency", "busy"] as const;
+export const SOUND_KINDS = [
+  "permit",
+  "channel_switch",
+  "emergency",
+  "busy",
+  "volume_check",
+  "marker_1033",
+] as const;
 export type SoundKind = (typeof SOUND_KINDS)[number];
 
 export function isSoundKind(value: unknown): value is SoundKind {

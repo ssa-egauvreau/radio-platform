@@ -33,6 +33,7 @@ class CustomSoundDownloader(
         "channel_switch" to "channel_switch.wav",
         "emergency" to "emergency.wav",
         "busy" to "busy.wav",
+        "volume_check" to "volume.wav",
     )
 
     /** Blocking refresh of every custom tone — call off the main thread. */

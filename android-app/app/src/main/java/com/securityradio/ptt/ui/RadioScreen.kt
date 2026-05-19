@@ -24,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -69,9 +70,13 @@ import com.securityradio.ptt.presentation.RadioUiEvent
 import com.securityradio.ptt.presentation.RadioUiState
 import com.securityradio.ptt.presentation.ThemeMode
 import com.securityradio.ptt.presentation.isLcdNight
+import com.securityradio.ptt.ui.lcd.LcdBluetoothIcon
 import com.securityradio.ptt.ui.lcd.LcdDayNightIcon
 import com.securityradio.ptt.ui.lcd.LcdEmergencyGlyphIcon
 import com.securityradio.ptt.ui.lcd.LcdGpsIcon
+import com.securityradio.ptt.ui.lcd.LcdReplayIcon
+import com.securityradio.ptt.ui.lcd.LcdSignalBarsIcon
+import com.securityradio.ptt.ui.lcd.LcdVolumeIcon
 import com.securityradio.ptt.ui.lcd.LcdListChannelIcon
 import com.securityradio.ptt.ui.lcd.LcdMicIcon
 import com.securityradio.ptt.ui.lcd.LcdScanIcon
@@ -106,8 +111,9 @@ fun RadioShell(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .statusBarsPadding()
                     .background(palette.lcdAlt)
-                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                    .padding(horizontal = 8.dp, vertical = 6.dp),
             ) {
                 Box(
                     modifier = Modifier
@@ -262,31 +268,84 @@ private fun LcdStatusBar(
             .clip(RoundedCornerShape(2.dp))
             .background(p.lcdSection)
             .border(1.dp, p.divider, RoundedCornerShape(2.dp))
-            .padding(horizontal = 8.dp, vertical = 6.dp),
+            .padding(
+                horizontal = 8.dp,
+                vertical = if (layout.minimalStatusBar) 10.dp else 6.dp,
+            ),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (layout.minimalStatusBar) {
+                        Modifier.heightIn(min = 36.dp)
+                    } else {
+                        Modifier
+                    },
+                ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(
-                text = state.systemTime.uppercase(Locale.US),
-                style = styles.status,
-                color = p.textPrimary,
-            )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                if (layout.minimalStatusBar) {
-                    Text(
-                        text = "SET",
-                        style = styles.softKey,
-                        color = p.statusBlue,
-                        modifier = Modifier.clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
+            if (layout.minimalStatusBar) {
+                val online = state.networkLabel == "ONLINE"
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f),
+                ) {
+                    LcdSignalBarsIcon(
+                        bars = if (online) 4 else 1,
+                        maxBars = 4,
+                        colorActive = p.statusGreen,
+                        colorInactive = p.textMuted,
+                        modifier = Modifier.size(22.dp, 16.dp),
                     )
-                } else {
+                    LcdBluetoothIcon(
+                        on = state.bluetoothOn,
+                        active = p.statusBlue,
+                        muted = p.textMuted,
+                        modifier = Modifier.size(18.dp),
+                    )
+                    LcdGpsIcon(
+                        active = p.statusGreen,
+                        muted = p.textMuted,
+                        locked = true,
+                        modifier = Modifier.size(16.dp),
+                    )
+                    LcdReplayIcon(
+                        ready = p.statusAmber,
+                        muted = p.textMuted,
+                        hasBuffer = state.hasReplayBuffer,
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clickable { onEvent(RadioUiEvent.PlayLastTransmission) },
+                    )
+                    LcdVolumeIcon(
+                        muted = p.textMuted,
+                        active = p.statusGreen,
+                        isMuted = state.listenVolumeMuted,
+                        modifier = Modifier
+                            .size(20.dp)
+                            .clickable { onEvent(RadioUiEvent.ToggleListenVolume) },
+                    )
+                }
+                Text(
+                    text = "SET",
+                    style = styles.softKey.copy(fontSize = 13.sp),
+                    color = p.statusBlue,
+                    modifier = Modifier.clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
+                )
+            } else {
+                Text(
+                    text = state.systemTime.uppercase(Locale.US),
+                    style = styles.status,
+                    color = p.textPrimary,
+                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
                     LcdGpsIcon(
                         active = p.statusGreen,
                         muted = p.textMuted,
@@ -636,13 +695,13 @@ private fun LcdHandsetFillChannelBlock(
         ) {
             Box(
                 modifier = Modifier
-                    .weight(0.9f)
+                    .weight(0.75f)
                     .fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = zoneLine,
-                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 17.sp),
+                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 22.sp),
                     color = p.textMuted,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -652,13 +711,13 @@ private fun LcdHandsetFillChannelBlock(
             }
             Box(
                 modifier = Modifier
-                    .weight(2.4f)
+                    .weight(3.2f)
                     .fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = state.channelLabel.uppercase(Locale.US),
-                    style = styles.channel.copy(fontSize = 56.sp, lineHeight = 58.sp),
+                    style = styles.channel.copy(fontSize = 72.sp, lineHeight = 74.sp),
                     color = chrome.channelTextColor,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -668,13 +727,13 @@ private fun LcdHandsetFillChannelBlock(
             }
             Box(
                 modifier = Modifier
-                    .weight(0.85f)
+                    .weight(0.75f)
                     .fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
                     text = radiosLine.uppercase(Locale.US),
-                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
+                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 22.sp),
                     color = if (state.radiosOnlineOnChannel != null) p.textSecondary else p.textMuted,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
@@ -684,7 +743,7 @@ private fun LcdHandsetFillChannelBlock(
             }
             Column(
                 modifier = Modifier
-                    .weight(2.3f)
+                    .weight(2.5f)
                     .fillMaxWidth(),
                 verticalArrangement = Arrangement.Center,
                 horizontalAlignment = Alignment.CenterHorizontally,
@@ -733,7 +792,7 @@ private fun LcdTalkerAttribution(
     ) {
         Text(
             text = unitId.uppercase(Locale.US),
-            style = styles.channel.copy(fontSize = 44.sp, lineHeight = 46.sp),
+            style = styles.channel.copy(fontSize = 52.sp, lineHeight = 54.sp),
             color = unitColor,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis,
@@ -743,7 +802,7 @@ private fun LcdTalkerAttribution(
         if (displayName.isNotBlank()) {
             Text(
                 text = displayName.uppercase(Locale.US),
-                style = styles.body.copy(fontWeight = FontWeight.Normal, fontSize = 20.sp, lineHeight = 22.sp),
+                style = styles.body.copy(fontWeight = FontWeight.Normal, fontSize = 26.sp, lineHeight = 28.sp),
                 color = nameColor,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
