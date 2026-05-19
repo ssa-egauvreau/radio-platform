@@ -1323,13 +1323,35 @@ export async function listAlerts(agencyId: number, limit = 100): Promise<AlertRo
   return res.rows;
 }
 
+/**
+ * Appends an inactive emergency row so radios polling the inbox by an id
+ * cursor learn the emergency ended — an in-place UPDATE to the original row
+ * is invisible to that cursor. Broadcast (no channel/target) so every device
+ * that saw the activation clears regardless of its current channel.
+ */
+async function appendEmergencyClearedMarker(
+  agencyId: number,
+  unit: string,
+  clearedBy: string,
+): Promise<void> {
+  await requirePool().query(
+    `INSERT INTO alerts (agency_id, kind, channel_name, target_unit, from_unit, message, active, cleared_by, cleared_at)
+     VALUES ($1, 'emergency', NULL, NULL, $2, 'Emergency cleared', FALSE, $3, now());`,
+    [agencyId, unit, clearedBy],
+  );
+}
+
 export async function clearAlert(id: number, agencyId: number, clearedBy: string): Promise<AlertRow | null> {
   const res = await requirePool().query<AlertRow>(
     `UPDATE alerts SET active = FALSE, cleared_by = $3, cleared_at = now()
      WHERE id = $1 AND agency_id = $2 RETURNING ${ALERT_COLS};`,
     [id, agencyId, clearedBy],
   );
-  return res.rows[0] ?? null;
+  const row = res.rows[0] ?? null;
+  if (row && row.kind === "emergency" && row.from_unit) {
+    await appendEmergencyClearedMarker(agencyId, row.from_unit, clearedBy);
+  }
+  return row;
 }
 
 export async function clearEmergenciesFromUnit(agencyId: number, unit: string, clearedBy: string): Promise<number> {
@@ -1338,7 +1360,11 @@ export async function clearEmergenciesFromUnit(agencyId: number, unit: string, c
      WHERE agency_id = $1 AND kind = 'emergency' AND active = TRUE AND from_unit = $2;`,
     [agencyId, unit, clearedBy],
   );
-  return res.rowCount ?? 0;
+  const cleared = res.rowCount ?? 0;
+  if (cleared > 0) {
+    await appendEmergencyClearedMarker(agencyId, unit, clearedBy);
+  }
+  return cleared;
 }
 
 /** Alerts addressed to a radio (direct, its channel, or broadcast) newer than `sinceId`. */

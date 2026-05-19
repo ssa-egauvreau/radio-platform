@@ -74,6 +74,9 @@ class MainActivity : ComponentActivity() {
         }
         appGraph = (application as RadioApplication).graph
         repository = appGraph.hardwareMappingRepository
+        // A new build from Android Studio keeps app data; drop any session that
+        // predates this install so it doesn't silently resume.
+        appGraph.radioPreferences.clearSessionIfReinstalled()
 
         setContent {
             RadioTheme {

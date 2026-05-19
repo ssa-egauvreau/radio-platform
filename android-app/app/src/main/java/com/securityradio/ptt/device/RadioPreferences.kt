@@ -8,7 +8,8 @@ import com.securityradio.ptt.presentation.ThemeMode
  */
 class RadioPreferences(context: Context) {
 
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+    private val appContext = context.applicationContext
+    private val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     fun getThemeMode(): ThemeMode =
         prefs.getString(KEY_THEME, null)?.let { ThemeMode.entries.find { mode -> mode.name == it } } ?: ThemeMode.AUTO
@@ -47,7 +48,10 @@ class RadioPreferences(context: Context) {
     fun getAuthToken(): String = prefs.getString(KEY_AUTH_TOKEN, "").orEmpty()
 
     fun setAuthToken(token: String) {
-        prefs.edit().putString(KEY_AUTH_TOKEN, token.trim()).apply()
+        prefs.edit()
+            .putString(KEY_AUTH_TOKEN, token.trim())
+            .putLong(KEY_SESSION_INSTALL_TOKEN, currentInstallToken())
+            .apply()
     }
 
     fun clearAuthSession() {
@@ -57,7 +61,28 @@ class RadioPreferences(context: Context) {
             .remove(KEY_SESSION_AGENCY_SLUG)
             .remove(KEY_SESSION_UNIT_ID)
             .remove(KEY_SESSION_DISPLAY_NAME)
+            .remove(KEY_SESSION_INSTALL_TOKEN)
             .apply()
+    }
+
+    /**
+     * Installing a new build keeps app data, so a stale session would resume
+     * silently. Drop the session when the app's install timestamp no longer
+     * matches the one saved at sign-in; a plain device reboot leaves it intact.
+     */
+    fun clearSessionIfReinstalled() {
+        if (getAuthToken().isBlank()) return
+        if (prefs.getLong(KEY_SESSION_INSTALL_TOKEN, 0L) != currentInstallToken()) {
+            clearAuthSession()
+        }
+    }
+
+    /** Timestamp of the last package install/update — changes on every new build. */
+    @Suppress("DEPRECATION")
+    private fun currentInstallToken(): Long = try {
+        appContext.packageManager.getPackageInfo(appContext.packageName, 0).lastUpdateTime
+    } catch (_: Exception) {
+        0L
     }
 
     /** Unit id from the signed-in account (voice + presence + air must match this). */
@@ -104,6 +129,7 @@ class RadioPreferences(context: Context) {
         const val KEY_SESSION_USERNAME = "session_username"
         const val KEY_SESSION_UNIT_ID = "session_unit_id"
         const val KEY_SESSION_DISPLAY_NAME = "session_display_name"
+        const val KEY_SESSION_INSTALL_TOKEN = "session_install_token"
         const val KEY_LISTEN_VOLUME_MUTED = "listen_volume_muted"
         const val DEFAULT_VOICE_ANNOUNCE = true
     }
