@@ -13,6 +13,10 @@ import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import org.json.JSONObject
 
 fun httpApiBaseUrlToVoiceWebSocketUrl(httpBaseUrl: String): String {
     val u = normalizeApiBaseUrl(httpBaseUrl).trimEnd('/')
@@ -38,12 +42,21 @@ fun httpApiBaseUrlToVoiceWebSocketUrl(httpBaseUrl: String): String {
  *
  * Codec: see [VoiceAudioSpecs] (PCM); IMBE via bundled dvmvocoder (GPL — see cpp/dvmvocoder).
  */
+sealed interface VoiceControlEvent {
+    data class Joined(val channel: String, val permission: String) : VoiceControlEvent
+    data class Error(val code: String) : VoiceControlEvent
+    data class Busy(val holderUnit: String?) : VoiceControlEvent
+}
+
 class VoiceRelayTransport(
     httpApiBaseUrl: String,
     private val authTokenProvider: () -> String,
     private val apiKeyProvider: () -> String,
     private val inbound: InboundVoicePlayer,
 ) : StreamingPcmSink {
+
+    private val _controlEvents = MutableSharedFlow<VoiceControlEvent>(extraBufferCapacity = 16)
+    val controlEvents: SharedFlow<VoiceControlEvent> = _controlEvents.asSharedFlow()
 
     private val wsBaseUrl = httpApiBaseUrlToVoiceWebSocketUrl(httpApiBaseUrl)
 
@@ -75,6 +88,10 @@ class VoiceRelayTransport(
             sendJoin(webSocket)
         }
 
+        override fun onMessage(webSocket: WebSocket, text: String) {
+            dispatchControlMessage(text)
+        }
+
         override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
             dispatchInboundVoice(bytes.toByteArray())
         }
@@ -91,6 +108,33 @@ class VoiceRelayTransport(
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             socketReady.set(false)
             webSocketRef.compareAndSet(webSocket, null)
+        }
+    }
+
+    private fun dispatchControlMessage(text: String) {
+        try {
+            val json = JSONObject(text)
+            when (json.optString("type")) {
+                "joined" -> {
+                    _controlEvents.tryEmit(
+                        VoiceControlEvent.Joined(
+                            channel = json.optString("channel"),
+                            permission = json.optString("permission", "talk"),
+                        ),
+                    )
+                }
+                "error" -> {
+                    _controlEvents.tryEmit(
+                        VoiceControlEvent.Error(code = json.optString("code", "voice_error")),
+                    )
+                }
+                "busy" -> {
+                    val holder = json.optString("unit_id").trim().takeIf { it.isNotEmpty() }
+                    _controlEvents.tryEmit(VoiceControlEvent.Busy(holderUnit = holder))
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Unparsed voice control frame: ${e.message}")
         }
     }
 

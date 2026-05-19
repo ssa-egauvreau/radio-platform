@@ -417,12 +417,17 @@ private fun LcdMainChannelBlock(
     val chrome = channelDisplayChrome(state, p, emergencyFlash)
     val talkLine = channelTalkLine(state)
     val channelStyle = if (layout.handsetStatusDisplay) {
-        styles.channel.copy(fontSize = 42.sp, lineHeight = 44.sp)
+        styles.channel.copy(fontSize = 58.sp, lineHeight = 60.sp)
     } else {
         styles.channel
     }
+    val zoneStyle = if (layout.handsetStatusDisplay) {
+        styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp)
+    } else {
+        styles.status
+    }
     val talkStyle = if (layout.handsetStatusDisplay) {
-        styles.body.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp)
+        styles.body.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp, lineHeight = 26.sp)
     } else {
         styles.body.copy(fontWeight = FontWeight.Bold)
     }
@@ -491,7 +496,7 @@ private fun LcdMainChannelBlock(
             if (!layout.showChannelTunerButtons) {
                 Text(
                     text = "${state.zoneLabel} · ${state.channelPosition}".uppercase(Locale.US),
-                    style = styles.status,
+                    style = zoneStyle,
                     color = p.textMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,

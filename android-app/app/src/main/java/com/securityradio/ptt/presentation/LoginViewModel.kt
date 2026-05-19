@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import retrofit2.HttpException
+import java.util.Locale
 
 data class LoginUiState(
     val agencySlug: String = "",
@@ -78,6 +79,10 @@ class LoginViewModel(
                 prefs.setAuthToken(res.token)
                 prefs.setSessionAgencySlug(slug)
                 prefs.setSessionUsername(username)
+                val accountUnit = res.user.unitId?.trim()?.takeIf { it.isNotEmpty() }
+                    ?: username.uppercase(Locale.US)
+                prefs.setSessionUnitId(accountUnit)
+                graph.localUnitIdentifier.setShortUnitId(accountUnit)
                 graph.onAuthSessionChanged()
                 _uiState.update { it.copy(busy = false, password = "") }
                 onSuccess()

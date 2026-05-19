@@ -24,6 +24,7 @@ import com.securityradio.ptt.device.LocationReporter
 import com.securityradio.ptt.device.PttMicCapture
 import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.RadioUiSoundPlayer
+import com.securityradio.ptt.device.VoiceControlEvent
 import com.securityradio.ptt.device.VoiceRelayTransport
 import com.securityradio.ptt.domain.ChannelCatalogOrigin
 import com.securityradio.ptt.domain.ChannelRepository
@@ -83,12 +84,24 @@ class RadioViewModel(
     /** API 21–25 path: avoids java.time (`LocalTime`), which requires desugaring below API 26. */
     private val clockFormat = SimpleDateFormat("HH:mm", Locale.US)
 
-    private val unitIdUpper: String = localUnitIdentifier.shortUnitId()
+    private val unitIdUpper: String
+        get() {
+            val session = radioPreferences.getSessionUnitId().trim().uppercase(Locale.US)
+            if (session.isNotEmpty()) return session
+            return localUnitIdentifier.shortUnitId()
+        }
 
     private val _uiState = MutableStateFlow(RadioUiState.initial())
     val uiState: StateFlow<RadioUiState> = _uiState.asStateFlow()
 
     init {
+        if (radioPreferences.isLoggedIn() && radioPreferences.getSessionUnitId().isBlank()) {
+            val fromUsername = radioPreferences.getSessionUsername().trim().uppercase(Locale.US)
+            if (fromUsername.isNotEmpty()) {
+                radioPreferences.setSessionUnitId(fromUsername)
+                localUnitIdentifier.setShortUnitId(fromUsername)
+            }
+        }
         locationReporter.configure(unitIdUpper)
         _uiState.update {
             it.copy(
@@ -115,6 +128,20 @@ class RadioViewModel(
         }
         viewModelScope.launch {
             pollTalkHints()
+        }
+        viewModelScope.launch {
+            voiceRelay.controlEvents.collect { event ->
+                val hint = when (event) {
+                    is VoiceControlEvent.Joined ->
+                        "VOICE ON ${event.channel.uppercase(Locale.US)}"
+                    is VoiceControlEvent.Error -> voiceErrorHint(event.code)
+                    is VoiceControlEvent.Busy -> {
+                        val peer = event.holderUnit?.trim()?.uppercase(Locale.US)
+                        if (peer != null) "CHANNEL BUSY — $peer" else "CHANNEL BUSY"
+                    }
+                }
+                _uiState.update { it.copy(statusMessage = hint) }
+            }
         }
         viewModelScope.launch {
             HardwareButtonRelay.rawKeyCodes.collect { keyCode ->
@@ -968,6 +995,14 @@ class RadioViewModel(
         val uid = t.unitId?.trim()?.takeIf { it.isNotEmpty() }?.uppercase(Locale.US) ?: "---"
         val un = t.username?.trim()?.takeIf { it.isNotEmpty() }
         return if (un != null) "$prefix: $uid • $un" else "$prefix: $uid"
+    }
+
+    private fun voiceErrorHint(code: String): String = when (code) {
+        "not_a_member" -> "VOICE BLOCKED — ASK ADMIN TO ASSIGN THIS CHANNEL"
+        "unknown_channel" -> "VOICE — CHANNEL NOT ON SERVER"
+        "bad_join" -> "VOICE — COULD NOT JOIN CHANNEL"
+        "channel_lookup_failed" -> "VOICE — SERVER CHANNEL CHECK FAILED"
+        else -> "VOICE ERROR — ${code.uppercase(Locale.US)}"
     }
 
     override fun onCleared() {

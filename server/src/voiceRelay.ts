@@ -464,11 +464,9 @@ export function attachVoiceRelay(
           return;
         }
         const membership = await getMembership(user.id, channelRow.id).catch(() => null);
-        if (!membership) {
-          ws.send(JSON.stringify({ type: "error", code: "not_a_member" }));
-          return;
-        }
-        permission = membership;
+        // Handsets list every agency channel; radios without an explicit assignment
+        // still need to join voice on their tuned channel (dispatchers use priority above).
+        permission = membership ?? "talk";
       }
     } else if (meta.identity.kind === "bridge") {
       // A radio bridge keys its admin-configured target like a unit. It may key

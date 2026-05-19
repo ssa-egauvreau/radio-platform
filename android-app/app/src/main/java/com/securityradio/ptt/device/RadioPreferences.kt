@@ -55,7 +55,15 @@ class RadioPreferences(context: Context) {
             .remove(KEY_AUTH_TOKEN)
             .remove(KEY_SESSION_USERNAME)
             .remove(KEY_SESSION_AGENCY_SLUG)
+            .remove(KEY_SESSION_UNIT_ID)
             .apply()
+    }
+
+    /** Unit id from the signed-in account (voice + presence + air must match this). */
+    fun getSessionUnitId(): String = prefs.getString(KEY_SESSION_UNIT_ID, "").orEmpty()
+
+    fun setSessionUnitId(unitId: String) {
+        prefs.edit().putString(KEY_SESSION_UNIT_ID, unitId.trim().uppercase()).apply()
     }
 
     fun getSessionAgencySlug(): String = prefs.getString(KEY_SESSION_AGENCY_SLUG, "").orEmpty()
@@ -81,6 +89,7 @@ class RadioPreferences(context: Context) {
         const val KEY_AUTH_TOKEN = "auth_token"
         const val KEY_SESSION_AGENCY_SLUG = "session_agency_slug"
         const val KEY_SESSION_USERNAME = "session_username"
+        const val KEY_SESSION_UNIT_ID = "session_unit_id"
         const val DEFAULT_VOICE_ANNOUNCE = true
     }
 }

@@ -95,7 +95,7 @@ object DeviceProfileResolver {
             showFullStatusBar = false,
             showChannelTunerButtons = false,
             showMainDetailLines = false,
-            showRadiosOnlineLine = false,
+            showRadiosOnlineLine = true,
             showScanConfigureLink = false,
             softKeysTwoRows = false,
             compactSpacing = true,

@@ -41,7 +41,7 @@ export function LoginPage() {
         <input
           id="agency-slug"
           autoComplete="organization"
-          placeholder="e.g. default or sunset-security"
+          placeholder="e.g. default or sunset-safety-agency"
           value={agencySlug}
           onChange={(e) => setAgencySlug(e.target.value)}
         />

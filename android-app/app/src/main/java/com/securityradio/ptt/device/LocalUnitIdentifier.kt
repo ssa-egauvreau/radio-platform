@@ -19,6 +19,14 @@ class LocalUnitIdentifier(context: Context) {
         return created
     }
 
+    /** Aligns on-screen / REST attribution with the account unit used on the voice relay. */
+    fun setShortUnitId(unitIdUpper: String) {
+        val trimmed = unitIdUpper.trim().uppercase(Locale.US)
+        if (trimmed.isNotEmpty()) {
+            prefs.edit().putString(KEY_UNIT, trimmed).apply()
+        }
+    }
+
     private companion object {
         const val PREFS = "security_radio_identity"
         const val KEY_UNIT = "local_unit_id"
