@@ -47,6 +47,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.style.TextAlign
@@ -102,11 +104,17 @@ fun RadioShell(
     val systemDark = isSystemInDarkTheme()
     val isNight = state.themeMode.isLcdNight(systemDark)
 
+    LaunchedEffect(systemDark) {
+        onEvent(RadioUiEvent.SystemDarkChanged(systemDark))
+    }
+
     Crossfade(
         targetState = isNight,
         animationSpec = tween(durationMillis = 210),
         label = "lcd_day_night",
-        modifier = modifier.fillMaxSize(),
+        modifier = modifier
+            .fillMaxSize()
+            .rotate(if (state.displayRotated180) 180f else 0f),
     ) { night ->
         val palette = if (night) RadioLcdPalette.night() else RadioLcdPalette.day()
         CompositionLocalProvider(LocalRadioLcdPalette provides palette) {
@@ -185,6 +193,9 @@ fun RadioScreen(
                     layout = layout,
                 )
                 LcdDivider()
+            }
+            if (state.connectivityBanner.isNotEmpty()) {
+                LcdConnectivityBanner(banner = state.connectivityBanner, styles = styles)
             }
             Box(
                 modifier = Modifier
@@ -419,6 +430,22 @@ private fun LcdStatusBar(
                     }
                 }
             }
+        }
+        if (layout.minimalStatusBar) Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = state.systemTime.uppercase(Locale.US),
+                style = styles.status,
+                color = p.textPrimary,
+            )
+            Text(
+                text = "BAT ${state.batteryPercent}%",
+                style = styles.status,
+                color = p.textSecondary,
+            )
         }
         if (layout.showFullStatusBar) Row(
             modifier = Modifier.fillMaxWidth(),
@@ -872,12 +899,27 @@ private fun LcdHandsetToolbar(
                     .clickable { onEvent(RadioUiEvent.ToggleListenVolume) },
             )
         }
-        Text(
-            text = "SET",
-            style = styles.softKey.copy(fontSize = 13.sp),
-            color = p.statusBlue,
-            modifier = Modifier.clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
-        )
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Text(
+                text = state.systemTime.uppercase(Locale.US),
+                style = styles.status,
+                color = p.textPrimary,
+            )
+            Text(
+                text = "BAT ${state.batteryPercent}%",
+                style = styles.status,
+                color = p.textSecondary,
+            )
+            Text(
+                text = "SET",
+                style = styles.softKey.copy(fontSize = 13.sp),
+                color = p.statusBlue,
+                modifier = Modifier.clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
+            )
+        }
     }
 }
 
@@ -1128,6 +1170,34 @@ private fun LcdSegmentButton(
                 color = if (enabled) p.textOnButton else p.textMuted,
             )
         }
+    }
+}
+
+/** Lost-link strip: red while NO CONNECTION / RECONNECTING, green on RECONNECTED. */
+@Composable
+private fun LcdConnectivityBanner(
+    banner: String,
+    styles: LcdTextStyles,
+) {
+    val p = RadioLcdTheme.palette
+    val accent = if (banner == RadioUiState.BANNER_RECONNECTED) p.statusGreen else p.statusRed
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(2.dp))
+            .background(accent.copy(alpha = 0.14f))
+            .border(1.dp, accent, RoundedCornerShape(2.dp))
+            .padding(horizontal = 10.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Text(
+            text = banner,
+            style = styles.banner,
+            color = accent,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 
@@ -1732,7 +1802,7 @@ fun HardwareMappingDialog(
                             color = p.textPrimary,
                         )
                         Text(
-                            text = "CURRENT: ${state.themeMode.label.uppercase(Locale.US)} · TOP-RIGHT SUN ICON ALSO CYCLES OVERRIDE",
+                            text = "CURRENT: ${state.themeMode.label.uppercase(Locale.US)} · SUN ICON / KEY TOGGLES DAY OR NIGHT",
                             style = styles.status,
                             color = p.textMuted,
                         )

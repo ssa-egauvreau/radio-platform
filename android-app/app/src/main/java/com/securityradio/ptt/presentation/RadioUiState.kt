@@ -89,6 +89,15 @@ data class RadioUiState(
     val bluetoothOn: Boolean,
     /** A completed RX clip is available for hardware replay. */
     val hasReplayBuffer: Boolean,
+
+    /**
+     * Lost-link banner text: blank when the link is healthy, otherwise one of
+     * [BANNER_NO_CONNECTION] / [BANNER_RECONNECTING] / [BANNER_RECONNECTED].
+     */
+    val connectivityBanner: String,
+
+    /** Screen flipped 180° (IRC590 day/night key long-press). */
+    val displayRotated180: Boolean,
 ) {
     init {
         require(softKeyLabels.size == SOFT_KEY_COUNT) {
@@ -98,6 +107,10 @@ data class RadioUiState(
 
     companion object {
         const val SOFT_KEY_COUNT = 5
+
+        const val BANNER_NO_CONNECTION = "NO CONNECTION"
+        const val BANNER_RECONNECTING = "RECONNECTING"
+        const val BANNER_RECONNECTED = "RECONNECTED"
 
         fun initial(): RadioUiState = RadioUiState(
             systemTime = "--:--",
@@ -147,6 +160,8 @@ data class RadioUiState(
             listenVolumeMuted = false,
             bluetoothOn = false,
             hasReplayBuffer = false,
+            connectivityBanner = "",
+            displayRotated180 = false,
         )
     }
 }
