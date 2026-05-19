@@ -35,6 +35,12 @@ data class RadioUiState(
     val micHint: String,
     /** Stable short unit id for TX line (persisted). */
     val localShortUnitId: String,
+    /** Signed-in operator display name (shown under unit id while keyed). */
+    val sessionDisplayName: String,
+    /** Unit id shown large on the main LCD while keyed (TX/RX/emergency). */
+    val activeTalkUnitId: String,
+    /** Display name under [activeTalkUnitId] (smaller type). */
+    val activeTalkDisplayName: String,
     /** Server hint: formatted RX attribution when someone else is keyed (main channel wins over scan). */
     val rxAttributedLine: String,
     /** Another unit's emergency on this channel (from inbox); shown in orange on the main LCD. */
@@ -111,6 +117,9 @@ data class RadioUiState(
             micPermissionGranted = false,
             micHint = "MIC: ALLOW ACCESS",
             localShortUnitId = "",
+            sessionDisplayName = "",
+            activeTalkUnitId = "",
+            activeTalkDisplayName = "",
             rxAttributedLine = "",
             remoteEmergencyUnit = null,
             scanActive = false,

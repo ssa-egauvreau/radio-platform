@@ -56,6 +56,7 @@ class RadioPreferences(context: Context) {
             .remove(KEY_SESSION_USERNAME)
             .remove(KEY_SESSION_AGENCY_SLUG)
             .remove(KEY_SESSION_UNIT_ID)
+            .remove(KEY_SESSION_DISPLAY_NAME)
             .apply()
     }
 
@@ -64,6 +65,12 @@ class RadioPreferences(context: Context) {
 
     fun setSessionUnitId(unitId: String) {
         prefs.edit().putString(KEY_SESSION_UNIT_ID, unitId.trim().uppercase()).apply()
+    }
+
+    fun getSessionDisplayName(): String = prefs.getString(KEY_SESSION_DISPLAY_NAME, "").orEmpty()
+
+    fun setSessionDisplayName(name: String) {
+        prefs.edit().putString(KEY_SESSION_DISPLAY_NAME, name.trim()).apply()
     }
 
     fun getSessionAgencySlug(): String = prefs.getString(KEY_SESSION_AGENCY_SLUG, "").orEmpty()
@@ -90,6 +97,7 @@ class RadioPreferences(context: Context) {
         const val KEY_SESSION_AGENCY_SLUG = "session_agency_slug"
         const val KEY_SESSION_USERNAME = "session_username"
         const val KEY_SESSION_UNIT_ID = "session_unit_id"
+        const val KEY_SESSION_DISPLAY_NAME = "session_display_name"
         const val DEFAULT_VOICE_ANNOUNCE = true
     }
 }

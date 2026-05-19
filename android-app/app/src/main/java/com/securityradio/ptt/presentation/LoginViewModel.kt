@@ -82,6 +82,7 @@ class LoginViewModel(
                 val accountUnit = res.user.unitId?.trim()?.takeIf { it.isNotEmpty() }
                     ?: username.uppercase(Locale.US)
                 prefs.setSessionUnitId(accountUnit)
+                prefs.setSessionDisplayName(res.user.displayName)
                 graph.localUnitIdentifier.setShortUnitId(accountUnit)
                 graph.onAuthSessionChanged()
                 _uiState.update { it.copy(busy = false, password = "") }

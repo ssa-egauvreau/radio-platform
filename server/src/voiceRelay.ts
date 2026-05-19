@@ -99,6 +99,7 @@ const BUSY_NOTICE_MS = 750;
 type VoiceSlot = {
   ws: WebSocket;
   unitUpper: string;
+  displayName: string | null;
   lastPcmMs: number;
   priority: boolean;
   yields: boolean;
@@ -207,6 +208,14 @@ export function listChannelRoster(agencyId: number, channelRaw: unknown): Roster
 }
 
 export function peekVoiceTransmittingUnit(agencyId: number, channelRaw: unknown): string | null {
+  return peekVoiceTransmittingTalker(agencyId, channelRaw)?.unit_id ?? null;
+}
+
+/** Live transmitter on a channel (for handset HUD / air probe). */
+export function peekVoiceTransmittingTalker(
+  agencyId: number,
+  channelRaw: unknown,
+): { unit_id: string; display_name: string | null } | null {
   const chNorm = normalizedChannel(channelRaw);
   if (!chNorm || chNorm === "----") {
     return null;
@@ -220,7 +229,7 @@ export function peekVoiceTransmittingUnit(agencyId: number, channelRaw: unknown)
     voiceAirByChannel.delete(key);
     return null;
   }
-  return slot.unitUpper;
+  return { unit_id: slot.unitUpper, display_name: slot.displayName };
 }
 
 type AirClaim = { ok: true } | { ok: false; holder: string };
@@ -237,6 +246,7 @@ function claimAir(
   chanKey: string,
   ws: WebSocket,
   unitUpper: string,
+  displayName: string | null,
   priority: boolean,
   yields: boolean,
 ): AirClaim {
@@ -250,7 +260,14 @@ function claimAir(
     }
     // fall through and take over the channel.
   }
-  voiceAirByChannel.set(chanKey, { ws, unitUpper, lastPcmMs: now, priority, yields });
+  voiceAirByChannel.set(chanKey, {
+    ws,
+    unitUpper,
+    displayName: displayName?.trim() || null,
+    lastPcmMs: now,
+    priority,
+    yields,
+  });
   return { ok: true };
 }
 
@@ -570,7 +587,7 @@ export function attachVoiceRelay(
         // Simulcast — fan the frame out to every member channel it can claim.
         if (meta.simulcastTargets) {
           for (const target of meta.simulcastTargets) {
-            if (!claimAir(target.channelKey, ws, meta.unitId, priority, meta.yields).ok) {
+            if (!claimAir(target.channelKey, ws, meta.unitId, meta.displayName, priority, meta.yields).ok) {
               continue; // a member channel held by someone else is simply skipped
             }
             broadcastExcept(ws, target.channelKey, payload);
@@ -591,7 +608,7 @@ export function attachVoiceRelay(
         }
 
         // Strict half-duplex — only the channel holder's audio goes through.
-        const claim = claimAir(meta.channelKey, ws, meta.unitId, priority, meta.yields);
+        const claim = claimAir(meta.channelKey, ws, meta.unitId, meta.displayName, priority, meta.yields);
         if (!claim.ok) {
           const now = Date.now();
           if (now - meta.lastBusyMs > BUSY_NOTICE_MS) {

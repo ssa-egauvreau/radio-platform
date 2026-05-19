@@ -102,10 +102,17 @@ class RadioViewModel(
                 localUnitIdentifier.setShortUnitId(fromUsername)
             }
         }
+        if (radioPreferences.isLoggedIn() && radioPreferences.getSessionDisplayName().isBlank()) {
+            val fromUsername = radioPreferences.getSessionUsername().trim()
+            if (fromUsername.isNotEmpty()) {
+                radioPreferences.setSessionDisplayName(fromUsername)
+            }
+        }
         locationReporter.configure(unitIdUpper)
         _uiState.update {
             it.copy(
                 localShortUnitId = unitIdUpper,
+                sessionDisplayName = radioPreferences.getSessionDisplayName(),
                 hardwareMappings = hardwareMappingRepository.getAllMappings(),
                 themeMode = radioPreferences.getThemeMode(),
                 announceChannelNameOnTune = radioPreferences.isAnnounceChannelOnTuneEnabled(),
@@ -437,12 +444,15 @@ class RadioViewModel(
     private fun onPttPressed() {
         pttMicCapture.stopCapture()
         pttMicLiveThisHold = false
-        _uiState.update {
-            it.copy(
+        _uiState.update { snap ->
+            val (talkUnit, talkName) = localTalkAttribution(snap)
+            snap.copy(
                 isPttPressed = true,
                 pttBusyTone = false,
                 statusMessage = "AIR: CHECKING",
                 micHint = "MIC: STANDBY",
+                activeTalkUnitId = talkUnit,
+                activeTalkDisplayName = talkName,
             )
         }
 
@@ -609,6 +619,8 @@ class RadioViewModel(
                 pttBusyTone = false,
                 statusMessage = "RX IDLE",
                 micHint = if (granted) "MIC: READY" else "MIC: ALLOW MIC",
+                activeTalkUnitId = "",
+                activeTalkDisplayName = "",
             )
         }
     }
@@ -618,10 +630,17 @@ class RadioViewModel(
         if (activating) {
             soundPlayer.playEmergencyAlert()
         }
-        _uiState.update {
-            it.copy(
+        _uiState.update { snap ->
+            val (talkUnit, talkName) = if (activating) {
+                localTalkAttribution(snap)
+            } else {
+                "" to ""
+            }
+            snap.copy(
                 isEmergencyActive = activating,
                 statusMessage = if (activating) "EMERGENCY ACTIVE" else "EMERGENCY OFF",
+                activeTalkUnitId = talkUnit,
+                activeTalkDisplayName = talkName,
             )
         }
         val channel = _uiState.value.channelLabel.trim().takeUnless { it.isEmpty() || it == "----" }
@@ -885,8 +904,16 @@ class RadioViewModel(
         while (currentCoroutineContext().isActive) {
             delay(TALK_ACTIVITY_POLL_MS)
             if (_uiState.value.networkLabel == "OFFLINE") {
-                if (_uiState.value.rxAttributedLine.isNotEmpty()) {
-                    _uiState.update { it.copy(rxAttributedLine = "") }
+                if (_uiState.value.rxAttributedLine.isNotEmpty() ||
+                    _uiState.value.activeTalkUnitId.isNotEmpty()
+                ) {
+                    _uiState.update {
+                        it.copy(
+                            rxAttributedLine = "",
+                            activeTalkUnitId = "",
+                            activeTalkDisplayName = "",
+                        )
+                    }
                 }
                 continue
             }
@@ -906,18 +933,71 @@ class RadioViewModel(
             val voiceLine = rxLineFromLiveVoice(air, snap)
             val mockLine = dto?.let { mergedRxAttributedLine(it, snap) }.orEmpty()
             val merged = voiceLine.ifBlank { mockLine }
+            val (talkUnit, talkName) = resolveActiveTalkAttribution(snap, air, dto)
 
-            if (merged.isNotEmpty() || snap.rxAttributedLine.isNotEmpty()) {
-                val wakingFromIdle = snap.rxAttributedLine.isEmpty() && merged.isNotEmpty()
+            if (merged.isNotEmpty() ||
+                snap.rxAttributedLine.isNotEmpty() ||
+                talkUnit != snap.activeTalkUnitId ||
+                talkName != snap.activeTalkDisplayName
+            ) {
+                val wakingFromIdle =
+                    snap.rxAttributedLine.isEmpty() &&
+                    snap.activeTalkUnitId.isEmpty() &&
+                    (merged.isNotEmpty() || talkUnit.isNotEmpty())
                 if (wakingFromIdle) {
                     enqueueBackgroundWakeIfNeeded("rx_talk_activity")
                 }
                 val replayCaption = nextReplayCaption(snap, merged)
                 _uiState.update {
-                    it.copy(rxAttributedLine = merged, lastRxReplayCaption = replayCaption)
+                    it.copy(
+                        rxAttributedLine = merged,
+                        lastRxReplayCaption = replayCaption,
+                        activeTalkUnitId = talkUnit,
+                        activeTalkDisplayName = talkName,
+                    )
                 }
             }
         }
+    }
+
+    private fun localTalkAttribution(snap: RadioUiState): Pair<String, String> {
+        val unit = snap.localShortUnitId.trim().uppercase(Locale.US)
+        val name = snap.sessionDisplayName.trim()
+        return unit to name
+    }
+
+    private fun resolveActiveTalkAttribution(
+        snap: RadioUiState,
+        air: AirStateDto?,
+        talkActivity: TalkActivityDto?,
+    ): Pair<String, String> {
+        if (snap.isEmergencyActive) {
+            val (unit, name) = localTalkAttribution(snap)
+            return unit to name.ifBlank { "YOU" }
+        }
+        if (snap.isPttPressed && !snap.pttBusyTone) {
+            return localTalkAttribution(snap)
+        }
+        val txUnit =
+            air?.transmittingUnitId?.trim()?.uppercase(Locale.US)?.takeIf { it.isNotEmpty() }
+                ?: return "" to ""
+        val local = snap.localShortUnitId.trim().uppercase(Locale.US)
+        if (txUnit == local) return "" to ""
+        val fromAir = air.transmittingDisplayName?.trim().orEmpty()
+        val fromMock = talkActivityDisplayName(talkActivity, snap.channelLabel, txUnit)
+        return txUnit to (fromAir.ifBlank { fromMock })
+    }
+
+    private fun talkActivityDisplayName(
+        dto: TalkActivityDto?,
+        tunedChannel: String,
+        unitUpper: String,
+    ): String {
+        val main = dto?.main ?: return ""
+        if (!main.active || !channelNamesMatch(main.channel, tunedChannel)) return ""
+        val uid = main.unitId?.trim()?.uppercase(Locale.US) ?: return ""
+        if (uid != unitUpper) return ""
+        return main.username?.trim().orEmpty()
     }
 
     /** Attribution from relay live PCM (“on air”); overrides mock talk-activity when non-empty. */
@@ -927,7 +1007,8 @@ class RadioViewModel(
                 ?: return ""
         val local = snap.localShortUnitId.trim().uppercase(Locale.US)
         if (tx == local) return ""
-        return "RX: $tx • VOICE"
+        val name = air.transmittingDisplayName?.trim()?.takeIf { it.isNotEmpty() }
+        return if (name != null) "RX: $tx • $name" else "RX: $tx • VOICE"
     }
 
     /** Keep prior caption unless a new attribution clearly refers to another handset. */

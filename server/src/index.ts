@@ -12,7 +12,7 @@ import { initServerImbe } from "./imbeServerCodec.js";
 import { authenticate } from "./auth.js";
 import { createApiRouter } from "./apiRoutes.js";
 import { countPresence, heartbeatPresence } from "./presence.js";
-import { VOICE_WS_PATH, attachVoiceRelay, peekVoiceTransmittingUnit } from "./voiceRelay.js";
+import { VOICE_WS_PATH, attachVoiceRelay, peekVoiceTransmittingTalker } from "./voiceRelay.js";
 import { startBridgeWorker } from "./bridgeWorker.js";
 
 const app = express();
@@ -109,12 +109,13 @@ app.get("/v1/air", (req, res) => {
   const envBusy = raw === "1" || raw === "true" || raw === "yes";
 
   const chQ = typeof req.query.channel === "string" ? req.query.channel : "";
-  const transmitting = peekVoiceTransmittingUnit(req.agency?.id ?? 0, chQ);
-  const occupied = envBusy || transmitting !== null;
+  const talker = peekVoiceTransmittingTalker(req.agency?.id ?? 0, chQ);
+  const occupied = envBusy || talker !== null;
 
   res.json({
     occupied,
-    transmitting_unit_id: transmitting ?? null,
+    transmitting_unit_id: talker?.unit_id ?? null,
+    transmitting_display_name: talker?.display_name ?? null,
   });
 });
 

@@ -415,22 +415,19 @@ private fun LcdMainChannelBlock(
         0f
     }
     val chrome = channelDisplayChrome(state, p, emergencyFlash)
+    if (layout.handsetStatusDisplay) {
+        LcdHandsetFillChannelBlock(
+            state = state,
+            chrome = chrome,
+            styles = styles,
+            modifier = modifier,
+        )
+        return
+    }
     val talkLine = channelTalkLine(state)
-    val channelStyle = if (layout.handsetStatusDisplay) {
-        styles.channel.copy(fontSize = 58.sp, lineHeight = 60.sp)
-    } else {
-        styles.channel
-    }
-    val zoneStyle = if (layout.handsetStatusDisplay) {
-        styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp)
-    } else {
-        styles.status
-    }
-    val talkStyle = if (layout.handsetStatusDisplay) {
-        styles.body.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp, lineHeight = 26.sp)
-    } else {
-        styles.body.copy(fontWeight = FontWeight.Bold)
-    }
+    val channelStyle = styles.channel
+    val zoneStyle = styles.status
+    val talkStyle = styles.body.copy(fontWeight = FontWeight.Bold)
     Box(
         modifier = modifier
             .fillMaxWidth()
@@ -578,6 +575,174 @@ private fun LcdMainChannelBlock(
                     textAlign = TextAlign.Center,
                 )
             }
+        }
+    }
+}
+
+@Composable
+private fun LcdHandsetFillChannelBlock(
+    state: RadioUiState,
+    chrome: ChannelDisplayChrome,
+    styles: LcdTextStyles,
+    modifier: Modifier = Modifier,
+) {
+    val p = RadioLcdTheme.palette
+    val zoneLine = "${state.zoneLabel} · ${state.channelPosition}".uppercase(Locale.US)
+    val radiosLine = state.radiosOnlineOnChannel?.let { n ->
+        "RADIOS ONLINE · $n"
+    } ?: "RADIOS ONLINE —"
+    val talkUnit = when {
+        state.isEmergencyActive ->
+            state.activeTalkUnitId.ifBlank { state.localShortUnitId }.trim().uppercase(Locale.US)
+        state.activeTalkUnitId.isNotBlank() -> state.activeTalkUnitId.trim().uppercase(Locale.US)
+        !state.isEmergencyActive && state.remoteEmergencyUnit != null ->
+            state.remoteEmergencyUnit.trim().uppercase(Locale.US)
+        else -> ""
+    }
+    val talkName = when {
+        state.isEmergencyActive -> state.activeTalkDisplayName.trim()
+        state.activeTalkUnitId.isNotBlank() -> state.activeTalkDisplayName.trim()
+        else -> ""
+    }
+    val talkColor = chrome.talkLineColor
+    val showEmergencyBanner = state.remoteEmergencyUnit != null && !state.isEmergencyActive
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(2.dp))
+            .border(chrome.borderWidth, chrome.borderColor, RoundedCornerShape(2.dp))
+            .background(p.lcdAlt),
+    ) {
+        if (chrome.washColor != Color.Transparent) {
+            Box(
+                modifier = Modifier
+                    .matchParentSize()
+                    .background(chrome.washColor),
+            )
+        }
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Box(
+                modifier = Modifier
+                    .weight(0.9f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = zoneLine,
+                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 17.sp),
+                    color = p.textMuted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .weight(2.4f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = state.channelLabel.uppercase(Locale.US),
+                    style = styles.channel.copy(fontSize = 56.sp, lineHeight = 58.sp),
+                    color = chrome.channelTextColor,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Box(
+                modifier = Modifier
+                    .weight(0.85f)
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = radiosLine.uppercase(Locale.US),
+                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
+                    color = if (state.radiosOnlineOnChannel != null) p.textSecondary else p.textMuted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Column(
+                modifier = Modifier
+                    .weight(2.3f)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.Center,
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                if (showEmergencyBanner) {
+                    Text(
+                        text = "EMERGENCY",
+                        style = styles.status.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp,
+                        ),
+                        color = p.statusEmergency,
+                        maxLines = 1,
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center,
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                }
+                if (talkUnit.isNotEmpty()) {
+                    LcdTalkerAttribution(
+                        unitId = talkUnit,
+                        displayName = talkName,
+                        unitColor = talkColor,
+                        nameColor = talkColor.copy(alpha = 0.88f),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun LcdTalkerAttribution(
+    unitId: String,
+    displayName: String,
+    unitColor: Color,
+    nameColor: Color,
+    modifier: Modifier = Modifier,
+) {
+    val styles = rememberLcdTextStyles(RadioLcdTheme.palette)
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = unitId.uppercase(Locale.US),
+            style = styles.channel.copy(fontSize = 44.sp, lineHeight = 46.sp),
+            color = unitColor,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        if (displayName.isNotBlank()) {
+            Text(
+                text = displayName.uppercase(Locale.US),
+                style = styles.body.copy(fontWeight = FontWeight.Normal, fontSize = 20.sp, lineHeight = 22.sp),
+                color = nameColor,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
