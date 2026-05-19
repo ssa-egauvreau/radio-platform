@@ -166,16 +166,18 @@ object DeviceProfileResolver {
         HardwareAction.SCAN_TOGGLE -> setOf(137)
         HardwareAction.PLAY_LAST_TRANSMISSION -> emptySet()
         HardwareAction.VOLUME_CHECK -> emptySet()
+        HardwareAction.TOGGLE_DAY_NIGHT -> emptySet()
     }
 
-    /** IRC590 physical side keys (programmable 1/2 → scan / replay). */
+    /** IRC590 programmable side keys (Inrico key codes). */
     private fun irc590Defaults(action: HardwareAction): Set<Int> = when (action) {
         HardwareAction.PTT -> setOf(229)
         HardwareAction.EMERGENCY -> setOf(233)
         HardwareAction.CHANNEL_UP -> setOf(235)
         HardwareAction.CHANNEL_DOWN -> setOf(234)
-        HardwareAction.SCAN_TOGGLE -> setOf(230)
-        HardwareAction.PLAY_LAST_TRANSMISSION -> setOf(232)
-        HardwareAction.VOLUME_CHECK -> setOf(231)
+        HardwareAction.SCAN_TOGGLE -> emptySet()
+        HardwareAction.PLAY_LAST_TRANSMISSION -> setOf(230)
+        HardwareAction.VOLUME_CHECK -> setOf(232)
+        HardwareAction.TOGGLE_DAY_NIGHT -> setOf(231)
     }
 }

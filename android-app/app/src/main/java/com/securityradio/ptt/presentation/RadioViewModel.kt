@@ -18,6 +18,7 @@ import com.securityradio.ptt.device.HardwareAction
 import com.securityradio.ptt.device.HardwareButtonEvent
 import com.securityradio.ptt.device.HardwareButtonRelay
 import com.securityradio.ptt.device.HardwareMappingRepository
+import com.securityradio.ptt.device.LastRxAudioRecorder
 import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.device.LocationReporter
 
@@ -58,6 +59,7 @@ class RadioViewModel(
     private val voiceRelay: VoiceRelayTransport,
     private val locationReporter: LocationReporter,
     private val customSoundDownloader: CustomSoundDownloader,
+    private val lastRxAudioRecorder: LastRxAudioRecorder,
 ) : ViewModel() {
 
     @Volatile
@@ -170,6 +172,7 @@ class RadioViewModel(
                     }
                     HardwareButtonEvent.PlayLastTransmissionPressed -> playLastTransmission()
                     HardwareButtonEvent.VolumeCheckPressed -> soundPlayer.playVolumeCheck()
+                    HardwareButtonEvent.ToggleDayNightPressed -> onEvent(RadioUiEvent.ToggleDayNight)
                 }
             }
         }
@@ -363,14 +366,12 @@ class RadioViewModel(
     }
 
     private fun playLastTransmission() {
-        val caption = _uiState.value.lastRxReplayCaption
-        if (caption.isBlank()) {
-            soundPlayer.playChannelSwitch()
-            _uiState.update { it.copy(statusMessage = "NO LAST RX") }
+        if (lastRxAudioRecorder.playLast()) {
+            _uiState.update { it.copy(statusMessage = "REPLAY AUDIO") }
             return
         }
-        speechHelper.speakLastTransmissionSummary(caption)
-        _uiState.update { it.copy(statusMessage = "REPLAY LAST") }
+        soundPlayer.playChannelSwitch()
+        _uiState.update { it.copy(statusMessage = "NO LAST RX AUDIO") }
     }
 
     private fun startMappingSession(action: HardwareAction) {

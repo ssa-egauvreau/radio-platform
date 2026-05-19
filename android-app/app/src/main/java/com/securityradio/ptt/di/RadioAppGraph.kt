@@ -15,6 +15,7 @@ import com.securityradio.ptt.device.CustomSoundDownloader
 import com.securityradio.ptt.device.CustomSoundStore
 import com.securityradio.ptt.device.HardwareMappingRepository
 import com.securityradio.ptt.device.InboundVoicePlayer
+import com.securityradio.ptt.device.LastRxAudioRecorder
 import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.device.LocationReporter
 import com.securityradio.ptt.device.P25ImbeNative
@@ -42,7 +43,9 @@ class RadioAppGraph(application: Application) {
 
     val localUnitIdentifier: LocalUnitIdentifier = LocalUnitIdentifier(application)
 
-    private val inboundVoicePlayer = InboundVoicePlayer()
+    val lastRxAudioRecorder = LastRxAudioRecorder()
+
+    private val inboundVoicePlayer = InboundVoicePlayer(lastRxRecorder = lastRxAudioRecorder)
 
     private val authTokenProvider: () -> String = { radioPreferences.getAuthToken() }
 

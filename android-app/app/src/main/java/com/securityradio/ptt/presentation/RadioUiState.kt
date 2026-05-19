@@ -70,7 +70,7 @@ data class RadioUiState(
 
     /** Announce channel name aloud when changing tuning (TextToSpeech). */
     val announceChannelNameOnTune: Boolean,
-    /** Caption used for one-shot replay (text-first until streamed audio replay exists). */
+    /** Last RX attribution caption (UI / logging; replay uses recorded PCM). */
     val lastRxReplayCaption: String,
     /** Agency radio key configured on this device; blank means use the build-time key. */
     val agencyRadioKey: String,

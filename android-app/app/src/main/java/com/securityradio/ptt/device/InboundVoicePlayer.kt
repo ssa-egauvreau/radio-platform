@@ -8,7 +8,9 @@ import android.os.Build
 /**
  * Plays PCM16 mono 16 kHz streamed from peers through the relay.
  */
-class InboundVoicePlayer {
+class InboundVoicePlayer(
+    private val lastRxRecorder: LastRxAudioRecorder? = null,
+) {
 
     private val lock = Any()
     private var track: AudioTrack? = null
@@ -17,6 +19,7 @@ class InboundVoicePlayer {
 
     fun writePcm(chunk: ByteArray) {
         if (released || chunk.isEmpty()) return
+        lastRxRecorder?.onInboundPcm(chunk)
         synchronized(lock) {
             if (released) return
             var t = track

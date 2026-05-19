@@ -537,16 +537,23 @@ private fun LcdMainChannelBlock(
                     textAlign = TextAlign.Center,
                 )
             }
-            if (talkLine.isNotBlank()) {
+            val talkUnit = state.activeTalkUnitId.trim().uppercase(Locale.US)
+            if (talkUnit.isNotEmpty()) {
+                LcdTalkerAttribution(
+                    unitId = talkUnit,
+                    displayName = state.activeTalkDisplayName,
+                    unitColor = chrome.talkLineColor,
+                    nameColor = chrome.talkLineColor.copy(alpha = 0.88f),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            } else if (talkLine.isNotBlank()) {
                 Text(
                     text = talkLine.uppercase(Locale.US),
                     style = talkStyle,
                     color = chrome.talkLineColor,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = if (layout.handsetStatusDisplay) 12.dp else 0.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     textAlign = TextAlign.Center,
                 )
             }

@@ -24,6 +24,7 @@ class RadioViewModelFactory(
                 voiceRelay = graph.voiceRelay,
                 locationReporter = graph.locationReporter,
                 customSoundDownloader = graph.customSoundDownloader,
+                lastRxAudioRecorder = graph.lastRxAudioRecorder,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel type ${modelClass.name}")
