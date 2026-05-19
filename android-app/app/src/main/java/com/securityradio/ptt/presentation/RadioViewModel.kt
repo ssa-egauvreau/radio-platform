@@ -96,6 +96,9 @@ class RadioViewModel(
     private var offlineJob: Job? = null
     private var reconnectClearJob: Job? = null
 
+    /** Clears the replay banner once the replayed clip has finished playing. */
+    private var replayJob: Job? = null
+
     /** Null until the first connectivity reading; used to fire on edges only. */
     private var lastConnectivityOnline: Boolean? = null
 
@@ -146,7 +149,6 @@ class RadioViewModel(
                 listenVolumeMuted = radioPreferences.isListenVolumeMuted(),
                 batteryPercent = BatteryStatusProbe.percent(application),
                 bluetoothOn = BluetoothStatusProbe.isBluetoothOn(application),
-                hasReplayBuffer = lastRxAudioRecorder.hasLastTransmission(),
                 hardwareMappings = hardwareMappingRepository.getAllMappings(),
                 themeMode = radioPreferences.getThemeMode(),
                 announceChannelNameOnTune = radioPreferences.isAnnounceChannelOnTuneEnabled(),
@@ -226,16 +228,10 @@ class RadioViewModel(
             while (isActive) {
                 delay(STATUS_REFRESH_MS)
                 val bt = BluetoothStatusProbe.isBluetoothOn(application)
-                val replay = lastRxAudioRecorder.hasLastTransmission()
                 val battery = BatteryStatusProbe.percent(application)
                 val snap = _uiState.value
-                if (bt != snap.bluetoothOn ||
-                    replay != snap.hasReplayBuffer ||
-                    battery != snap.batteryPercent
-                ) {
-                    _uiState.update {
-                        it.copy(bluetoothOn = bt, hasReplayBuffer = replay, batteryPercent = battery)
-                    }
+                if (bt != snap.bluetoothOn || battery != snap.batteryPercent) {
+                    _uiState.update { it.copy(bluetoothOn = bt, batteryPercent = battery) }
                 }
             }
         }
@@ -534,14 +530,30 @@ class RadioViewModel(
     }
 
     private fun playLastTransmission() {
-        if (lastRxAudioRecorder.playLast()) {
+        val durationMs = lastRxAudioRecorder.playLast()
+        if (durationMs > 0L) {
+            replayJob?.cancel()
             _uiState.update {
-                it.copy(statusMessage = "REPLAY AUDIO", hasReplayBuffer = lastRxAudioRecorder.hasLastTransmission())
+                it.copy(statusMessage = "REPLAY AUDIO", replayBanner = replayBannerText(it))
+            }
+            // Banner shows for exactly the clip length, then the radio returns to normal.
+            replayJob = viewModelScope.launch {
+                delay(durationMs)
+                _uiState.update { it.copy(replayBanner = "") }
             }
             return
         }
         soundPlayer.playChannelSwitch()
-        _uiState.update { it.copy(statusMessage = "NO LAST RX AUDIO", hasReplayBuffer = false) }
+        _uiState.update { it.copy(statusMessage = "NO LAST RX AUDIO", replayBanner = "") }
+    }
+
+    /** "Who was talking" caption for the replay banner, from the last RX attribution. */
+    private fun replayBannerText(state: RadioUiState): String {
+        val who = state.lastRxReplayCaption.trim()
+            .removePrefix("RX:")
+            .removePrefix("RX")
+            .trim()
+        return if (who.isNotEmpty()) "REPLAY  $who" else "REPLAYING LAST MESSAGE"
     }
 
     private fun startMappingSession(action: HardwareAction) {
@@ -1145,14 +1157,12 @@ class RadioViewModel(
                     enqueueBackgroundWakeIfNeeded("rx_talk_activity")
                 }
                 val replayCaption = nextReplayCaption(snap, merged)
-                val replayReady = lastRxAudioRecorder.hasLastTransmission()
                 _uiState.update {
                     it.copy(
                         rxAttributedLine = merged,
                         lastRxReplayCaption = replayCaption,
                         activeTalkUnitId = talkUnit,
                         activeTalkDisplayName = talkName,
-                        hasReplayBuffer = replayReady,
                     )
                 }
             }
@@ -1304,7 +1314,7 @@ class RadioViewModel(
         const val TALK_ACTIVITY_POLL_MS = 1200L
         const val WAKE_DEBOUNCE_MS = 700L
         const val PRESENCE_POLL_MS = 12_000L
-        const val INBOX_POLL_MS = 5_000L
+        const val INBOX_POLL_MS = 2_000L
         const val STATUS_REFRESH_MS = 2_000L
         const val SOUNDS_VERSION_POLL_MS = 60_000L
         const val OFFLINE_BANNER_CYCLE_MS = 2_000L

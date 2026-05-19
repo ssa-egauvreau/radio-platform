@@ -47,15 +47,12 @@ class LastRxAudioRecorder {
         }
     }
 
-    fun hasLastTransmission(): Boolean =
-        synchronized(lock) { lastCompletePcm.size >= MIN_TRANSMISSION_BYTES }
-
-    /** Play the last completed RX transmission; returns false if none stored. */
-    fun playLast(): Boolean {
+    /** Play the last completed RX transmission; returns its length in ms, or 0 if none stored. */
+    fun playLast(): Long {
         val pcm = synchronized(lock) {
             finalizeCurrentTransmissionLocked()
             if (lastCompletePcm.size < MIN_TRANSMISSION_BYTES) {
-                return false
+                return 0L
             }
             lastCompletePcm.copyOf()
         }
@@ -87,7 +84,7 @@ class LastRxAudioRecorder {
                 stopReplayLocked()
             }
         }
-        return true
+        return pcm.size / 2 * 1000L / VoiceAudioSpecs.SAMPLE_RATE_HZ
     }
 
     fun stopReplay() {

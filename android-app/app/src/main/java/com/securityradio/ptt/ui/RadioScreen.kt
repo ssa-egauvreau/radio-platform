@@ -77,8 +77,11 @@ import com.securityradio.ptt.presentation.isLcdNight
 import com.securityradio.ptt.ui.lcd.LcdBluetoothIcon
 import com.securityradio.ptt.ui.lcd.LcdDayNightIcon
 import com.securityradio.ptt.ui.lcd.LcdEmergencyGlyphIcon
+import com.securityradio.ptt.ui.lcd.LcdGlobeIcon
 import com.securityradio.ptt.ui.lcd.LcdGpsIcon
+import com.securityradio.ptt.ui.lcd.LcdRadioIcon
 import com.securityradio.ptt.ui.lcd.LcdReplayIcon
+import com.securityradio.ptt.ui.lcd.LcdZoneIcon
 import com.securityradio.ptt.ui.lcd.LcdSignalBarsIcon
 import com.securityradio.ptt.ui.lcd.LcdVolumeIcon
 import com.securityradio.ptt.ui.lcd.LcdListChannelIcon
@@ -195,7 +198,22 @@ fun RadioScreen(
                 LcdDivider()
             }
             if (state.connectivityBanner.isNotEmpty()) {
-                LcdConnectivityBanner(banner = state.connectivityBanner, styles = styles)
+                LcdAlertBanner(
+                    text = state.connectivityBanner,
+                    accent = if (state.connectivityBanner == RadioUiState.BANNER_RECONNECTED) {
+                        palette.statusGreen
+                    } else {
+                        palette.statusRed
+                    },
+                    styles = styles,
+                )
+            }
+            if (state.replayBanner.isNotEmpty()) {
+                LcdAlertBanner(
+                    text = state.replayBanner,
+                    accent = palette.statusAmber,
+                    styles = styles,
+                )
             }
             Box(
                 modifier = Modifier
@@ -344,7 +362,7 @@ private fun LcdStatusBar(
                     LcdReplayIcon(
                         ready = p.statusAmber,
                         muted = p.textMuted,
-                        hasBuffer = state.hasReplayBuffer,
+                        playing = state.replayBanner.isNotEmpty(),
                         modifier = Modifier
                             .size(24.dp)
                             .clickable { onEvent(RadioUiEvent.PlayLastTransmission) },
@@ -702,10 +720,10 @@ private fun LcdHandsetFillChannelBlock(
     modifier: Modifier = Modifier,
 ) {
     val p = RadioLcdTheme.palette
-    val zoneLine = "${state.zoneLabel} · ${state.channelPosition}".uppercase(Locale.US)
-    val radiosLine = state.radiosOnlineOnChannel?.let { n ->
-        "RADIOS ONLINE · $n"
-    } ?: "RADIOS ONLINE —"
+    val zoneValue = state.zoneLabel.filter { it.isDigit() }
+        .ifEmpty { state.zoneLabel.trim().uppercase(Locale.US) }
+    val channelValue = state.channelPosition.replace(" ", "")
+    val radiosValue = state.radiosOnlineOnChannel?.toString() ?: "—"
     val talkUnit = when {
         state.isEmergencyActive ->
             state.activeTalkUnitId.ifBlank { state.localShortUnitId }.trim().uppercase(Locale.US)
@@ -760,30 +778,28 @@ private fun LcdHandsetFillChannelBlock(
             Spacer(modifier = Modifier.height(6.dp))
             LcdDivider()
             Spacer(modifier = Modifier.height(6.dp))
-            Column(
+            Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.Center,
-                horizontalAlignment = Alignment.CenterHorizontally,
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = zoneLine,
-                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp),
-                    color = p.textMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = radiosLine.uppercase(Locale.US),
-                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp),
-                    color = if (state.radiosOnlineOnChannel != null) p.textSecondary else p.textMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                LcdHandsetStat(value = zoneValue, valueColor = p.textSecondary, styles = styles) {
+                    LcdZoneIcon(color = p.textSecondary, modifier = Modifier.size(30.dp))
+                }
+                LcdHandsetStat(value = channelValue, valueColor = p.textSecondary, styles = styles) {
+                    LcdRadioIcon(color = p.textSecondary, modifier = Modifier.size(32.dp))
+                }
+                val radiosKnown = state.radiosOnlineOnChannel != null
+                LcdHandsetStat(
+                    value = radiosValue,
+                    valueColor = if (radiosKnown) p.statusGreen else p.textMuted,
+                    styles = styles,
+                ) {
+                    LcdGlobeIcon(
+                        color = if (radiosKnown) p.statusGreen else p.textMuted,
+                        modifier = Modifier.size(32.dp),
+                    )
+                }
             }
             BoxWithConstraints(
                 modifier = Modifier
@@ -818,7 +834,7 @@ private fun LcdHandsetFillChannelBlock(
                         color = p.statusAmber,
                         modifier = Modifier
                             .align(Alignment.TopEnd)
-                            .size(24.dp),
+                            .size(48.dp),
                     )
                 }
             }
@@ -846,6 +862,28 @@ private fun LcdHandsetFillChannelBlock(
                 )
             }
         }
+    }
+}
+
+/** One handset stat — an icon with its number — for zone, channel position and radios online. */
+@Composable
+private fun LcdHandsetStat(
+    value: String,
+    valueColor: Color,
+    styles: LcdTextStyles,
+    icon: @Composable () -> Unit,
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(7.dp),
+    ) {
+        icon()
+        Text(
+            text = value,
+            style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 27.sp),
+            color = valueColor,
+            maxLines = 1,
+        )
     }
 }
 
@@ -892,7 +930,7 @@ private fun LcdHandsetToolbar(
             LcdReplayIcon(
                 ready = p.statusAmber,
                 muted = p.textMuted,
-                hasBuffer = state.hasReplayBuffer,
+                playing = state.replayBanner.isNotEmpty(),
                 modifier = Modifier
                     .size(38.dp)
                     .clickable { onEvent(RadioUiEvent.PlayLastTransmission) },
@@ -980,13 +1018,15 @@ private fun LcdHandsetTalkerBlock(
         val density = LocalDensity.current
         val maxH = maxHeight
         val hasName = displayName.isNotBlank()
+        // Caps leave headroom so the unit id and name always fit the block —
+        // the name was being clipped at the bottom on the smaller IRC590 screen.
         val unitSp = with(density) {
-            val cap = if (hasName) maxH.value * 0.42f else maxH.value * 0.55f
-            cap.coerceIn(30f, 48f).sp
+            val cap = if (hasName) maxH.value * 0.38f else maxH.value * 0.5f
+            cap.coerceIn(22f, 44f).sp
         }
         val nameSp = with(density) {
-            val cap = maxH.value * 0.28f
-            cap.coerceIn(14f, 22f).sp
+            val cap = maxH.value * 0.2f
+            cap.coerceIn(12f, 20f).sp
         }
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -1006,16 +1046,16 @@ private fun LcdHandsetTalkerBlock(
                 modifier = Modifier.fillMaxWidth(),
             )
             if (hasName) {
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     text = displayName.uppercase(Locale.US),
                     style = styles.body.copy(
                         fontWeight = FontWeight.Normal,
                         fontSize = nameSp,
-                        lineHeight = (nameSp.value * 1.1f).sp,
+                        lineHeight = (nameSp.value * 1.15f).sp,
                     ),
                     color = nameColor,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
@@ -1181,14 +1221,13 @@ private fun LcdSegmentButton(
     }
 }
 
-/** Lost-link strip: red while NO CONNECTION / RECONNECTING, green on RECONNECTED. */
+/** Full-width alert strip — lost-link status and last-message replay both use it. */
 @Composable
-private fun LcdConnectivityBanner(
-    banner: String,
+private fun LcdAlertBanner(
+    text: String,
+    accent: Color,
     styles: LcdTextStyles,
 ) {
-    val p = RadioLcdTheme.palette
-    val accent = if (banner == RadioUiState.BANNER_RECONNECTED) p.statusGreen else p.statusRed
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -1200,7 +1239,7 @@ private fun LcdConnectivityBanner(
         horizontalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = banner,
+            text = text,
             style = styles.banner,
             color = accent,
             maxLines = 1,
@@ -1528,7 +1567,7 @@ private fun LcdHardwareKeyLegend(
             LcdReplayIcon(
                 ready = p.textOnButton,
                 muted = p.textOnButton,
-                hasBuffer = true,
+                playing = true,
                 modifier = Modifier.size(34.dp),
             )
         }

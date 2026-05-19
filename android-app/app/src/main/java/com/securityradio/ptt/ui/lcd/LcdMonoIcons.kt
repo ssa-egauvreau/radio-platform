@@ -217,18 +217,17 @@ fun LcdBluetoothIcon(
         val stroke = lcdStroke(STATUS_STROKE)
         val w = size.width
         val h = size.height
-        val stemX = w * 0.34f
-        val midY = h * 0.5f
-        drawCircle(color = c, radius = w * 0.12f, center = Offset(stemX, midY), style = stroke)
-        val wing = Path().apply {
-            moveTo(stemX + w * 0.1f, midY - h * 0.28f)
-            lineTo(w * 0.92f, midY - h * 0.42f)
-            lineTo(w * 0.78f, midY)
-            lineTo(w * 0.92f, midY + h * 0.42f)
-            lineTo(stemX + w * 0.1f, midY + h * 0.28f)
-            close()
+        // The Bluetooth rune, traced as one continuous stroke: two crossing
+        // wings, the central spine, and the pointed top and bottom tips.
+        val rune = Path().apply {
+            moveTo(w * 0.28f, h * 0.35f)
+            lineTo(w * 0.72f, h * 0.65f)
+            lineTo(w * 0.5f, h * 0.85f)
+            lineTo(w * 0.5f, h * 0.15f)
+            lineTo(w * 0.72f, h * 0.35f)
+            lineTo(w * 0.28f, h * 0.65f)
         }
-        drawPath(wing, color = c, style = stroke)
+        drawPath(rune, color = c, style = stroke)
     }
 }
 
@@ -237,10 +236,10 @@ fun LcdBluetoothIcon(
 fun LcdReplayIcon(
     ready: Color,
     muted: Color,
-    hasBuffer: Boolean,
+    playing: Boolean,
     modifier: Modifier = Modifier,
 ) {
-    val c = if (hasBuffer) ready else muted
+    val c = if (playing) ready else muted
     Canvas(modifier) {
         val stroke = lcdStroke(STATUS_STROKE)
         val cx = size.width * 0.5f
@@ -376,5 +375,87 @@ fun LcdDayNightIcon(
                 )
             }
         }
+    }
+}
+
+/** Bold "Z" — the zone marker. */
+@Composable
+fun LcdZoneIcon(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier) {
+        val stroke = lcdStroke(STATUS_STROKE)
+        val w = size.width
+        val h = size.height
+        val z = Path().apply {
+            moveTo(w * 0.22f, h * 0.26f)
+            lineTo(w * 0.78f, h * 0.26f)
+            lineTo(w * 0.22f, h * 0.74f)
+            lineTo(w * 0.78f, h * 0.74f)
+        }
+        drawPath(z, color = color, style = stroke)
+    }
+}
+
+/** Handheld radio — body, antenna, screen and key — for the channel-position marker. */
+@Composable
+fun LcdRadioIcon(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier) {
+        val stroke = lcdStroke(STATUS_STROKE)
+        val w = size.width
+        val h = size.height
+        drawRoundRect(
+            color = color,
+            topLeft = Offset(w * 0.3f, h * 0.34f),
+            size = Size(w * 0.4f, h * 0.58f),
+            cornerRadius = CornerRadius(w * 0.09f, w * 0.09f),
+            style = stroke,
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.42f, h * 0.34f),
+            end = Offset(w * 0.42f, h * 0.1f),
+            strokeWidth = stroke.width,
+            cap = StrokeCap.Round,
+        )
+        drawLine(
+            color = color,
+            start = Offset(w * 0.38f, h * 0.5f),
+            end = Offset(w * 0.62f, h * 0.5f),
+            strokeWidth = stroke.width,
+            cap = StrokeCap.Round,
+        )
+        drawCircle(color = color, radius = w * 0.06f, center = Offset(w * 0.5f, h * 0.72f))
+    }
+}
+
+/** Globe — circle with an equator line and a meridian ellipse — for radios online. */
+@Composable
+fun LcdGlobeIcon(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier) {
+        val stroke = lcdStroke(STATUS_STROKE)
+        val cx = size.width * 0.5f
+        val cy = size.height * 0.5f
+        val r = size.minDimension * 0.36f
+        drawCircle(color = color, radius = r, style = stroke)
+        drawLine(
+            color = color,
+            start = Offset(cx - r, cy),
+            end = Offset(cx + r, cy),
+            strokeWidth = stroke.width,
+        )
+        drawOval(
+            color = color,
+            topLeft = Offset(cx - r * 0.5f, cy - r),
+            size = Size(r, r * 2),
+            style = stroke,
+        )
     }
 }

@@ -87,14 +87,14 @@ data class RadioUiState(
     val listenVolumeMuted: Boolean,
     /** Bluetooth radio enabled (status icon). */
     val bluetoothOn: Boolean,
-    /** A completed RX clip is available for hardware replay. */
-    val hasReplayBuffer: Boolean,
-
     /**
      * Lost-link banner text: blank when the link is healthy, otherwise one of
      * [BANNER_NO_CONNECTION] / [BANNER_RECONNECTING] / [BANNER_RECONNECTED].
      */
     val connectivityBanner: String,
+
+    /** Non-blank while the last RX is replaying; holds the "who was talking" caption. */
+    val replayBanner: String,
 
     /** Screen flipped 180° (IRC590 day/night key long-press). */
     val displayRotated180: Boolean,
@@ -162,8 +162,8 @@ data class RadioUiState(
             needsOverlayPermission = false,
             listenVolumeMuted = false,
             bluetoothOn = false,
-            hasReplayBuffer = false,
             connectivityBanner = "",
+            replayBanner = "",
             displayRotated180 = false,
         )
     }
