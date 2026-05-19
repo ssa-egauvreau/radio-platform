@@ -246,7 +246,7 @@ fun RadioScreen(
                 LcdHardwareKeyLegend(
                     onEvent = onEvent,
                     styles = styles,
-                    rowHeight = if (layout.compactSpacing) 44.dp else 50.dp,
+                    rowHeight = if (layout.compactSpacing) 58.dp else 64.dp,
                 )
             }
         }
@@ -738,7 +738,7 @@ private fun LcdHandsetFillChannelBlock(
             ) {
                 Text(
                     text = zoneLine,
-                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
+                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp),
                     color = p.textMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -748,7 +748,7 @@ private fun LcdHandsetFillChannelBlock(
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = radiosLine.uppercase(Locale.US),
-                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
+                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp),
                     color = if (state.radiosOnlineOnChannel != null) p.textSecondary else p.textMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
@@ -756,17 +756,27 @@ private fun LcdHandsetFillChannelBlock(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .weight(if (hasTalk) 2.35f else 3.1f)
                     .fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
+                val channelText = state.channelLabel.uppercase(Locale.US)
+                val density = LocalDensity.current
+                // Scale the channel name to fill the block — height-capped, then
+                // narrowed if the label is long so a wide name still fits.
+                val channelFont = with(density) {
+                    val byHeight = constraints.maxHeight * 0.82f
+                    val byWidth = constraints.maxWidth /
+                        (channelText.length.coerceAtLeast(3) * 0.66f)
+                    minOf(byHeight, byWidth).toSp()
+                }.value.coerceIn(40f, 190f).sp
                 Text(
-                    text = state.channelLabel.uppercase(Locale.US),
+                    text = channelText,
                     style = styles.channel.copy(
-                        fontSize = if (hasTalk) 60.sp else 72.sp,
-                        lineHeight = if (hasTalk) 62.sp else 74.sp,
+                        fontSize = channelFont,
+                        lineHeight = (channelFont.value * 1.05f).sp,
                     ),
                     color = chrome.channelTextColor,
                     maxLines = 1,
@@ -1453,7 +1463,7 @@ private fun LcdHardwareKeyLegend(
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                     Text(
                         text = label,
-                        style = styles.softKey,
+                        style = styles.softKey.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold),
                         color = p.textOnButton,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
