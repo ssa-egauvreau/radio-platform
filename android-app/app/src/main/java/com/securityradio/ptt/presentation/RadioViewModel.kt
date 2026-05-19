@@ -1042,9 +1042,9 @@ class RadioViewModel(
                 ?: return "" to ""
         val local = snap.localShortUnitId.trim().uppercase(Locale.US)
         if (txUnit == local) return "" to ""
-        val fromAir = air.transmittingDisplayName?.trim().orEmpty()
-        val fromMock = talkActivityDisplayName(talkActivity, snap.channelLabel, txUnit)
-        return txUnit to (fromAir.ifBlank { fromMock })
+        // Secondary line is the talker's display name (resolved server-side from
+        // their account); never fall back to the raw username.
+        return txUnit to air.transmittingDisplayName?.trim().orEmpty()
     }
 
     private fun talkActivityDisplayName(
