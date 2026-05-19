@@ -34,6 +34,7 @@ import com.securityradio.ptt.device.RadioUiSoundPlayer
 import com.securityradio.ptt.device.VoiceControlEvent
 import com.securityradio.ptt.device.VoiceRelayTransport
 import com.securityradio.ptt.domain.ChannelCatalogOrigin
+import com.securityradio.ptt.domain.ChannelPermission
 import com.securityradio.ptt.domain.ChannelRepository
 import android.os.SystemClock
 import java.text.SimpleDateFormat
@@ -86,6 +87,9 @@ class RadioViewModel(
 
     private var channelNames: List<String> = emptyList()
     private var channelIndex: Int = 0
+
+    /** Per-channel permissions from the portal, keyed lowercased; missing == [ChannelPermission.TALK]. */
+    private var channelPermissions: Map<String, ChannelPermission> = emptyMap()
 
     /** Agency tone-set version last seen; a change triggers a custom-tone re-pull. */
     private var lastSoundsVersion: String? = null
@@ -632,6 +636,24 @@ class RadioViewModel(
     }
 
     private fun onPttPressed() {
+        // Refuse PTT locally on listen-only channels: no relay attempt, no
+        // talk-permit tone, just the busy alert and a clear status line. The
+        // server would reject anyway, but doing it here keeps the UX honest.
+        if (currentPermission() == ChannelPermission.LISTEN_ONLY) {
+            pttToneJob?.cancel()
+            soundPlayer.startBusyLoop()
+            _uiState.update { snap ->
+                snap.copy(
+                    isPttPressed = true,
+                    pttBusyTone = true,
+                    statusMessage = "LISTEN ONLY",
+                    micHint = "MIC: LISTEN ONLY",
+                    activeTalkUnitId = "",
+                    activeTalkDisplayName = "",
+                )
+            }
+            return
+        }
         pttMicCapture.stopCapture()
         pttMicLiveThisHold = false
         _uiState.update { snap ->
@@ -863,7 +885,10 @@ class RadioViewModel(
         soundPlayer.playChannelSwitch()
         val tunedLabel = channelNames[channelIndex]
         _uiState.update {
-            it.withTuning(channelNames, channelIndex).pruneScanSets().copy(statusMessage = "CHANNEL ${if (delta > 0) "+" else "-"}")
+            it.withTuning(channelNames, channelIndex).pruneScanSets().copy(
+                statusMessage = "CHANNEL ${if (delta > 0) "+" else "-"}",
+                currentChannelPermission = currentPermission(),
+            )
         }
         speechHelper.speakChannelTuneIfEnabled(tunedLabel)
         viewModelScope.launch { pulsePresenceHeartbeatAndCount(expectOnline = true) }
@@ -883,6 +908,7 @@ class RadioViewModel(
 
         val catalog = channelRepository.loadCatalog()
         channelNames = catalog.channels
+        channelPermissions = catalog.permissions
         if (channelNames.isNotEmpty()) {
             channelIndex = channelIndex.coerceIn(0, channelNames.lastIndex)
         } else {
@@ -918,6 +944,7 @@ class RadioViewModel(
                 } else {
                     "READY"
                 },
+                currentChannelPermission = currentPermission(),
             )
         }
 
@@ -975,9 +1002,10 @@ class RadioViewModel(
                 null
             } ?: continue
             if (fresh.origin != ChannelCatalogOrigin.NETWORK) continue
-            val incoming = fresh.channels
-            if (incoming == channelNames) continue
-            applyCatalogChange(incoming)
+            val sameNames = fresh.channels == channelNames
+            val samePermissions = fresh.permissions == channelPermissions
+            if (sameNames && samePermissions) continue
+            applyCatalogChange(fresh.channels, fresh.permissions)
         }
     }
 
@@ -1024,12 +1052,16 @@ class RadioViewModel(
         reconcileVoiceTransport()
     }
 
-    /** Replace the live catalog while keeping the tuned channel if it still exists. */
-    private fun applyCatalogChange(incoming: List<String>) {
+    /** Replace the live catalog and permissions, keeping the tuned channel if it still exists. */
+    private fun applyCatalogChange(
+        incoming: List<String>,
+        incomingPermissions: Map<String, ChannelPermission>,
+    ) {
         if (incoming.isEmpty()) return
         val tunedName = channelNames
             .getOrNull(channelIndex.coerceIn(0, channelNames.lastIndex.coerceAtLeast(0)))
         channelNames = incoming
+        channelPermissions = incomingPermissions
         channelIndex = tunedName
             ?.let { name -> incoming.indexOfFirst { it.equals(name, ignoreCase = true) } }
             ?.takeIf { it >= 0 }
@@ -1040,10 +1072,18 @@ class RadioViewModel(
                 channelSyncError = null,
                 networkLabel = "ONLINE",
                 displayLine3 = "CHANNELS: NETWORK OK",
+                currentChannelPermission = currentPermission(),
             )
         }
         reconcileVoiceTransport()
         pulsePresenceFromCurrentState(clearWhenOffline = false)
+    }
+
+    /** Lookup the tuned channel's permission; defaults to TALK when nothing matches. */
+    private fun currentPermission(): ChannelPermission {
+        if (channelNames.isEmpty()) return ChannelPermission.TALK
+        val name = channelNames[channelIndex.coerceIn(0, channelNames.lastIndex)]
+        return channelPermissions[name.lowercase(Locale.US)] ?: ChannelPermission.TALK
     }
 
     /**

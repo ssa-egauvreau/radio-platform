@@ -70,6 +70,7 @@ import com.securityradio.ptt.device.HardwareAction
 import com.securityradio.ptt.device.P25ImbeNative
 import com.securityradio.ptt.device.RadioLayoutPolicy
 import com.securityradio.ptt.device.ResolvedDeviceProfile
+import com.securityradio.ptt.domain.ChannelPermission
 import com.securityradio.ptt.presentation.RadioUiEvent
 import com.securityradio.ptt.presentation.RadioUiState
 import com.securityradio.ptt.presentation.ThemeMode
@@ -801,6 +802,7 @@ private fun LcdHandsetFillChannelBlock(
                     )
                 }
             }
+            LcdPermissionBadge(permission = state.currentChannelPermission, styles = styles)
             BoxWithConstraints(
                 modifier = Modifier
                     .weight(if (hasTalk) 2.35f else 3.1f)
@@ -863,6 +865,29 @@ private fun LcdHandsetFillChannelBlock(
             }
         }
     }
+}
+
+/** Small per-channel permission tag — only shown when the channel isn't plain TALK. */
+@Composable
+private fun LcdPermissionBadge(
+    permission: ChannelPermission,
+    styles: LcdTextStyles,
+) {
+    if (permission == ChannelPermission.TALK) return
+    val p = RadioLcdTheme.palette
+    val (label, color) = when (permission) {
+        ChannelPermission.LISTEN_ONLY -> "LISTEN ONLY" to p.statusRed
+        ChannelPermission.TALK_PRIORITY -> "PRIORITY" to p.statusAmber
+        else -> return
+    }
+    Text(
+        text = label,
+        style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
+        color = color,
+        textAlign = TextAlign.Center,
+        maxLines = 1,
+        modifier = Modifier.fillMaxWidth(),
+    )
 }
 
 /** One handset stat — an icon with its number — for zone, channel position and radios online. */
@@ -1314,6 +1339,16 @@ private fun deriveBanner(state: RadioUiState, p: RadioLcdPalette): Triple<String
         state.networkLabel == "OFFLINE" && !state.channelsLoading -> Triple(
             "NO SIGNAL",
             state.statusMessage.uppercase(Locale.US),
+            p.statusAmber,
+        )
+        state.currentChannelPermission == ChannelPermission.LISTEN_ONLY -> Triple(
+            "LISTEN ONLY",
+            "RX ONLY ON THIS CHANNEL",
+            p.statusRed,
+        )
+        state.currentChannelPermission == ChannelPermission.TALK_PRIORITY -> Triple(
+            "PRIORITY",
+            "PRE-EMPTS NON-PRIORITY",
             p.statusAmber,
         )
         else -> Triple(

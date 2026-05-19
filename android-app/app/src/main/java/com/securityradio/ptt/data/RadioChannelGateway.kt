@@ -2,6 +2,7 @@ package com.securityradio.ptt.data
 
 import com.securityradio.ptt.data.remote.ChannelsApi
 import com.securityradio.ptt.domain.ChannelCatalogOrigin
+import com.securityradio.ptt.domain.ChannelPermission
 import com.securityradio.ptt.domain.ChannelRepository
 import com.securityradio.ptt.domain.RadioChannelCatalog
 import kotlinx.coroutines.Dispatchers
@@ -18,12 +19,17 @@ class RadioChannelGateway(
     override suspend fun loadCatalog(): RadioChannelCatalog = withContext(Dispatchers.IO) {
         try {
             val body = api.channels()
-            val names = body.channels.map { it.name }.filter { it.isNotBlank() }
-            if (names.isEmpty()) {
+            val rows = body.channels.filter { it.name.isNotBlank() }
+            if (rows.isEmpty()) {
                 error("Server returned an empty channel list.")
+            }
+            val names = rows.map { it.name }
+            val permissions = rows.associate {
+                it.name.lowercase() to ChannelPermission.fromWire(it.permission)
             }
             RadioChannelCatalog(
                 channels = names,
+                permissions = permissions,
                 origin = ChannelCatalogOrigin.NETWORK,
                 errorMessage = null,
             )
@@ -31,6 +37,7 @@ class RadioChannelGateway(
             val local = localFallback.loadCatalog()
             RadioChannelCatalog(
                 channels = local.channels,
+                permissions = local.permissions,
                 origin = ChannelCatalogOrigin.LOCAL_FALLBACK,
                 errorMessage = e.message ?: e::class.java.simpleName,
             )

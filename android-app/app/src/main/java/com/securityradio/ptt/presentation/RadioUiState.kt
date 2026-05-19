@@ -2,6 +2,7 @@ package com.securityradio.ptt.presentation
 
 import com.securityradio.ptt.device.DeviceProfilePreference
 import com.securityradio.ptt.device.ResolvedDeviceProfile
+import com.securityradio.ptt.domain.ChannelPermission
 
 /**
  * Immutable snapshot of the radio shell. The [RadioViewModel] is the single source of truth.
@@ -101,6 +102,9 @@ data class RadioUiState(
 
     /** Dispatcher has flagged the tuned channel 10-33 (emergency traffic only). */
     val channelTen33: Boolean = false,
+
+    /** Talk permission for the currently tuned channel; drives the on-screen badge + local PTT gate. */
+    val currentChannelPermission: ChannelPermission = ChannelPermission.TALK,
 ) {
     init {
         require(softKeyLabels.size == SOFT_KEY_COUNT) {
