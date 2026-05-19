@@ -477,20 +477,20 @@ private fun LcdMainChannelBlock(
     modifier: Modifier = Modifier,
 ) {
     val p = RadioLcdTheme.palette
-    val emergencyFlash = if (state.isEmergencyActive) {
-        val transition = rememberInfiniteTransition(label = "local_emergency_flash")
-        transition.animateFloat(
-            initialValue = 0.28f,
-            targetValue = 0.72f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(durationMillis = 550),
-                repeatMode = RepeatMode.Reverse,
-            ),
-            label = "emergency_flash_alpha",
-        ).value
-    } else {
-        0f
-    }
+    // The flash animation is always running; its value is only applied while an
+    // emergency is active. Driving it unconditionally avoids any conditional-
+    // composition gap that could leave the orange wash static.
+    val emergencyTransition = rememberInfiniteTransition(label = "local_emergency_flash")
+    val emergencyFlashAnim by emergencyTransition.animateFloat(
+        initialValue = 0.28f,
+        targetValue = 0.72f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 550),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "emergency_flash_alpha",
+    )
+    val emergencyFlash = if (state.isEmergencyActive) emergencyFlashAnim else 0f
     val chrome = channelDisplayChrome(state, p, emergencyFlash)
     if (layout.handsetStatusDisplay) {
         LcdHandsetFillChannelBlock(
