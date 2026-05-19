@@ -105,11 +105,15 @@ class LoginViewModel(
                     }
                 }
                 _uiState.update { it.copy(busy = false, errorMessage = msg) }
-            } catch (_: Exception) {
+            } catch (e: Exception) {
+                val errorType = e.javaClass.simpleName
+                val hint = if (android.os.Build.VERSION.SDK_INT <= 25) {
+                    " (On Android 7, check if the device date/time is correct, or if the server uses a modern certificate the device doesn't trust)"
+                } else ""
                 _uiState.update {
                     it.copy(
                         busy = false,
-                        errorMessage = "Cannot reach the server. Pull latest code, set radio.api.base.url=https://safet.up.railway.app/ in android-app/local.properties, then rebuild.",
+                        errorMessage = "Cannot reach server: $errorType. $hint Set radio.api.base.url=https://safet.up.railway.app/ in local.properties and rebuild.",
                     )
                 }
             }

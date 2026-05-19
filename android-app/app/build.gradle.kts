@@ -99,11 +99,8 @@ android {
 
     packaging {
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
-        jniLibs {
-            // Helps install on strict 16KB-page emulators when zip/APK JNI alignment differs.
-            useLegacyPackaging = true
+            excludes.add("/META-INF/AL2.0")
+            excludes.add("/META-INF/LGPL2.1")
         }
     }
 }
