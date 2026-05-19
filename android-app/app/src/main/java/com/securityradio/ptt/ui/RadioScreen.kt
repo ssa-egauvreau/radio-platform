@@ -114,7 +114,7 @@ fun RadioShell(
                     .fillMaxSize()
                     .statusBarsPadding()
                     .background(palette.lcdAlt)
-                    .padding(horizontal = 8.dp, top = 4.dp, bottom = 6.dp),
+                    .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 6.dp),
             ) {
                 Box(
                     modifier = Modifier
