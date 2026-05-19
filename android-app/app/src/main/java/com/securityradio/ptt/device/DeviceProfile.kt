@@ -179,9 +179,9 @@ object DeviceProfileResolver {
         HardwareAction.CHANNEL_UP -> setOf(235)
         HardwareAction.CHANNEL_DOWN -> setOf(234)
         HardwareAction.SCAN_TOGGLE -> emptySet()
-        HardwareAction.PLAY_LAST_TRANSMISSION -> setOf(230)
-        HardwareAction.VOLUME_CHECK -> setOf(232)
-        HardwareAction.TOGGLE_DAY_NIGHT -> setOf(231)
+        HardwareAction.PLAY_LAST_TRANSMISSION -> setOf(232)
+        HardwareAction.VOLUME_CHECK -> setOf(231)
+        HardwareAction.TOGGLE_DAY_NIGHT -> setOf(230)
     }
 
     /** Inrico TM-7 Plus hardware keys (emergency key + four programmable keys). */
