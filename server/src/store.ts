@@ -1273,6 +1273,21 @@ export async function deleteAgencySound(agencyId: number, kind: string): Promise
   return (res.rowCount ?? 0) > 0;
 }
 
+/**
+ * A token that changes whenever any of an agency's custom tones is added,
+ * replaced or removed. Clients poll it to know when to re-pull their tones —
+ * the row count covers removals, the latest timestamp covers adds/replacements.
+ */
+export async function getAgencySoundsVersion(agencyId: number): Promise<string> {
+  const res = await requirePool().query<{ n: string; ts: string | null }>(
+    `SELECT COUNT(*)::text AS n, MAX(updated_at)::text AS ts
+       FROM agency_sounds WHERE agency_id = $1;`,
+    [agencyId],
+  );
+  const row = res.rows[0];
+  return `${row?.n ?? "0"}:${row?.ts ?? "-"}`;
+}
+
 /** First candidate username not already taken; falls back to a unique suffix. */
 async function firstAvailableUsername(candidates: string[]): Promise<string> {
   for (const candidate of candidates) {

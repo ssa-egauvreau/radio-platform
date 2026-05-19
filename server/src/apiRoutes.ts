@@ -61,6 +61,7 @@ import {
   deleteAgencySound,
   getAgencyLogo,
   getAgencySound,
+  getAgencySoundsVersion,
   isDeviceType,
   isSoundKind,
   listAgencySounds,
@@ -92,6 +93,21 @@ const LOGO_MAX_BYTES = "512kb";
 /** Reads a device-category value from request input, or null when absent/invalid. */
 function asDeviceType(value: unknown): string | null {
   return isDeviceType(value) ? value : null;
+}
+
+/**
+ * Agency id for a sound request — from a console JWT, else the handset radio
+ * key (header or `?key=`). Returns null when neither resolves an agency.
+ */
+async function resolveSoundAgencyId(req: Request): Promise<number | null> {
+  if (req.authUser?.agencyId != null) {
+    return req.authUser.agencyId;
+  }
+  const headerRaw = req.headers["x-radio-key"];
+  const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
+  const key = headerVal ?? (typeof req.query.key === "string" ? req.query.key : null);
+  const agency = await resolveAgencyByKey(key ?? null, radioApiKey).catch(() => null);
+  return agency?.id ?? null;
 }
 
 /** Picks `value` when it is one of `allowed`, else `fallback`. */
@@ -1194,6 +1210,22 @@ export function createApiRouter(): Router {
     }
   });
 
+  // Tone-set version probe. Consoles and handsets poll this and re-pull their
+  // custom tones whenever the returned version changes.
+  router.get("/sounds", async (req, res) => {
+    try {
+      const agencyId = await resolveSoundAgencyId(req);
+      if (agencyId == null) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.setHeader("Cache-Control", "no-cache");
+      res.json({ version: await getAgencySoundsVersion(agencyId) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
   // Serves an agency's custom tone to consoles (JWT) and handsets (radio key).
   // A 404 simply means "no custom tone" — the client falls back to its bundled one.
   router.get("/sounds/:kind", async (req, res) => {
@@ -1203,14 +1235,7 @@ export function createApiRouter(): Router {
         res.status(404).json({ error: "unknown_sound" });
         return;
       }
-      let agencyId = req.authUser?.agencyId ?? null;
-      if (agencyId == null) {
-        const headerRaw = req.headers["x-radio-key"];
-        const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
-        const key = headerVal ?? (typeof req.query.key === "string" ? req.query.key : null);
-        const agency = await resolveAgencyByKey(key ?? null, radioApiKey).catch(() => null);
-        agencyId = agency?.id ?? null;
-      }
+      const agencyId = await resolveSoundAgencyId(req);
       if (agencyId == null) {
         res.status(404).json({ error: "not_found" });
         return;

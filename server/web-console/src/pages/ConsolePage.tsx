@@ -87,6 +87,7 @@ export function ConsolePage() {
 
   useEffect(() => {
     sounds.preload();
+    const stopSoundSync = sounds.startAutoRefresh();
     api
       .myChannels()
       .then((res) => {
@@ -100,6 +101,7 @@ export function ConsolePage() {
       })
       .catch((err) => setListError(describeError(err)))
       .finally(() => setLoading(false));
+    return stopSoundSync;
   }, []);
 
   // Keep the primary channel pointing at an open panel.
