@@ -42,6 +42,8 @@ data class RadioLayoutPolicy(
     val showOnScreenEmergency: Boolean = true,
     /** Large channel + talk line; minimal chrome (IRC590). */
     val handsetStatusDisplay: Boolean = false,
+    /** Bottom strip of labels above the four physical hardware keys (TM-7 Plus). */
+    val showHardwareKeyLegend: Boolean = false,
 )
 
 object DeviceProfileResolver {
@@ -74,20 +76,21 @@ object DeviceProfileResolver {
             handsetStatusDisplay = false,
         )
         ResolvedDeviceProfile.TM7_PLUS -> RadioLayoutPolicy(
-            showSoftKeyRow = true,
+            showSoftKeyRow = false,
             showStateBanner = false,
-            showFullStatusBar = true,
-            showChannelTunerButtons = true,
+            showFullStatusBar = false,
+            showChannelTunerButtons = false,
             showMainDetailLines = false,
-            showRadiosOnlineLine = false,
+            showRadiosOnlineLine = true,
             showScanConfigureLink = false,
-            softKeysTwoRows = true,
+            softKeysTwoRows = false,
             compactSpacing = true,
             compactPtt = true,
-            minimalStatusBar = false,
-            showOnScreenPtt = true,
-            showOnScreenEmergency = true,
-            handsetStatusDisplay = false,
+            minimalStatusBar = true,
+            showOnScreenPtt = false,
+            showOnScreenEmergency = false,
+            handsetStatusDisplay = true,
+            showHardwareKeyLegend = true,
         )
         ResolvedDeviceProfile.IRC590 -> RadioLayoutPolicy(
             showSoftKeyRow = false,
@@ -141,8 +144,8 @@ object DeviceProfileResolver {
 
     fun defaultKeyCodes(profile: ResolvedDeviceProfile, action: HardwareAction): Set<Int> = when (profile) {
         ResolvedDeviceProfile.IRC590 -> irc590Defaults(action)
+        ResolvedDeviceProfile.TM7_PLUS -> tm7PlusDefaults(action)
         ResolvedDeviceProfile.S200,
-        ResolvedDeviceProfile.TM7_PLUS,
         ResolvedDeviceProfile.RESPONSIVE,
         -> s200StyleDefaults(action)
     }
@@ -179,5 +182,17 @@ object DeviceProfileResolver {
         HardwareAction.PLAY_LAST_TRANSMISSION -> setOf(230)
         HardwareAction.VOLUME_CHECK -> setOf(232)
         HardwareAction.TOGGLE_DAY_NIGHT -> setOf(231)
+    }
+
+    /** Inrico TM-7 Plus hardware keys (emergency key + four programmable keys). */
+    private fun tm7PlusDefaults(action: HardwareAction): Set<Int> = when (action) {
+        HardwareAction.PTT -> setOf(229)
+        HardwareAction.EMERGENCY -> setOf(135)
+        HardwareAction.CHANNEL_UP -> setOf(132)
+        HardwareAction.CHANNEL_DOWN -> setOf(131)
+        HardwareAction.SCAN_TOGGLE -> setOf(23)
+        HardwareAction.PLAY_LAST_TRANSMISSION -> setOf(133)
+        HardwareAction.VOLUME_CHECK -> setOf(24, 25)
+        HardwareAction.TOGGLE_DAY_NIGHT -> setOf(134)
     }
 }

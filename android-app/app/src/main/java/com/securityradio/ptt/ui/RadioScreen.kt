@@ -242,6 +242,13 @@ fun RadioScreen(
                     )
                 }
             }
+            if (layout.showHardwareKeyLegend) {
+                LcdHardwareKeyLegend(
+                    onEvent = onEvent,
+                    styles = styles,
+                    rowHeight = if (layout.compactSpacing) 44.dp else 50.dp,
+                )
+            }
         }
         ScanChannelPickerDialog(state = state, onEvent = onEvent)
         HardwareMappingDialog(state = state, onEvent = onEvent, styles = styles)
@@ -1387,6 +1394,65 @@ private fun LcdSoftKeyRow(
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                     Text(
                         text = label.uppercase(Locale.US),
+                        style = styles.softKey,
+                        color = p.textOnButton,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Bottom legend for the TM-7 Plus's four physical hardware keys. The boxes sit
+ * directly above the keys (left to right: channel down, channel up, replay,
+ * day/night) and double as touch targets for the same actions.
+ */
+@Composable
+private fun LcdHardwareKeyLegend(
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+    rowHeight: Dp = 46.dp,
+) {
+    val p = RadioLcdTheme.palette
+    val keys: List<Pair<String, RadioUiEvent>> = listOf(
+        "CH-" to RadioUiEvent.ChannelDown,
+        "CH+" to RadioUiEvent.ChannelUp,
+        "REPLAY" to RadioUiEvent.PlayLastTransmission,
+        "DAY/NT" to RadioUiEvent.ToggleDayNight,
+    )
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(rowHeight)
+            .clip(RoundedCornerShape(2.dp))
+            .border(1.dp, p.divider, RoundedCornerShape(2.dp))
+            .background(p.lcdSection),
+    ) {
+        keys.forEachIndexed { index, (label, event) ->
+            if (index > 0) {
+                Spacer(
+                    modifier = Modifier
+                        .fillMaxHeight()
+                        .width(1.dp)
+                        .background(p.divider),
+                )
+            }
+            val interaction = remember { MutableInteractionSource() }
+            Surface(
+                onClick = { onEvent(event) },
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                shape = RoundedCornerShape(0.dp),
+                color = p.softKeyInactiveFill,
+                interactionSource = interaction,
+            ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    Text(
+                        text = label,
                         style = styles.softKey,
                         color = p.textOnButton,
                         maxLines = 1,
