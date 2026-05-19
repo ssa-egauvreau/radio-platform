@@ -841,7 +841,7 @@ private fun LcdHandsetFillChannelBlock(
     }
 }
 
-/** Status icon strip + SET button merged into the top of the handset channel box. */
+/** Status icons + clock / battery / SET, spread edge to edge across the handset screen. */
 @Composable
 private fun LcdHandsetToolbar(
     state: RadioUiState,
@@ -851,43 +851,42 @@ private fun LcdHandsetToolbar(
 ) {
     val p = RadioLcdTheme.palette
     val online = state.networkLabel == "ONLINE"
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .heightIn(min = 32.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Row(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 40.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             LcdSignalBarsIcon(
                 bars = if (online) 4 else 1,
                 maxBars = 4,
                 colorActive = if (online) p.statusGreen else p.statusAmber,
                 colorInactive = p.textMuted,
-                modifier = Modifier.size(26.dp, 18.dp),
+                modifier = Modifier.size(46.dp, 32.dp),
             )
             LcdBluetoothIcon(
                 on = state.bluetoothOn,
                 active = p.statusBlue,
                 muted = p.textMuted,
-                modifier = Modifier.size(24.dp),
+                modifier = Modifier.size(36.dp),
             )
             LcdGpsIcon(
                 active = p.statusGreen,
                 muted = p.textMuted,
                 locked = true,
-                modifier = Modifier.size(22.dp),
+                modifier = Modifier.size(36.dp),
             )
             LcdReplayIcon(
                 ready = p.statusAmber,
                 muted = p.textMuted,
                 hasBuffer = state.hasReplayBuffer,
                 modifier = Modifier
-                    .size(24.dp)
+                    .size(38.dp)
                     .clickable { onEvent(RadioUiEvent.PlayLastTransmission) },
             )
             LcdVolumeIcon(
@@ -895,27 +894,28 @@ private fun LcdHandsetToolbar(
                 active = p.statusGreen,
                 isMuted = state.listenVolumeMuted,
                 modifier = Modifier
-                    .size(26.dp)
+                    .size(40.dp)
                     .clickable { onEvent(RadioUiEvent.ToggleListenVolume) },
             )
         }
         Row(
+            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
             Text(
                 text = state.systemTime.uppercase(Locale.US),
-                style = styles.status,
+                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
                 color = p.textPrimary,
             )
             Text(
                 text = "BAT ${state.batteryPercent}%",
-                style = styles.status,
+                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
                 color = p.textSecondary,
             )
             Text(
                 text = "SET",
-                style = styles.softKey.copy(fontSize = 13.sp),
+                style = styles.softKey.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
                 color = p.statusBlue,
                 modifier = Modifier.clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
             )
