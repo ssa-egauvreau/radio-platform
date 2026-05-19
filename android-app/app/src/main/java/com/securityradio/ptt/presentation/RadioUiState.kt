@@ -98,6 +98,9 @@ data class RadioUiState(
 
     /** Screen flipped 180° (IRC590 day/night key long-press). */
     val displayRotated180: Boolean,
+
+    /** Dispatcher has flagged the tuned channel 10-33 (emergency traffic only). */
+    val channelTen33: Boolean = false,
 ) {
     init {
         require(softKeyLabels.size == SOFT_KEY_COUNT) {

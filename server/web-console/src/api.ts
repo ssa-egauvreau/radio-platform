@@ -233,6 +233,22 @@ export interface BridgeStatus {
   running: boolean;
 }
 
+/** A custom soundboard tone-out — an operator-fired audio clip. */
+export interface ToneOut {
+  id: number;
+  name: string;
+  /** "once" plays through; "loop" repeats until stopped. */
+  play_mode: string;
+  /** Built-in glyph kind, used when no custom image is set. */
+  icon_kind: string;
+  icon_color: string;
+  /** True when a custom icon image is set (overrides the built-in glyph). */
+  has_image: boolean;
+  /** True once an audio clip has been uploaded — a tone-out is firable only then. */
+  has_audio: boolean;
+  sort_order: number;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(code: string, status: number) {
@@ -374,6 +390,10 @@ export const api = {
     request<{ alert: Alert }>("POST", "/v1/alerts", input),
   clearAlert: (id: number) => request<{ alert: Alert }>("POST", `/v1/alerts/${id}/clear`),
 
+  /** Toggles the 10-33 channel marker so radios on that channel show a warning icon. */
+  setChannelTen33: (channelName: string, active: boolean) =>
+    request<{ ok: boolean }>("POST", "/v1/channels/ten33", { channel: channelName, active }),
+
   channelRoster: (channel: string) =>
     request<{ members: ChannelMember[] }>("GET", `/v1/channels/roster?channel=${encodeURIComponent(channel)}`),
 
@@ -441,6 +461,22 @@ export const api = {
   /** Enabled audio-device bridges this agency can run from the desktop console. */
   listRunnableBridges: () => request<{ bridges: Bridge[] }>("GET", "/v1/bridges/runnable"),
 
+  // --- custom soundboard tone-outs ---------------------------------------
+  toneOuts: () => request<{ toneOuts: ToneOut[] }>("GET", "/v1/tone-outs"),
+  createToneOut: (input: {
+    name: string;
+    playMode: string;
+    iconKind: string;
+    iconColor: string;
+  }) => request<{ toneOut: ToneOut }>("POST", "/v1/admin/tone-outs", input),
+  updateToneOut: (
+    id: number,
+    patch: Partial<{ name: string; playMode: string; iconKind: string; iconColor: string }>,
+  ) => request<{ toneOut: ToneOut }>("PATCH", `/v1/admin/tone-outs/${id}`, patch),
+  deleteToneOut: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/admin/tone-outs/${id}`),
+  deleteToneOutIcon: (id: number) =>
+    request<{ ok: boolean }>("DELETE", `/v1/admin/tone-outs/${id}/icon`),
+
   // --- simulcast channels ------------------------------------------------
   listSimulcasts: () => request<{ simulcasts: Simulcast[] }>("GET", "/v1/simulcast"),
   createSimulcast: (name: string, channelIds: number[]) =>
@@ -497,6 +533,60 @@ export async function fetchTransmissionAudio(id: number): Promise<Blob> {
     headers["Authorization"] = `Bearer ${authToken}`;
   }
   const res = await fetch(`/v1/transmissions/${id}/audio`, { headers });
+  if (!res.ok) {
+    throw new ApiError(`http_${res.status}`, res.status);
+  }
+  return res.blob();
+}
+
+/** Uploads a raw file body to one of the bearer-protected API endpoints. */
+async function uploadRaw(path: string, file: File, fallbackType: string): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": file.type || fallbackType };
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  const res = await fetch(path, { method: "PUT", headers, body: file });
+  if (!res.ok) {
+    let code = `http_${res.status}`;
+    try {
+      code = (JSON.parse(await res.text()) as { error?: string }).error ?? code;
+    } catch {
+      /* keep the generic code */
+    }
+    throw new ApiError(code, res.status);
+  }
+}
+
+/** Uploads a soundboard tone-out's audio clip (raw body — not JSON). */
+export function uploadToneOutAudio(id: number, file: File): Promise<void> {
+  return uploadRaw(`/v1/admin/tone-outs/${id}/audio`, file, "audio/wav");
+}
+
+/** Uploads a soundboard tone-out's custom icon image (raw body — not JSON). */
+export function uploadToneOutIcon(id: number, file: File): Promise<void> {
+  return uploadRaw(`/v1/admin/tone-outs/${id}/icon`, file, "image/png");
+}
+
+/** Fetches a tone-out's audio clip as a Blob (a bearer header cannot ride on a URL). */
+export async function fetchToneOutAudio(id: number): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  const res = await fetch(`/v1/tone-outs/${id}/audio`, { headers });
+  if (!res.ok) {
+    throw new ApiError(`http_${res.status}`, res.status);
+  }
+  return res.blob();
+}
+
+/** Fetches a tone-out's custom icon image as a Blob. */
+export async function fetchToneOutIcon(id: number): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  const res = await fetch(`/v1/tone-outs/${id}/icon`, { headers });
   if (!res.ok) {
     throw new ApiError(`http_${res.status}`, res.status);
   }

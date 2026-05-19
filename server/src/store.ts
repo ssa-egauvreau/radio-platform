@@ -1387,6 +1387,30 @@ export async function listInboxAlerts(
   return res.rows;
 }
 
+/** Sets or clears the 10-33 marker for one channel of an agency. */
+export async function setChannelTen33(
+  agencyId: number,
+  channelName: string,
+  active: boolean,
+): Promise<void> {
+  await requirePool().query(
+    `INSERT INTO channel_markers (agency_id, channel_name, active)
+       VALUES ($1, $2, $3)
+     ON CONFLICT (agency_id, channel_name)
+       DO UPDATE SET active = EXCLUDED.active, updated_at = now();`,
+    [agencyId, channelName, active],
+  );
+}
+
+/** Channel names currently flagged 10-33 for an agency. */
+export async function listTen33Channels(agencyId: number): Promise<string[]> {
+  const res = await requirePool().query<{ channel_name: string }>(
+    `SELECT channel_name FROM channel_markers WHERE agency_id = $1 AND active = TRUE;`,
+    [agencyId],
+  );
+  return res.rows.map((r) => r.channel_name);
+}
+
 // --- agency sounds (custom radio tones) ----------------------------------
 
 export interface AgencySoundMeta {
@@ -1452,6 +1476,159 @@ export async function getAgencySoundsVersion(agencyId: number): Promise<string> 
   );
   const row = res.rows[0];
   return `${row?.n ?? "0"}:${row?.ts ?? "-"}`;
+}
+
+// --- custom soundboard tone-outs ----------------------------------------
+
+export const TONE_OUT_PLAY_MODES = ["once", "loop"] as const;
+export type ToneOutPlayMode = (typeof TONE_OUT_PLAY_MODES)[number];
+
+/** Metadata for one soundboard tone-out (never selects the audio/icon bytes). */
+export interface ToneOutMeta {
+  id: number;
+  name: string;
+  play_mode: string;
+  icon_kind: string;
+  icon_color: string;
+  has_image: boolean;
+  has_audio: boolean;
+  sort_order: number;
+}
+
+const TONE_OUT_META_COLS =
+  "id, name, play_mode, icon_kind, icon_color, " +
+  "(icon_image IS NOT NULL) AS has_image, (audio IS NOT NULL) AS has_audio, sort_order";
+
+export async function listToneOuts(agencyId: number): Promise<ToneOutMeta[]> {
+  const res = await requirePool().query<ToneOutMeta>(
+    `SELECT ${TONE_OUT_META_COLS} FROM agency_tone_outs
+     WHERE agency_id = $1 ORDER BY sort_order ASC, id ASC;`,
+    [agencyId],
+  );
+  return res.rows;
+}
+
+export async function createToneOut(
+  agencyId: number,
+  input: { name: string; playMode: string; iconKind: string; iconColor: string },
+): Promise<ToneOutMeta> {
+  const res = await requirePool().query<ToneOutMeta>(
+    `INSERT INTO agency_tone_outs (agency_id, name, play_mode, icon_kind, icon_color, sort_order)
+     VALUES ($1, $2, $3, $4, $5,
+             COALESCE((SELECT MAX(sort_order) + 1 FROM agency_tone_outs WHERE agency_id = $1), 0))
+     RETURNING ${TONE_OUT_META_COLS};`,
+    [agencyId, input.name, input.playMode, input.iconKind, input.iconColor],
+  );
+  return res.rows[0]!;
+}
+
+export async function updateToneOut(
+  id: number,
+  agencyId: number,
+  patch: { name?: string; playMode?: string; iconKind?: string; iconColor?: string },
+): Promise<ToneOutMeta | null> {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  let i = 1;
+  if (patch.name !== undefined) {
+    sets.push(`name = $${i++}`);
+    vals.push(patch.name);
+  }
+  if (patch.playMode !== undefined) {
+    sets.push(`play_mode = $${i++}`);
+    vals.push(patch.playMode);
+  }
+  if (patch.iconKind !== undefined) {
+    sets.push(`icon_kind = $${i++}`);
+    vals.push(patch.iconKind);
+  }
+  if (patch.iconColor !== undefined) {
+    sets.push(`icon_color = $${i++}`);
+    vals.push(patch.iconColor);
+  }
+  if (sets.length === 0) {
+    const res = await requirePool().query<ToneOutMeta>(
+      `SELECT ${TONE_OUT_META_COLS} FROM agency_tone_outs WHERE id = $1 AND agency_id = $2;`,
+      [id, agencyId],
+    );
+    return res.rows[0] ?? null;
+  }
+  vals.push(id, agencyId);
+  const res = await requirePool().query<ToneOutMeta>(
+    `UPDATE agency_tone_outs SET ${sets.join(", ")}
+     WHERE id = $${i++} AND agency_id = $${i}
+     RETURNING ${TONE_OUT_META_COLS};`,
+    vals,
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function setToneOutAudio(
+  id: number,
+  agencyId: number,
+  audio: Buffer,
+  mime: string,
+): Promise<boolean> {
+  const res = await requirePool().query(
+    `UPDATE agency_tone_outs SET audio = $1, audio_mime = $2, audio_bytes = $3
+     WHERE id = $4 AND agency_id = $5;`,
+    [audio, mime, audio.length, id, agencyId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+export async function setToneOutIcon(
+  id: number,
+  agencyId: number,
+  image: Buffer,
+  mime: string,
+): Promise<boolean> {
+  const res = await requirePool().query(
+    `UPDATE agency_tone_outs SET icon_image = $1, icon_mime = $2 WHERE id = $3 AND agency_id = $4;`,
+    [image, mime, id, agencyId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+export async function clearToneOutIcon(id: number, agencyId: number): Promise<boolean> {
+  const res = await requirePool().query(
+    `UPDATE agency_tone_outs SET icon_image = NULL, icon_mime = NULL
+     WHERE id = $1 AND agency_id = $2;`,
+    [id, agencyId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+export async function getToneOutAudio(
+  id: number,
+  agencyId: number,
+): Promise<{ audio: Buffer; mime: string } | null> {
+  const res = await requirePool().query<{ audio: Buffer; mime: string }>(
+    `SELECT audio, COALESCE(audio_mime, 'audio/wav') AS mime
+     FROM agency_tone_outs WHERE id = $1 AND agency_id = $2 AND audio IS NOT NULL;`,
+    [id, agencyId],
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function getToneOutIcon(
+  id: number,
+  agencyId: number,
+): Promise<{ image: Buffer; mime: string } | null> {
+  const res = await requirePool().query<{ image: Buffer; mime: string }>(
+    `SELECT icon_image AS image, COALESCE(icon_mime, 'image/png') AS mime
+     FROM agency_tone_outs WHERE id = $1 AND agency_id = $2 AND icon_image IS NOT NULL;`,
+    [id, agencyId],
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function deleteToneOut(id: number, agencyId: number): Promise<boolean> {
+  const res = await requirePool().query(
+    `DELETE FROM agency_tone_outs WHERE id = $1 AND agency_id = $2;`,
+    [id, agencyId],
+  );
+  return (res.rowCount ?? 0) > 0;
 }
 
 /** First candidate username not already taken; falls back to a unique suffix. */

@@ -95,10 +95,12 @@ function BridgeForm({
             <input
               value={f.sourceUrl ?? ""}
               onChange={(e) => set("sourceUrl", e.target.value)}
-              placeholder="https://… (Broadcastify / ProScan / icecast)"
+              placeholder="https://stream.example.com:8000/feed.mp3"
             />
             <p className="field-hint">
-              Direct audio stream link (Icecast / MP3 / AAC). The server ingests it automatically.
+              The <strong>direct audio-stream address</strong> — an Icecast / Shoutcast HTTP(S)
+              feed (MP3 or AAC) or an HLS <code>.m3u8</code> playlist. Use the raw stream link, not
+              a Broadcastify listen page or a web page with an embedded player.
             </p>
           </div>
         ) : (
