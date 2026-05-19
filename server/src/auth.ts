@@ -41,7 +41,7 @@ if (!envSecret) {
   console.warn("JWT_SECRET not set — using a random secret; existing sessions break on every restart.");
 }
 
-/** Token lifetime in seconds (12h). */
+/** Console/admin/owner token lifetime in seconds (12h). Radio handsets never expire. */
 export const TOKEN_TTL_SECONDS = 12 * 60 * 60;
 
 export async function hashPassword(plain: string): Promise<string> {
@@ -57,19 +57,22 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
 }
 
 export function signToken(user: AuthUser): string {
-  return jwt.sign(
-    {
-      uid: user.id,
-      un: user.username,
-      dn: user.displayName,
-      role: user.role,
-      unit: user.unitId,
-      aid: user.agencyId,
-      an: user.agencyName,
-    },
-    JWT_SECRET,
-    { expiresIn: TOKEN_TTL_SECONDS },
-  );
+  const claims = {
+    uid: user.id,
+    un: user.username,
+    dn: user.displayName,
+    role: user.role,
+    unit: user.unitId,
+    aid: user.agencyId,
+    an: user.agencyName,
+  };
+  // Radio handsets stay signed in until a manual sign-out, so their tokens
+  // carry no expiry. Console/admin/owner sessions still expire so a lost
+  // dispatch login cannot live forever.
+  if (user.role === "radio") {
+    return jwt.sign(claims, JWT_SECRET);
+  }
+  return jwt.sign(claims, JWT_SECRET, { expiresIn: TOKEN_TTL_SECONDS });
 }
 
 export function verifyToken(token: string): AuthUser | null {
