@@ -36,6 +36,7 @@ import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.RadioUiSoundPlayer
 import com.securityradio.ptt.device.ServerReachabilityMonitor
 import com.securityradio.ptt.device.VoiceControlEvent
+import com.securityradio.ptt.device.ScanVoiceListenTransport
 import com.securityradio.ptt.device.VoiceRelayTransport
 import com.securityradio.ptt.domain.ChannelCatalogOrigin
 import com.securityradio.ptt.domain.ChannelPermission
@@ -74,6 +75,7 @@ class RadioViewModel(
     private val radioPreferences: RadioPreferences,
     private val speechHelper: ChannelSpeechHelper,
     private val voiceRelay: VoiceRelayTransport,
+    private val scanVoiceListen: ScanVoiceListenTransport,
     private val locationReporter: LocationReporter,
     private val customSoundDownloader: CustomSoundDownloader,
     private val lastRxAudioRecorder: LastRxAudioRecorder,
@@ -241,6 +243,7 @@ class RadioViewModel(
                     HardwareButtonEvent.ChannelDownPressed -> bumpChannel(-1)
                     HardwareButtonEvent.ScanTogglePressed -> {
                         _uiState.update { s -> onScanSoftKeyToggle(s) }
+                        reconcileVoiceTransport()
                     }
                     HardwareButtonEvent.PlayLastTransmissionPressed -> onPlayLastKeyDown()
                     HardwareButtonEvent.PlayLastTransmissionReleased -> onPlayLastKeyUp()
@@ -457,6 +460,7 @@ class RadioViewModel(
                 statusMessage = if (next.scanActive) "SCAN ON" else "SCAN OFF",
             )
         }
+        reconcileVoiceTransport()
     }
 
     /** Rotates the whole LCD 180° (IRC590 day/night key long-press) and persists it. */
@@ -529,6 +533,9 @@ class RadioViewModel(
                                 2 -> onScanSoftKeyToggle(state)
                                 else -> state
                             }
+                        }
+                        if (event.index == 2) {
+                            reconcileVoiceTransport()
                         }
                     }
                 }
@@ -822,6 +829,7 @@ class RadioViewModel(
             }
             s.copy(scanIncludedChannelIndices = next)
         }
+        reconcileVoiceTransport()
     }
 
     private fun onPttPressed() {
@@ -1163,13 +1171,28 @@ class RadioViewModel(
         }
     }
 
-    /** Align Voice WebSocket relay with tuned channel / link state (half-duplex PCM). */
+    /** Align voice WebSockets with tuned channel, scan list, and link state. */
     private fun reconcileVoiceTransport() {
         val s = _uiState.value
         voiceRelay.updateVoiceTarget(
             unitIdUpper = unitIdUpper,
             channelLabel = s.channelLabel,
             networkOnline = s.networkLabel == "ONLINE",
+        )
+        val scanNames = if (s.scanActive) {
+            s.scanIncludedChannelIndices
+                .mapNotNull { ix -> s.channelCatalog.getOrNull(ix)?.trim() }
+                .filter { it.isNotEmpty() }
+                .toSet()
+        } else {
+            emptySet()
+        }
+        scanVoiceListen.updateScanListen(
+            unitIdUpper = unitIdUpper,
+            homeChannel = s.channelLabel,
+            scanChannels = scanNames,
+            networkOnline = s.networkLabel == "ONLINE",
+            scanActive = s.scanActive,
         )
         locationReporter.setChannel(s.channelLabel)
     }
@@ -1455,8 +1478,20 @@ class RadioViewModel(
             val snap = _uiState.value
             val chParam =
                 snap.channelLabel.trim().takeUnless { it.isEmpty() || it == "----" }
+            val scanParam = if (snap.scanActive) {
+                snap.scanIncludedChannelIndices
+                    .mapNotNull { ix -> snap.channelCatalog.getOrNull(ix)?.trim() }
+                    .filter { name ->
+                        name.isNotEmpty() &&
+                            !channelNamesMatch(name, snap.channelLabel)
+                    }
+                    .joinToString(",")
+                    .takeIf { it.isNotEmpty() }
+            } else {
+                null
+            }
             val dto = try {
-                channelsApi.talkActivity()
+                channelsApi.talkActivity(home = chParam, scan = scanParam)
             } catch (_: Exception) {
                 null
             }
@@ -1465,7 +1500,8 @@ class RadioViewModel(
             } catch (_: Exception) {
                 null
             }
-            val voiceLine = rxLineFromLiveVoice(air, snap)
+            val scanAirLine = rxLineFromScanAir(snap)
+            val voiceLine = rxLineFromLiveVoice(air, snap).ifBlank { scanAirLine }
             val mockLine = dto?.let { mergedRxAttributedLine(it, snap) }.orEmpty()
             val merged = voiceLine.ifBlank { mockLine }
             val (talkUnit, talkName) = resolveActiveTalkAttribution(snap, air, dto)
@@ -1542,6 +1578,24 @@ class RadioViewModel(
         val uid = main.unitId?.trim()?.uppercase(Locale.US) ?: return ""
         if (uid != unitUpper) return ""
         return main.username?.trim().orEmpty()
+    }
+
+    /** First active side-channel air state while scan is on (home channel polled separately). */
+    private suspend fun rxLineFromScanAir(snap: RadioUiState): String {
+        if (!snap.scanActive) return ""
+        val tuned = snap.channelLabel.trim()
+        for (ix in snap.scanIncludedChannelIndices) {
+            val ch = snap.channelCatalog.getOrNull(ix)?.trim().orEmpty()
+            if (ch.isEmpty() || channelNamesMatch(ch, tuned)) continue
+            val air = try {
+                channelsApi.airState(channel = ch)
+            } catch (_: Exception) {
+                null
+            }
+            val line = rxLineFromLiveVoice(air, snap)
+            if (line.isNotBlank()) return line
+        }
+        return ""
     }
 
     /** Attribution from relay live PCM (“on air”); overrides mock talk-activity when non-empty. */
