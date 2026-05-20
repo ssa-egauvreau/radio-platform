@@ -51,7 +51,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -830,6 +829,10 @@ private fun LcdHandsetFillChannelBlock(
             LcdHandsetToolbar(
                 state = state,
                 showBatteryStatus = showBatteryStatus,
+                zoneValue = zoneValue,
+                channelValue = channelValue,
+                radiosValue = radiosValue,
+                radiosKnown = state.radiosOnlineOnChannel != null,
                 onEvent = onEvent,
                 styles = styles,
             )
@@ -849,14 +852,6 @@ private fun LcdHandsetFillChannelBlock(
                     .fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
-                LcdHandsetMetaRow(
-                    zoneValue = zoneValue,
-                    channelValue = channelValue,
-                    radiosValue = radiosValue,
-                    radiosKnown = state.radiosOnlineOnChannel != null,
-                    styles = styles,
-                    modifier = Modifier.align(Alignment.TopEnd),
-                )
                 if (state.scanActive && state.scanBackgroundChannel.isNotBlank()) {
                     Text(
                         text = "▶ ${state.scanBackgroundChannel}",
@@ -959,7 +954,7 @@ private fun LcdPermissionBadge(
     )
 }
 
-/** Zone / channel position / radios — top-right of the channel block. */
+/** Zone / channel position / radios — top toolbar, right-aligned. */
 @Composable
 private fun LcdHandsetMetaRow(
     zoneValue: String,
@@ -971,8 +966,8 @@ private fun LcdHandsetMetaRow(
 ) {
     val p = RadioLcdTheme.palette
     Row(
-        modifier = modifier.padding(top = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         LcdHandsetStat(value = zoneValue, valueColor = p.textSecondary, styles = styles, compact = true) {
@@ -1025,6 +1020,10 @@ private fun LcdHandsetStat(
 private fun LcdHandsetToolbar(
     state: RadioUiState,
     showBatteryStatus: Boolean,
+    zoneValue: String,
+    channelValue: String,
+    radiosValue: String,
+    radiosKnown: Boolean,
     onEvent: (RadioUiEvent) -> Unit,
     styles: LcdTextStyles,
     modifier: Modifier = Modifier,
@@ -1039,9 +1038,6 @@ private fun LcdHandsetToolbar(
     val signalHeight = if (showBatteryStatus) 24.dp else 22.dp
     val timeFontSize = if (showBatteryStatus) 17.sp else 20.sp
     val minHeight = if (showBatteryStatus) 38.dp else 40.dp
-    val density = LocalDensity.current
-    var leftIconsWidthPx by remember { mutableIntStateOf(0) }
-    val leftIconsWidth = with(density) { leftIconsWidthPx.toDp() }
 
     Column(modifier = modifier) {
         Row(
@@ -1051,7 +1047,7 @@ private fun LcdHandsetToolbar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Row(
-                modifier = Modifier.onSizeChanged { leftIconsWidthPx = it.width },
+                modifier = Modifier.weight(1f, fill = false),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(iconGap),
             ) {
@@ -1123,9 +1119,19 @@ private fun LcdHandsetToolbar(
                 color = accentOnEmergency,
                 maxLines = 1,
                 textAlign = TextAlign.Center,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 4.dp),
+            )
+            LcdHandsetMetaRow(
+                zoneValue = zoneValue,
+                channelValue = channelValue,
+                radiosValue = radiosValue,
+                radiosKnown = radiosKnown,
+                styles = styles,
             )
             if (showBatteryStatus) {
+                Spacer(modifier = Modifier.width(iconGap))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(iconGap),
@@ -1145,8 +1151,6 @@ private fun LcdHandsetToolbar(
                         maxLines = 1,
                     )
                 }
-            } else if (leftIconsWidth > 0.dp) {
-                Spacer(modifier = Modifier.width(leftIconsWidth))
             }
         }
         if (state.scanActive && state.scanBackgroundChannel.isNotBlank()) {
