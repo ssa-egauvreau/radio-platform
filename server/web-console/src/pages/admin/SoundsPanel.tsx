@@ -57,6 +57,7 @@ export function SoundsPanel() {
   const [sounds, setSounds] = useState<AgencySound[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [busyKind, setBusyKind] = useState<string | null>(null);
 
   async function reload() {
@@ -112,20 +113,53 @@ export function SoundsPanel() {
   }
 
   async function preview(tone: ToneDef) {
-    if (!customByKind.has(tone.kind)) {
-      void new Audio(tone.bundled).play().catch(() => undefined);
-      return;
-    }
-    const token = getToken();
-    try {
-      const res = await fetch(`/v1/sounds/${tone.kind}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (res.ok) {
-        void new Audio(URL.createObjectURL(await res.blob())).play().catch(() => undefined);
+    setPreviewError(null);
+    let objectUrl: string | null = null;
+    let src = tone.bundled;
+    if (customByKind.has(tone.kind)) {
+      const token = getToken();
+      try {
+        const res = await fetch(`/v1/sounds/${tone.kind}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          objectUrl = URL.createObjectURL(await res.blob());
+          src = objectUrl;
+        }
+      } catch {
+        /* fall back to bundled default */
       }
+    }
+    if (!objectUrl) {
+      try {
+        const head = await fetch(src, { method: "HEAD" });
+        if (!head.ok) {
+          setPreviewError(
+            `Cannot play “${tone.label}”: missing bundled file ${tone.bundled}. Add it under server/web-console/public/sounds/ or upload a custom tone.`,
+          );
+          return;
+        }
+      } catch {
+        setPreviewError(`Cannot play “${tone.label}”: could not reach ${tone.bundled}.`);
+        return;
+      }
+    }
+    const clip = new Audio(src);
+    clip.volume = 1;
+    const revoke = () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+    clip.addEventListener("ended", revoke, { once: true });
+    clip.addEventListener("error", revoke, { once: true });
+    try {
+      await clip.play();
     } catch {
-      /* preview is best-effort */
+      revoke();
+      setPreviewError(
+        `Cannot play “${tone.label}”. Your browser may block sound until you click elsewhere on the page, or the file may be missing (${tone.bundled}).`,
+      );
     }
   }
 
@@ -142,6 +176,7 @@ export function SoundsPanel() {
       </p>
 
       {error && <div className="banner error">{error}</div>}
+      {previewError && <div className="banner error">{previewError}</div>}
 
       {loading ? (
         <div className="empty">Loading…</div>
