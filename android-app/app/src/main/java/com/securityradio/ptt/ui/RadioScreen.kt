@@ -625,14 +625,16 @@ private fun UniversalCockpitControlsRow(
         )
         UniversalCockpitButton(
             label = if (state.scanActive) "SCAN •" else "SCAN",
+            // Tap = plain on/off toggle (no picker overlay). Long-press opens the picker only
+            // when scan is already on, mirroring the documented cockpit interaction; long-press
+            // when off enables scan AND opens the picker so the user can pick channels.
             onClick = {
                 if (state.scanActive) onEvent(RadioUiEvent.DisableScan)
-                else onEvent(RadioUiEvent.ToggleScanLongPress)
+                else onEvent(RadioUiEvent.ToggleScanSoftKey)
             },
-            onLongClick = if (state.scanActive) {
-                { onEvent(RadioUiEvent.OpenScanPicker) }
-            } else {
-                null
+            onLongClick = {
+                if (state.scanActive) onEvent(RadioUiEvent.OpenScanPicker)
+                else onEvent(RadioUiEvent.ToggleScanLongPress)
             },
             modifier = Modifier.weight(1f),
             styles = styles,
