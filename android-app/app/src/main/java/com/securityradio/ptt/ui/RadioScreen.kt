@@ -679,20 +679,29 @@ private fun UniversalCockpitButton(
     val gestureModifier = when {
         onLongClick != null && longPressTimeoutMs != null ->
             // Custom hold-detection because detectTapGestures only honours the platform
-            // long-press threshold (~500ms). withTimeoutOrNull returns null on timeout =>
-            // fire onLongClick, otherwise the user released early => fire onClick.
+            // long-press threshold (~500ms). Tricky bit: waitForUpOrCancellation() returns null
+            // both on a real release AND on a system-driven gesture cancellation (finger drifts
+            // off, another modifier consumes the pointer, etc.). withTimeoutOrNull adds a third
+            // null path on actual timeout. We use elapsed wall-clock time to distinguish:
+            //   - released != null  → genuine release, fire onClick
+            //   - released == null, elapsed ≥ timeout → real long press, fire onLongClick
+            //   - released == null, elapsed < timeout → canceled, fire nothing
             Modifier.pointerInput(onClick, onLongClick, longPressTimeoutMs) {
                 awaitEachGesture {
                     awaitFirstDown(requireUnconsumed = false)
+                    val downAt = System.currentTimeMillis()
                     val released = withTimeoutOrNull(longPressTimeoutMs) {
                         waitForUpOrCancellation()
                     }
-                    if (released != null) {
-                        onClick?.invoke()
-                    } else {
-                        onLongClick()
-                        // Drain the eventual release so we don't leave the gesture stream stuck.
-                        waitForUpOrCancellation()
+                    val elapsed = System.currentTimeMillis() - downAt
+                    when {
+                        released != null -> onClick?.invoke()
+                        elapsed >= longPressTimeoutMs -> {
+                            onLongClick()
+                            // Drain the eventual release so the gesture stream isn't left stuck.
+                            waitForUpOrCancellation()
+                        }
+                        // else: gesture canceled before the threshold — intentionally do nothing.
                     }
                 }
             }
