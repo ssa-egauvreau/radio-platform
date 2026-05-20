@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.AlertDialog
@@ -110,11 +111,14 @@ import com.securityradio.ptt.ui.theme.LocalRadioLcdPalette
 import com.securityradio.ptt.ui.theme.RadioLcdPalette
 import com.securityradio.ptt.ui.theme.RadioLcdTheme
 import java.util.Locale
+import kotlinx.coroutines.withTimeoutOrNull
 
 private val HANDSET_CLOCK_FONT_IRC590 = 44.sp
 private val HANDSET_CLOCK_FONT_TM7 = 28.sp
 private const val HANDSET_EMERGENCY_FLASH_LO = 0.38f
 private const val HANDSET_EMERGENCY_FLASH_HI = 0.92f
+/** Hold duration that arms emergency from the universal-cockpit EMER button. */
+private const val EMERGENCY_LONG_PRESS_MS: Long = 1500
 private const val HANDSET_EMERGENCY_PANEL_LO = 0.42f
 private const val HANDSET_EMERGENCY_PANEL_HI = 0.95f
 private const val HANDSET_EMERGENCY_BORDER_LO = 0.65f
@@ -222,6 +226,16 @@ fun RadioScreen(
                         .background(handsetEmergencyFlashColor.copy(alpha = 0.68f)),
                 )
             }
+            if (layout.universalCockpit) {
+                LcdUniversalCockpit(
+                    state = state,
+                    lcdNightEffective = lcdNightEffective,
+                    onEvent = onEvent,
+                    onRequestMicPermission = onRequestMicPermission,
+                    styles = styles,
+                    layout = layout,
+                )
+            } else {
             Column(
                 modifier = Modifier.fillMaxSize(),
                 verticalArrangement = Arrangement.spacedBy(gap),
@@ -336,6 +350,7 @@ fun RadioScreen(
                 )
             }
             }
+            }
         }
         if (state.resolvedDeviceProfile == ResolvedDeviceProfile.TM7_PLUS) {
             ScanChannelPickerFullScreen(state = state, onEvent = onEvent, styles = styles)
@@ -357,6 +372,390 @@ private fun LcdDivider() {
             .height(1.dp)
             .background(p.divider),
     )
+}
+
+/**
+ * Universal touch cockpit (#15): a single mobile-friendly layout that fits any phone screen,
+ * built around a big centred circular PTT. Channel name large at the top, channel up/down /
+ * replay / scan / long-press-emergency along the bottom; the standard bottom hardware-key legend
+ * is hidden since this layout has its own on-screen counterparts.
+ */
+@Composable
+private fun LcdUniversalCockpit(
+    state: RadioUiState,
+    lcdNightEffective: Boolean,
+    onEvent: (RadioUiEvent) -> Unit,
+    onRequestMicPermission: () -> Unit,
+    styles: LcdTextStyles,
+    layout: RadioLayoutPolicy,
+) {
+    val p = RadioLcdTheme.palette
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        LcdStatusBar(
+            state = state,
+            lcdNightEffective = lcdNightEffective,
+            onEvent = onEvent,
+            onRequestMicPermission = onRequestMicPermission,
+            styles = styles,
+            layout = layout,
+        )
+        if (state.connectivityBanner.isNotEmpty()) {
+            LcdAlertBanner(
+                text = state.connectivityBanner,
+                accent = if (state.connectivityBanner == RadioUiState.BANNER_RECONNECTED) {
+                    p.statusGreen
+                } else {
+                    p.statusRed
+                },
+                styles = styles,
+            )
+        }
+        if (state.replayBanner.isNotEmpty()) {
+            LcdAlertBanner(text = state.replayBanner, accent = p.statusAmber, styles = styles)
+            if (state.replayTranscript.isNotBlank()) {
+                LcdReplayTranscriptBanner(text = state.replayTranscript, styles = styles)
+            }
+        }
+        if (state.scanBackgroundActive && state.scanBackgroundChannel.isNotBlank()) {
+            UniversalCockpitScanBanner(state = state, styles = styles)
+        }
+        UniversalCockpitMainPanel(
+            state = state,
+            onEvent = onEvent,
+            styles = styles,
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        )
+        UniversalCockpitControlsRow(
+            state = state,
+            onEvent = onEvent,
+            styles = styles,
+        )
+    }
+}
+
+@Composable
+private fun UniversalCockpitScanBanner(state: RadioUiState, styles: LcdTextStyles) {
+    val p = RadioLcdTheme.palette
+    val bannerColor = rememberScanIconActiveColor(scanActive = true, scanReceiving = true)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(2.dp))
+            .background(p.lcdSection)
+            .border(1.dp, p.statusAmber.copy(alpha = 0.6f), RoundedCornerShape(2.dp))
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        LcdScanIcon(
+            on = true,
+            active = bannerColor,
+            muted = p.textMuted,
+            modifier = Modifier.size(20.dp),
+        )
+        Text(
+            text = "SCAN RX · ${state.scanBackgroundChannel.uppercase(Locale.US)}",
+            style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp),
+            color = p.statusAmber,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+@Composable
+private fun UniversalCockpitMainPanel(
+    state: RadioUiState,
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+    modifier: Modifier = Modifier,
+) {
+    val p = RadioLcdTheme.palette
+    val ten33Alpha = rememberTen33PulseAlpha(state.channelTen33)
+    val channelText = state.channelLabel.uppercase(Locale.US)
+    // Strip the "RX:" prefix so the centre status line reads naturally; the chrome and the talker
+    // line share rxAttributedLine but the cockpit doesn't paint a wash, just text.
+    val talker = state.rxAttributedLine.trimStart().removePrefix("RX:").trim()
+    val statusLine = when {
+        state.isEmergencyActive -> "EMERGENCY ACTIVE"
+        state.isPttPressed && state.pttBusyTone -> "CHANNEL BUSY"
+        state.isPttPressed -> "TRANSMITTING"
+        state.remoteEmergencyUnit != null -> "EMERGENCY · ${state.remoteEmergencyUnit}"
+        talker.isNotEmpty() -> talker
+        else -> ""
+    }
+    val statusColor = when {
+        state.isEmergencyActive || state.remoteEmergencyUnit != null -> p.statusEmergency
+        state.isPttPressed && state.pttBusyTone -> p.statusRed
+        state.isPttPressed -> p.statusGreen
+        else -> p.rxHighlight
+    }
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .then(
+                    if (state.channelTen33) {
+                        Modifier
+                            .background(p.statusAmber.copy(alpha = ten33Alpha))
+                            .border(2.dp, p.statusAmber, RoundedCornerShape(4.dp))
+                    } else {
+                        Modifier
+                    },
+                )
+                .padding(vertical = 8.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                text = channelText,
+                style = styles.channel.copy(fontSize = 52.sp, lineHeight = 56.sp),
+                color = p.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+            )
+        }
+        if (statusLine.isNotEmpty()) {
+            Text(
+                text = statusLine,
+                style = styles.body.copy(fontWeight = FontWeight.SemiBold, fontSize = 18.sp),
+                color = statusColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        UniversalCockpitPttCircle(state = state, onEvent = onEvent, styles = styles)
+    }
+}
+
+@Composable
+private fun UniversalCockpitPttCircle(
+    state: RadioUiState,
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+) {
+    val p = RadioLcdTheme.palette
+    val fill = when {
+        state.isPttPressed && state.pttBusyTone -> p.statusRed
+        state.isPttPressed -> p.statusGreen
+        else -> p.pttIdleFill
+    }
+    val foreground = when {
+        state.isPttPressed && state.pttBusyTone -> p.textOnButton
+        state.isPttPressed -> Color.Black.copy(alpha = 0.9f)
+        else -> p.textOnButton
+    }
+    val label = when {
+        state.isPttPressed && state.pttBusyTone -> "BUSY"
+        state.isPttPressed -> "TX"
+        else -> "PTT"
+    }
+    Box(
+        modifier = Modifier
+            .size(200.dp)
+            .clip(CircleShape)
+            .background(fill)
+            .border(3.dp, p.divider, CircleShape)
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    onEvent(RadioUiEvent.PttPressed)
+                    waitForUpOrCancellation()
+                    onEvent(RadioUiEvent.PttReleased)
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            LcdMicIcon(color = foreground, modifier = Modifier.size(48.dp))
+            Text(
+                text = label,
+                style = styles.softKey.copy(fontSize = 26.sp, fontWeight = FontWeight.Bold),
+                color = foreground,
+            )
+            if (!state.isPttPressed) {
+                Text(
+                    text = "HOLD TO TALK",
+                    style = styles.status,
+                    color = foreground.copy(alpha = 0.85f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun UniversalCockpitControlsRow(
+    state: RadioUiState,
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+) {
+    val p = RadioLcdTheme.palette
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(72.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        UniversalCockpitButton(
+            label = "CH-",
+            onClick = { onEvent(RadioUiEvent.ChannelDown) },
+            modifier = Modifier.weight(1f),
+            styles = styles,
+        )
+        UniversalCockpitButton(
+            label = "CH+",
+            onClick = { onEvent(RadioUiEvent.ChannelUp) },
+            modifier = Modifier.weight(1f),
+            styles = styles,
+        )
+        UniversalCockpitButton(
+            label = "REPLAY",
+            onClick = { onEvent(RadioUiEvent.PlayLastTransmission) },
+            onLongClick = { onEvent(RadioUiEvent.ToggleMessageHistory) },
+            modifier = Modifier.weight(1f),
+            styles = styles,
+            accent = if (state.replayBanner.isNotEmpty()) p.statusAmber else null,
+        )
+        UniversalCockpitButton(
+            label = if (state.scanActive) "SCAN •" else "SCAN",
+            // Tap = plain on/off toggle (no picker overlay). Long-press opens the picker only
+            // when scan is already on, mirroring the documented cockpit interaction; long-press
+            // when off enables scan AND opens the picker so the user can pick channels.
+            onClick = {
+                if (state.scanActive) onEvent(RadioUiEvent.DisableScan)
+                else onEvent(RadioUiEvent.ToggleScanSoftKey)
+            },
+            onLongClick = {
+                if (state.scanActive) onEvent(RadioUiEvent.OpenScanPicker)
+                else onEvent(RadioUiEvent.ToggleScanLongPress)
+            },
+            modifier = Modifier.weight(1f),
+            styles = styles,
+            accent = if (state.scanActive) p.statusAmber else null,
+        )
+        UniversalCockpitButton(
+            label = if (state.isEmergencyActive) "ALARM" else "EMER",
+            // Long-press only with a 1.5s hold — single-tap intentionally inert and the longer
+            // threshold makes a glancing thumb on a touchscreen unable to accidentally key
+            // emergency. Matches the Android handset's hardware-button safety pattern.
+            onLongClick = { onEvent(RadioUiEvent.EmergencyToggle) },
+            longPressTimeoutMs = EMERGENCY_LONG_PRESS_MS,
+            modifier = Modifier.weight(1f),
+            styles = styles,
+            accent = if (state.isEmergencyActive) p.statusEmergency else p.statusRed.copy(alpha = 0.72f),
+            longPressHint = if (!state.isEmergencyActive) "HOLD 1.5s" else null,
+        )
+    }
+}
+
+@Composable
+private fun UniversalCockpitButton(
+    label: String,
+    modifier: Modifier = Modifier,
+    onClick: (() -> Unit)? = null,
+    onLongClick: (() -> Unit)? = null,
+    styles: LcdTextStyles,
+    accent: Color? = null,
+    longPressHint: String? = null,
+    /**
+     * Override Compose's default ~500ms long-press timeout. The EMER button passes a longer
+     * hold so a glancing thumb cannot accidentally fire emergency on a touchscreen.
+     */
+    longPressTimeoutMs: Long? = null,
+) {
+    val p = RadioLcdTheme.palette
+    val fill = accent ?: p.softKeyInactiveFill
+    val textColor = if (accent != null) p.textOnButton else p.textPrimary
+    val gestureModifier = when {
+        onLongClick != null && longPressTimeoutMs != null ->
+            // Custom hold-detection because detectTapGestures only honours the platform
+            // long-press threshold (~500ms). Tricky bit: waitForUpOrCancellation() returns null
+            // both on a real release AND on a system-driven gesture cancellation (finger drifts
+            // off, another modifier consumes the pointer, etc.). withTimeoutOrNull adds a third
+            // null path on actual timeout. We use elapsed wall-clock time to distinguish:
+            //   - released != null  → genuine release, fire onClick
+            //   - released == null, elapsed ≥ timeout → real long press, fire onLongClick
+            //   - released == null, elapsed < timeout → canceled, fire nothing
+            Modifier.pointerInput(onClick, onLongClick, longPressTimeoutMs) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    val downAt = System.currentTimeMillis()
+                    val released = withTimeoutOrNull(longPressTimeoutMs) {
+                        waitForUpOrCancellation()
+                    }
+                    val elapsed = System.currentTimeMillis() - downAt
+                    when {
+                        released != null -> onClick?.invoke()
+                        elapsed >= longPressTimeoutMs -> {
+                            onLongClick()
+                            // Drain the eventual release so the gesture stream isn't left stuck.
+                            waitForUpOrCancellation()
+                        }
+                        // else: gesture canceled before the threshold — intentionally do nothing.
+                    }
+                }
+            }
+        onClick != null && onLongClick != null ->
+            Modifier.pointerInput(onClick, onLongClick) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onLongPress = { onLongClick() },
+                )
+            }
+        onClick != null ->
+            Modifier.pointerInput(onClick) {
+                detectTapGestures(onTap = { onClick() })
+            }
+        onLongClick != null ->
+            Modifier.pointerInput(onLongClick) {
+                detectTapGestures(onLongPress = { onLongClick() })
+            }
+        else -> Modifier
+    }
+    Box(
+        modifier = modifier
+            .fillMaxHeight()
+            .clip(RoundedCornerShape(6.dp))
+            .background(fill)
+            .border(1.dp, p.divider, RoundedCornerShape(6.dp))
+            .then(gestureModifier),
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
+            Text(
+                text = label,
+                style = styles.softKey.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
+                color = textColor,
+                maxLines = 1,
+            )
+            if (longPressHint != null) {
+                Text(
+                    text = longPressHint,
+                    style = styles.status.copy(fontSize = 10.sp),
+                    color = textColor.copy(alpha = 0.85f),
+                )
+            }
+        }
+    }
 }
 
 @Composable

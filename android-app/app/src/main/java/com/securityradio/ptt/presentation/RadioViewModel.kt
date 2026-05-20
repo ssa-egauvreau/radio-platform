@@ -570,6 +570,11 @@ class RadioViewModel(
             RadioUiEvent.ChannelDown -> bumpChannel(-1)
             RadioUiEvent.ToggleScanLongPress -> onTm7ScanLongPressToggle()
             RadioUiEvent.DisableScan -> disableScan()
+            RadioUiEvent.ToggleScanSoftKey -> {
+                soundPlayer.playChannelSwitch()
+                _uiState.update { onScanSoftKeyToggle(it) }
+                reconcileVoiceTransport()
+            }
             RadioUiEvent.OpenScanPicker -> {
                 soundPlayer.playChannelSwitch()
                 if (_uiState.value.channelCatalog.size > 1) {
