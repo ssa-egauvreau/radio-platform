@@ -105,11 +105,14 @@ import com.securityradio.ptt.ui.theme.LocalRadioLcdPalette
 import com.securityradio.ptt.ui.theme.RadioLcdPalette
 import com.securityradio.ptt.ui.theme.RadioLcdTheme
 import java.util.Locale
+import kotlinx.coroutines.withTimeoutOrNull
 
 private val HANDSET_CLOCK_FONT_IRC590 = 44.sp
 private val HANDSET_CLOCK_FONT_TM7 = 28.sp
 private const val HANDSET_EMERGENCY_FLASH_LO = 0.38f
 private const val HANDSET_EMERGENCY_FLASH_HI = 0.92f
+/** Hold duration that arms emergency from the universal-cockpit EMER button. */
+private const val EMERGENCY_LONG_PRESS_MS: Long = 1500
 private const val HANDSET_EMERGENCY_PANEL_LO = 0.42f
 private const val HANDSET_EMERGENCY_PANEL_HI = 0.95f
 private const val HANDSET_EMERGENCY_BORDER_LO = 0.65f
@@ -642,13 +645,15 @@ private fun UniversalCockpitControlsRow(
         )
         UniversalCockpitButton(
             label = if (state.isEmergencyActive) "ALARM" else "EMER",
-            // Long-press only — single-tap intentionally inert so a glancing thumb on a
-            // touchscreen can't accidentally key emergency.
+            // Long-press only with a 1.5s hold — single-tap intentionally inert and the longer
+            // threshold makes a glancing thumb on a touchscreen unable to accidentally key
+            // emergency. Matches the Android handset's hardware-button safety pattern.
             onLongClick = { onEvent(RadioUiEvent.EmergencyToggle) },
+            longPressTimeoutMs = EMERGENCY_LONG_PRESS_MS,
             modifier = Modifier.weight(1f),
             styles = styles,
             accent = if (state.isEmergencyActive) p.statusEmergency else p.statusRed.copy(alpha = 0.72f),
-            longPressHint = if (!state.isEmergencyActive) "HOLD" else null,
+            longPressHint = if (!state.isEmergencyActive) "HOLD 1.5s" else null,
         )
     }
 }
@@ -662,11 +667,35 @@ private fun UniversalCockpitButton(
     styles: LcdTextStyles,
     accent: Color? = null,
     longPressHint: String? = null,
+    /**
+     * Override Compose's default ~500ms long-press timeout. The EMER button passes a longer
+     * hold so a glancing thumb cannot accidentally fire emergency on a touchscreen.
+     */
+    longPressTimeoutMs: Long? = null,
 ) {
     val p = RadioLcdTheme.palette
     val fill = accent ?: p.softKeyInactiveFill
     val textColor = if (accent != null) p.textOnButton else p.textPrimary
     val gestureModifier = when {
+        onLongClick != null && longPressTimeoutMs != null ->
+            // Custom hold-detection because detectTapGestures only honours the platform
+            // long-press threshold (~500ms). withTimeoutOrNull returns null on timeout =>
+            // fire onLongClick, otherwise the user released early => fire onClick.
+            Modifier.pointerInput(onClick, onLongClick, longPressTimeoutMs) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false)
+                    val released = withTimeoutOrNull(longPressTimeoutMs) {
+                        waitForUpOrCancellation()
+                    }
+                    if (released != null) {
+                        onClick?.invoke()
+                    } else {
+                        onLongClick()
+                        // Drain the eventual release so we don't leave the gesture stream stuck.
+                        waitForUpOrCancellation()
+                    }
+                }
+            }
         onClick != null && onLongClick != null ->
             Modifier.pointerInput(onClick, onLongClick) {
                 detectTapGestures(
