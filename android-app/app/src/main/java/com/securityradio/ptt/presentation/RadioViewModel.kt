@@ -193,6 +193,9 @@ class RadioViewModel(
                 agencyRadioKey = radioPreferences.getAgencyRadioKey(),
                 deviceProfilePreference = radioPreferences.getDeviceProfilePreference(),
                 resolvedDeviceProfile = DeviceProfileResolver.resolve(radioPreferences.getDeviceProfilePreference()),
+                micNoiseSuppressionEnabled = radioPreferences.isNoiseSuppressionEnabled(),
+                micAutoGainEnabled = radioPreferences.isMicAutoGainEnabled(),
+                micGainMultiplier = radioPreferences.getMicGainMultiplier(),
             )
         }
         viewModelScope.launch {
@@ -609,6 +612,37 @@ class RadioViewModel(
                 soundPlayer.playChannelSwitch()
                 _uiState.update { it.copy(mappingSettingsVisible = false, currentlyMappingAction = null) }
                 mappingJob?.cancel()
+            }
+            is RadioUiEvent.SelectSettingsTab -> {
+                val targetIndex = event.index.coerceIn(0, 3)
+                // Leaving the BUTTONS tab while a mapping session is armed would otherwise
+                // capture the next physical keypress silently and write it to the previously
+                // selected action — cancel the listener so the user has to re-arm explicitly.
+                val leavingButtonsTab =
+                    targetIndex != 0 && _uiState.value.currentlyMappingAction != null
+                if (leavingButtonsTab) {
+                    mappingJob?.cancel()
+                }
+                _uiState.update {
+                    it.copy(
+                        settingsTabIndex = targetIndex,
+                        currentlyMappingAction = if (leavingButtonsTab) null else it.currentlyMappingAction,
+                    )
+                }
+            }
+            is RadioUiEvent.SetMicNoiseSuppression -> {
+                radioPreferences.setNoiseSuppressionEnabled(event.enabled)
+                _uiState.update { it.copy(micNoiseSuppressionEnabled = event.enabled) }
+            }
+            is RadioUiEvent.SetMicAutoGain -> {
+                radioPreferences.setMicAutoGainEnabled(event.enabled)
+                _uiState.update { it.copy(micAutoGainEnabled = event.enabled) }
+            }
+            is RadioUiEvent.SetMicGainMultiplier -> {
+                val clamped = event.multiplier
+                    .coerceIn(RadioPreferences.MIN_MIC_GAIN, RadioPreferences.MAX_MIC_GAIN)
+                radioPreferences.setMicGainMultiplier(clamped)
+                _uiState.update { it.copy(micGainMultiplier = clamped) }
             }
             is RadioUiEvent.StartListeningForMapping -> {
                 soundPlayer.playChannelSwitch()

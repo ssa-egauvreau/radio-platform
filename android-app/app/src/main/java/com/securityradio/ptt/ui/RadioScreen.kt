@@ -44,9 +44,14 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -74,6 +79,7 @@ import com.securityradio.ptt.device.DeviceProfileResolver
 import com.securityradio.ptt.device.HardwareAction
 import com.securityradio.ptt.device.P25ImbeNative
 import com.securityradio.ptt.device.RadioLayoutPolicy
+import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.ResolvedDeviceProfile
 import com.securityradio.ptt.presentation.RxMessageHistoryItem
 import com.securityradio.ptt.domain.ChannelPermission
@@ -3005,307 +3011,467 @@ fun HardwareMappingDialog(
 ) {
     if (!state.mappingSettingsVisible) return
     val p = RadioLcdTheme.palette
+    val tabs = listOf("BUTTONS", "DEVICE", "AUDIO", "ACCOUNT")
+    val selectedTab = state.settingsTabIndex.coerceIn(0, tabs.lastIndex)
 
-    AlertDialog(
+    Dialog(
         onDismissRequest = { onEvent(RadioUiEvent.CloseMappingSettings) },
-        title = {
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = p.lcdAlt,
+        ) {
+            Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "SETTINGS",
+                        style = styles.body.copy(fontWeight = FontWeight.Bold, fontSize = 20.sp),
+                        color = p.textPrimary,
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        state.lastDetectedKey?.let {
+                            Text(
+                                text = "LAST KEY: $it",
+                                style = styles.status,
+                                color = p.statusBlue,
+                                modifier = Modifier.padding(end = 12.dp),
+                            )
+                        }
+                        TextButton(onClick = { onEvent(RadioUiEvent.CloseMappingSettings) }) {
+                            Text("DONE", color = p.statusBlue)
+                        }
+                    }
+                }
+                HorizontalDivider(color = p.divider)
+                TabRow(selectedTabIndex = selectedTab) {
+                    tabs.forEachIndexed { idx, label ->
+                        Tab(
+                            selected = selectedTab == idx,
+                            onClick = { onEvent(RadioUiEvent.SelectSettingsTab(idx)) },
+                            text = {
+                                Text(
+                                    text = label,
+                                    style = styles.body.copy(fontWeight = FontWeight.Bold),
+                                )
+                            },
+                        )
+                    }
+                }
+                Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                    when (selectedTab) {
+                        0 -> ButtonMappingTab(state, onEvent, styles, p)
+                        1 -> DeviceSettingsTab(state, onEvent, styles, p)
+                        2 -> AudioSettingsTab(state, onEvent, styles, p)
+                        else -> AccountSettingsTab(onEvent, styles, p)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ButtonMappingTab(
+    state: RadioUiState,
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+    p: RadioLcdPalette,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        item {
+            Text(
+                text = "Map this handset's physical buttons to radio actions. Press ADD then the key.",
+                style = styles.status,
+                color = p.textMuted,
+            )
+        }
+        itemsIndexed(HardwareAction.entries) { _, action ->
+            val codes = state.hardwareMappings[action] ?: emptySet()
+            val isListening = state.currentlyMappingAction == action
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, p.divider, RoundedCornerShape(4.dp))
+                    .background(if (isListening) p.statusBlue.copy(alpha = 0.1f) else Color.Transparent)
+                    .padding(8.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = action.label.uppercase(Locale.US),
+                        style = styles.body.copy(fontWeight = FontWeight.Bold),
+                        color = p.textPrimary,
+                    )
+                    if (isListening) {
+                        Text(
+                            text = "PRESS BUTTON...",
+                            style = styles.status,
+                            color = p.statusAmber,
+                        )
+                    }
+                }
+                Text(
+                    text = if (codes.isEmpty()) "NO KEYS MAPPED" else "KEYS: ${codes.joinToString(", ")}",
+                    style = styles.status,
+                    color = p.textMuted,
+                    modifier = Modifier.padding(vertical = 4.dp),
+                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    TextButton(
+                        onClick = {
+                            if (isListening) onEvent(RadioUiEvent.StopListeningForMapping)
+                            else onEvent(RadioUiEvent.StartListeningForMapping(action))
+                        },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColors(
+                            containerColor = if (isListening) p.statusAmber else p.softKeyInactiveFill,
+                            contentColor = p.textOnButton,
+                        ),
+                    ) {
+                        Text(if (isListening) "STOP" else "ADD")
+                    }
+                    TextButton(
+                        onClick = { onEvent(RadioUiEvent.ResetMappingToDefault(action)) },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColors(
+                            containerColor = p.softKeyInactiveFill,
+                            contentColor = p.textOnButton,
+                        ),
+                    ) {
+                        Text("DEFAULT")
+                    }
+                    TextButton(
+                        onClick = { onEvent(RadioUiEvent.ClearMapping(action)) },
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.textButtonColors(
+                            containerColor = p.softKeyInactiveFill,
+                            contentColor = p.textOnButton,
+                        ),
+                    ) {
+                        Text("CLEAR")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeviceSettingsTab(
+    state: RadioUiState,
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+    p: RadioLcdPalette,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item {
+            SettingsSectionHeader("HANDSET LAYOUT", styles, p)
+            Text(
+                text = "ACTIVE: ${state.resolvedDeviceProfile.label.uppercase(Locale.US)} · " +
+                    "OVERRIDE: ${state.deviceProfilePreference.label.uppercase(Locale.US)}",
+                style = styles.status,
+                color = p.textMuted,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            DeviceProfilePreference.entries.forEach { preference ->
+                val selected = state.deviceProfilePreference == preference
+                TextButton(
+                    onClick = { onEvent(RadioUiEvent.SetDeviceProfilePreference(preference)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        containerColor = if (selected) {
+                            p.statusBlue.copy(alpha = 0.16f)
+                        } else {
+                            p.softKeyInactiveFill
+                        },
+                        contentColor = if (selected) p.statusGreen else p.textPrimary,
+                    ),
+                ) {
+                    Text(preference.label.uppercase(Locale.US))
+                }
+            }
+        }
+        item { HorizontalDivider(color = p.divider) }
+        item {
+            SettingsSectionHeader("DISPLAY — DAY / NIGHT", styles, p)
+            Text(
+                text = "CURRENT: ${state.themeMode.label.uppercase(Locale.US)} · " +
+                    "SUN ICON / KEY TOGGLES DAY OR NIGHT",
+                style = styles.status,
+                color = p.textMuted,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            ThemeMode.entries.forEach { mode ->
+                val selected = state.themeMode == mode
+                TextButton(
+                    onClick = { onEvent(RadioUiEvent.SetThemeMode(mode)) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        containerColor = if (selected) {
+                            p.statusBlue.copy(alpha = 0.16f)
+                        } else {
+                            p.softKeyInactiveFill
+                        },
+                        contentColor = if (selected) p.statusGreen else p.textPrimary,
+                    ),
+                ) {
+                    Text(mode.label.uppercase(Locale.US))
+                }
+            }
+        }
+        item { HorizontalDivider(color = p.divider) }
+        item {
+            SettingsSectionHeader("DISPLAY OVER OTHER APPS", styles, p)
+            Text(
+                text = if (state.needsOverlayPermission) {
+                    "Required on some rugged radios so the tactical screen can return on top after PTT."
+                } else {
+                    "Granted — the radio UI can draw over other apps when needed."
+                },
+                style = styles.status,
+                color = p.textMuted,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            if (state.needsOverlayPermission) {
+                TextButton(
+                    onClick = { onEvent(RadioUiEvent.RequestOverlayPermission) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        containerColor = p.softKeyInactiveFill,
+                        contentColor = p.textOnButton,
+                    ),
+                ) {
+                    Text("OPEN OVERLAY PERMISSION".uppercase(Locale.US))
+                }
+            }
+        }
+        item { HorizontalDivider(color = p.divider) }
+        item {
+            SettingsSectionHeader("BACKGROUND POWER", styles, p)
+            Text(
+                text = "Open the battery screen and exempt this app if the manufacturer lets you. " +
+                    "OEMs still may stop background work.",
+                style = styles.status,
+                color = p.textMuted,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            TextButton(
+                onClick = { onEvent(RadioUiEvent.RequestIgnoreBatteryOptimizations) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.textButtonColors(
+                    containerColor = p.softKeyInactiveFill,
+                    contentColor = p.textOnButton,
+                ),
+            ) {
+                Text("IGNORE BATTERY SAVER PROMPT FOR THIS APP".uppercase(Locale.US))
+            }
+        }
+    }
+}
+
+@Composable
+private fun AudioSettingsTab(
+    state: RadioUiState,
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+    p: RadioLcdPalette,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp),
+    ) {
+        item {
+            SettingsSectionHeader("MICROPHONE", styles, p)
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Text(
-                    text = "BUTTON MAPPING",
-                    color = p.textPrimary,
+                Checkbox(
+                    checked = state.micNoiseSuppressionEnabled,
+                    onCheckedChange = { onEvent(RadioUiEvent.SetMicNoiseSuppression(it)) },
                 )
-                state.lastDetectedKey?.let {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "LAST KEY: $it",
+                        text = "NOISE SUPPRESSION",
+                        style = styles.body.copy(fontWeight = FontWeight.Bold),
+                        color = p.textPrimary,
+                    )
+                    Text(
+                        text = "Reduce background noise on outgoing voice using the Android NoiseSuppressor effect.",
                         style = styles.status,
-                        color = p.statusBlue
+                        color = p.textMuted,
                     )
                 }
             }
-        },
-        text = {
-            LazyColumn(
-                modifier = Modifier.heightIn(max = 560.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                item {
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                    ) {
-                        Text(
-                            text = "ACCOUNT",
-                            style = styles.body.copy(fontWeight = FontWeight.Bold),
-                            color = p.textPrimary,
-                        )
-                        TextButton(
-                            onClick = { onEvent(RadioUiEvent.SignOut) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.textButtonColors(
-                                containerColor = p.softKeyInactiveFill,
-                                contentColor = p.statusAmber,
-                            ),
-                        ) {
-                            Text("SIGN OUT".uppercase(Locale.US))
-                        }
-                        HorizontalDivider(color = p.divider)
-                        Text(
-                            text = "HANDSET LAYOUT",
-                            style = styles.body.copy(fontWeight = FontWeight.Bold),
-                            color = p.textPrimary,
-                        )
-                        Text(
-                            text = "ACTIVE: ${state.resolvedDeviceProfile.label.uppercase(Locale.US)} · " +
-                                "OVERRIDE: ${state.deviceProfilePreference.label.uppercase(Locale.US)}",
-                            style = styles.status,
-                            color = p.textMuted,
-                        )
-                        DeviceProfilePreference.entries.forEach { preference ->
-                            val selected = state.deviceProfilePreference == preference
-                            TextButton(
-                                onClick = { onEvent(RadioUiEvent.SetDeviceProfilePreference(preference)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.textButtonColors(
-                                    containerColor = if (selected) {
-                                        p.statusBlue.copy(alpha = 0.16f)
-                                    } else {
-                                        p.softKeyInactiveFill
-                                    },
-                                    contentColor = if (selected) p.statusGreen else p.textPrimary,
-                                ),
-                            ) {
-                                Text(preference.label.uppercase(Locale.US))
-                            }
-                        }
-                        HorizontalDivider(color = p.divider)
-                        Text(
-                            text = "DISPLAY OVER OTHER APPS",
-                            style = styles.body.copy(fontWeight = FontWeight.Bold),
-                            color = p.textPrimary,
-                        )
-                        Text(
-                            text = if (state.needsOverlayPermission) {
-                                "Required on some rugged radios so the tactical screen can return on top after PTT."
-                            } else {
-                                "Granted — the radio UI can draw over other apps when needed."
-                            },
-                            style = styles.status,
-                            color = p.textMuted,
-                        )
-                        if (state.needsOverlayPermission) {
-                            TextButton(
-                                onClick = { onEvent(RadioUiEvent.RequestOverlayPermission) },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.textButtonColors(
-                                    containerColor = p.softKeyInactiveFill,
-                                    contentColor = p.textOnButton,
-                                ),
-                            ) {
-                                Text("OPEN OVERLAY PERMISSION".uppercase(Locale.US))
-                            }
-                        }
-                        HorizontalDivider(color = p.divider)
-                        Text(
-                            text = "DISPLAY — DAY / NIGHT",
-                            style = styles.body.copy(fontWeight = FontWeight.Bold),
-                            color = p.textPrimary,
-                        )
-                        Text(
-                            text = "CURRENT: ${state.themeMode.label.uppercase(Locale.US)} · SUN ICON / KEY TOGGLES DAY OR NIGHT",
-                            style = styles.status,
-                            color = p.textMuted,
-                        )
-                        HorizontalDivider(color = p.divider)
-                        ThemeMode.entries.forEach { mode ->
-                            val selected = state.themeMode == mode
-                            TextButton(
-                                onClick = { onEvent(RadioUiEvent.SetThemeMode(mode)) },
-                                modifier = Modifier.fillMaxWidth(),
-                                colors = ButtonDefaults.textButtonColors(
-                                    containerColor = if (selected) {
-                                        p.statusBlue.copy(alpha = 0.16f)
-                                    } else {
-                                        p.softKeyInactiveFill
-                                    },
-                                    contentColor = if (selected) p.statusGreen else p.textPrimary,
-                                ),
-                            ) {
-                                Text(mode.label.uppercase(Locale.US))
-                            }
-                        }
-                        HorizontalDivider(color = p.divider)
-                        Text(
-                            text = "BACKGROUND POWER",
-                            style = styles.body.copy(fontWeight = FontWeight.Bold),
-                            color = p.textPrimary,
-                        )
-                        Text(
-                            text = "Open the battery screen and exempt this app if the manufacturer lets you. OEMs still may stop background work.",
-                            style = styles.status,
-                            color = p.textMuted,
-                        )
-                        TextButton(
-                            onClick = { onEvent(RadioUiEvent.RequestIgnoreBatteryOptimizations) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.textButtonColors(
-                                containerColor = p.softKeyInactiveFill,
-                                contentColor = p.textOnButton,
-                            ),
-                        ) {
-                            Text("IGNORE BATTERY SAVER PROMPT FOR THIS APP".uppercase(Locale.US))
-                        }
-                        HorizontalDivider(color = p.divider)
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            Checkbox(
-                                checked = state.announceChannelNameOnTune,
-                                onCheckedChange = { onEvent(RadioUiEvent.ToggleVoiceAnnounceChannelTune) },
-                            )
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = "SPOKEN CHANNEL ON TUNE",
-                                    style = styles.body.copy(fontWeight = FontWeight.Bold),
-                                    color = p.textPrimary,
-                                )
-                                Text(
-                                    text = "Speak channel name aloud when switching (e.g. Green 2).",
-                                    style = styles.status,
-                                    color = p.textMuted,
-                                )
-                            }
-                        }
-                        HorizontalDivider(color = p.divider)
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 4.dp),
-                        ) {
-                            Text(
-                                text = "P25-STYLE DIGITAL VOICE (IMBE)",
-                                style = styles.body.copy(fontWeight = FontWeight.Bold),
-                                color = p.textPrimary,
-                            )
-                            Text(
-                                text = if (P25ImbeNative.isAvailable) {
-                                    "Always on when the native vocoder is loaded: transmit uses 88-bit IMBE codewords. " +
-                                        "GPL-2.0 codec (dvmvocoder) is bundled in the app binary."
-                                } else {
-                                    "Native codec did not load (check build ABI or reinstall); voice stays clear PCM until it loads."
-                                },
-                                style = styles.status,
-                                color = p.textMuted,
-                            )
-                        }
-                        HorizontalDivider(color = p.divider)
-                        TextButton(
-                            onClick = { onEvent(RadioUiEvent.PlayLastTransmission) },
-                            modifier = Modifier.fillMaxWidth(),
-                            colors = ButtonDefaults.textButtonColors(
-                                containerColor = p.softKeyInactiveFill,
-                                contentColor = p.textPrimary,
-                            ),
-                        ) {
-                            Text("PLAY LAST MESSAGE (SCREEN)".uppercase(Locale.US))
-                        }
-                        HorizontalDivider(color = p.divider)
-                        Text(
-                            text = "HARDWARE KEYS",
-                            style = styles.body.copy(fontWeight = FontWeight.Bold),
-                            color = p.textPrimary,
-                        )
-                    }
-                }
-                itemsIndexed(HardwareAction.entries) { _, action ->
-                    val codes = state.hardwareMappings[action] ?: emptySet()
-                    val isListening = state.currentlyMappingAction == action
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .border(1.dp, p.divider, RoundedCornerShape(4.dp))
-                            .background(if (isListening) p.statusBlue.copy(alpha = 0.1f) else Color.Transparent)
-                            .padding(8.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(
-                                text = action.label.uppercase(Locale.US),
-                                style = styles.body.copy(fontWeight = FontWeight.Bold),
-                                color = p.textPrimary
-                            )
-                            if (isListening) {
-                                Text(
-                                    text = "PRESS BUTTON...",
-                                    style = styles.status,
-                                    color = p.statusAmber
-                                )
-                            }
-                        }
-                        
-                        Text(
-                            text = if (codes.isEmpty()) "NO KEYS MAPPED" else "KEYS: ${codes.joinToString(", ")}",
-                            style = styles.status,
-                            color = p.textMuted,
-                            modifier = Modifier.padding(vertical = 4.dp)
-                        )
-
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            TextButton(
-                                onClick = {
-                                    if (isListening) onEvent(RadioUiEvent.StopListeningForMapping)
-                                    else onEvent(RadioUiEvent.StartListeningForMapping(action))
-                                },
-                                modifier = Modifier.weight(1f),
-                                colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                                    containerColor = if (isListening) p.statusAmber else p.softKeyInactiveFill,
-                                    contentColor = p.textOnButton
-                                )
-                            ) {
-                                Text(if (isListening) "STOP" else "ADD")
-                            }
-                            TextButton(
-                                onClick = { onEvent(RadioUiEvent.ResetMappingToDefault(action)) },
-                                modifier = Modifier.weight(1f),
-                                colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                                    containerColor = p.softKeyInactiveFill,
-                                    contentColor = p.textOnButton
-                                )
-                            ) {
-                                Text("DEFAULT")
-                            }
-                            TextButton(
-                                onClick = { onEvent(RadioUiEvent.ClearMapping(action)) },
-                                modifier = Modifier.weight(1f),
-                                colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
-                                    containerColor = p.softKeyInactiveFill,
-                                    contentColor = p.textOnButton
-                                )
-                            ) {
-                                Text("CLEAR")
-                            }
-                        }
-                    }
+                Checkbox(
+                    checked = state.micAutoGainEnabled,
+                    onCheckedChange = { onEvent(RadioUiEvent.SetMicAutoGain(it)) },
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "AUTO-SET RECORDING LEVEL",
+                        style = styles.body.copy(fontWeight = FontWeight.Bold),
+                        color = p.textPrimary,
+                    )
+                    Text(
+                        text = "Let Android pick the best mic level automatically (overrides the slider).",
+                        style = styles.status,
+                        color = p.textMuted,
+                    )
                 }
             }
-        },
-        confirmButton = {
-            TextButton(onClick = { onEvent(RadioUiEvent.CloseMappingSettings) }) {
-                Text("DONE", color = p.statusBlue)
+            Column(modifier = Modifier.padding(top = 12.dp)) {
+                val sliderEnabled = !state.micAutoGainEnabled
+                val sliderColor = if (sliderEnabled) p.textPrimary else p.textMuted
+                Text(
+                    text = "RECORDING VOLUME",
+                    style = styles.body.copy(fontWeight = FontWeight.Bold),
+                    color = sliderColor,
+                )
+                Text(
+                    text = if (sliderEnabled) {
+                        "Boost or reduce mic level (${"%.1f".format(state.micGainMultiplier)}×). " +
+                            "1.0× is unchanged; 3.0× is hot."
+                    } else {
+                        "Disabled while AUTO-SET is on."
+                    },
+                    style = styles.status,
+                    color = p.textMuted,
+                )
+                Slider(
+                    value = state.micGainMultiplier,
+                    onValueChange = { onEvent(RadioUiEvent.SetMicGainMultiplier(it)) },
+                    valueRange = RadioPreferences.MIN_MIC_GAIN..RadioPreferences.MAX_MIC_GAIN,
+                    steps = 24,
+                    enabled = sliderEnabled,
+                    modifier = Modifier.fillMaxWidth(),
+                )
             }
-        },
+        }
+        item { HorizontalDivider(color = p.divider) }
+        item {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Checkbox(
+                    checked = state.announceChannelNameOnTune,
+                    onCheckedChange = { onEvent(RadioUiEvent.ToggleVoiceAnnounceChannelTune) },
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "SPOKEN CHANNEL ON TUNE",
+                        style = styles.body.copy(fontWeight = FontWeight.Bold),
+                        color = p.textPrimary,
+                    )
+                    Text(
+                        text = "Speak channel name aloud when switching (e.g. Green 2).",
+                        style = styles.status,
+                        color = p.textMuted,
+                    )
+                }
+            }
+        }
+        item { HorizontalDivider(color = p.divider) }
+        item {
+            SettingsSectionHeader("P25-STYLE DIGITAL VOICE (IMBE)", styles, p)
+            Text(
+                text = if (P25ImbeNative.isAvailable) {
+                    "Always on when the native vocoder is loaded: transmit uses 88-bit IMBE codewords. " +
+                        "GPL-2.0 codec (dvmvocoder) is bundled in the app binary."
+                } else {
+                    "Native codec did not load (check build ABI or reinstall); voice stays clear PCM until it loads."
+                },
+                style = styles.status,
+                color = p.textMuted,
+            )
+        }
+        item { HorizontalDivider(color = p.divider) }
+        item {
+            TextButton(
+                onClick = { onEvent(RadioUiEvent.PlayLastTransmission) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.textButtonColors(
+                    containerColor = p.softKeyInactiveFill,
+                    contentColor = p.textPrimary,
+                ),
+            ) {
+                Text("PLAY LAST MESSAGE (SCREEN)".uppercase(Locale.US))
+            }
+        }
+    }
+}
+
+@Composable
+private fun AccountSettingsTab(
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+    p: RadioLcdPalette,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SettingsSectionHeader("ACCOUNT", styles, p)
+        Text(
+            text = "Sign out clears the saved token on this device and returns to the login screen.",
+            style = styles.status,
+            color = p.textMuted,
+        )
+        TextButton(
+            onClick = { onEvent(RadioUiEvent.SignOut) },
+            modifier = Modifier.fillMaxWidth(),
+            colors = ButtonDefaults.textButtonColors(
+                containerColor = p.softKeyInactiveFill,
+                contentColor = p.statusAmber,
+            ),
+        ) {
+            Text("SIGN OUT".uppercase(Locale.US))
+        }
+    }
+}
+
+@Composable
+private fun SettingsSectionHeader(label: String, styles: LcdTextStyles, p: RadioLcdPalette) {
+    Text(
+        text = label,
+        style = styles.body.copy(fontWeight = FontWeight.Bold),
+        color = p.textPrimary,
+        modifier = Modifier.padding(bottom = 4.dp),
     )
 }
 
