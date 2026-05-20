@@ -29,6 +29,7 @@ import android.app.Application
 import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.device.LocationReporter
 
+import com.securityradio.ptt.device.PttHapticFeedback
 import com.securityradio.ptt.device.PttMicCapture
 import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.RadioUiSoundPlayer
@@ -61,6 +62,7 @@ class RadioViewModel(
     private val channelRepository: ChannelRepository,
     private val soundPlayer: RadioUiSoundPlayer,
     private val pttMicCapture: PttMicCapture,
+    private val pttHapticFeedback: PttHapticFeedback,
     private val channelsApi: ChannelsApi,
     private val radioApi: RadioApi,
     private val localUnitIdentifier: LocalUnitIdentifier,

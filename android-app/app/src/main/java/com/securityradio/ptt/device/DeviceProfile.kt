@@ -44,6 +44,8 @@ data class RadioLayoutPolicy(
     val handsetStatusDisplay: Boolean = false,
     /** Bottom strip of labels above the four physical hardware keys (TM-7 Plus). */
     val showHardwareKeyLegend: Boolean = false,
+    /** TM-7 Plus is mains-powered — hide battery icon and percentage in the status row. */
+    val showBatteryStatus: Boolean = true,
 )
 
 object DeviceProfileResolver {

@@ -1011,10 +1011,11 @@ private fun LcdHandsetStat(
     }
 }
 
-/** Status row: signal → BT → GPS → scan → replay → volume | time → battery → settings. */
+/** Status row: signal → BT → GPS → scan → replay → volume | time → (battery) → settings. */
 @Composable
 private fun LcdHandsetToolbar(
     state: RadioUiState,
+    showBatteryStatus: Boolean,
     onEvent: (RadioUiEvent) -> Unit,
     styles: LcdTextStyles,
     modifier: Modifier = Modifier,
@@ -1023,24 +1024,33 @@ private fun LcdHandsetToolbar(
     val online = state.networkLabel == "ONLINE"
     val scanPulse = state.scanBackgroundActive
     val accentOnEmergency = if (state.isEmergencyActive) Color.White else p.textPrimary
-    val iconSize = 28.dp
+    val iconSize = if (showBatteryStatus) 28.dp else 32.dp
+    val iconGap = if (showBatteryStatus) 6.dp else 8.dp
+    val timeFontSize = if (showBatteryStatus) 17.sp else 22.sp
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 38.dp),
+            .heightIn(min = if (showBatteryStatus) 38.dp else 42.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Row(
             modifier = Modifier.weight(1f),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            horizontalArrangement = if (showBatteryStatus) {
+                Arrangement.spacedBy(iconGap)
+            } else {
+                Arrangement.SpaceEvenly
+            },
         ) {
             LcdSignalBarsIcon(
                 bars = if (online) 4 else 1,
                 maxBars = 4,
                 colorActive = if (online) p.statusGreen else p.statusAmber,
                 colorInactive = p.textMuted,
-                modifier = Modifier.size(36.dp, 24.dp),
+                modifier = Modifier.size(
+                    if (showBatteryStatus) 36.dp else 42.dp,
+                    if (showBatteryStatus) 24.dp else 28.dp,
+                ),
             )
             LcdBluetoothIcon(
                 on = state.bluetoothOn,
