@@ -64,6 +64,9 @@ export function RadioPortal() {
   const scanRef = useRef<ScanListenClient | null>(null);
   const emergencyTimerRef = useRef<number | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
+  // Track the current blob URL so we can revoke it on every transition (next playback, error,
+  // unmount) — relying on the onended listener leaks the URL whenever playback is interrupted.
+  const audioBlobUrlRef = useRef<string | null>(null);
   /*
    * Want-to-stay-connected flag: separates "user picked a new channel" / "user signed out" (no
    * reconnect) from "the WS dropped out from under us" (try to reconnect). Held in a ref so the
@@ -204,6 +207,30 @@ export function RadioPortal() {
       scanRef.current = null;
       if (emergencyTimerRef.current !== null) {
         window.clearTimeout(emergencyTimerRef.current);
+      }
+      // Stop any in-flight transmission playback so audio doesn't bleed into another page
+      // (e.g. after sign-out / navigating away from /radio). Revoke the blob too — onended
+      // would otherwise be the only path that releases the URL, and unmount cancels it.
+      const audio = audioElRef.current;
+      if (audio) {
+        try {
+          audio.pause();
+        } catch {
+          /* already paused or never started */
+        }
+        audio.removeAttribute("src");
+        try {
+          audio.load();
+        } catch {
+          /* defensive */
+        }
+        audio.onended = null;
+        audio.onerror = null;
+        audioElRef.current = null;
+      }
+      if (audioBlobUrlRef.current) {
+        URL.revokeObjectURL(audioBlobUrlRef.current);
+        audioBlobUrlRef.current = null;
       }
     };
   }, []);
@@ -389,19 +416,42 @@ export function RadioPortal() {
 
   // --- transmission playback ---
   async function playTransmission(id: number) {
+    let url: string | null = null;
     try {
       const blob = await fetchTransmissionAudio(id);
-      const url = URL.createObjectURL(blob);
+      url = URL.createObjectURL(blob);
+      // Revoke the prior blob (from an interrupted clip) before re-pointing the element. Without
+      // this, blob URLs accumulate in memory across repeated playback / quickly-skipped clips.
+      if (audioBlobUrlRef.current) {
+        URL.revokeObjectURL(audioBlobUrlRef.current);
+      }
+      audioBlobUrlRef.current = url;
       const audio = audioElRef.current ?? new Audio();
       audioElRef.current = audio;
       audio.onended = () => {
         setPlayingTxId(null);
-        URL.revokeObjectURL(url);
+        if (audioBlobUrlRef.current === url && url) {
+          URL.revokeObjectURL(url);
+          audioBlobUrlRef.current = null;
+        }
+      };
+      audio.onerror = () => {
+        setPlayingTxId(null);
+        if (audioBlobUrlRef.current === url && url) {
+          URL.revokeObjectURL(url);
+          audioBlobUrlRef.current = null;
+        }
       };
       audio.src = url;
       setPlayingTxId(id);
       await audio.play();
     } catch (err) {
+      // play() can reject after audio.src is set (autoplay policy, format error). Revoke the
+      // URL we created so it doesn't leak even when the catch path runs.
+      if (url && audioBlobUrlRef.current === url) {
+        URL.revokeObjectURL(url);
+        audioBlobUrlRef.current = null;
+      }
       setError(describeError(err));
       setPlayingTxId(null);
     }
