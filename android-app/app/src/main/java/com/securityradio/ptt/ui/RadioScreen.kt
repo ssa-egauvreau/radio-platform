@@ -85,7 +85,9 @@ import com.securityradio.ptt.ui.lcd.LcdEmergencyGlyphIcon
 import com.securityradio.ptt.ui.lcd.LcdGlobeIcon
 import com.securityradio.ptt.ui.lcd.LcdGpsIcon
 import com.securityradio.ptt.ui.lcd.LcdRadioIcon
+import com.securityradio.ptt.ui.lcd.LcdPlayIcon
 import com.securityradio.ptt.ui.lcd.LcdReplayIcon
+import com.securityradio.ptt.ui.lcd.LcdSettingsIcon
 import com.securityradio.ptt.ui.lcd.LcdZoneIcon
 import com.securityradio.ptt.ui.lcd.LcdSignalBarsIcon
 import com.securityradio.ptt.ui.lcd.LcdVolumeIcon
@@ -840,7 +842,7 @@ private fun LcdHandsetFillChannelBlock(
             LcdPermissionBadge(permission = state.currentChannelPermission, styles = styles)
             BoxWithConstraints(
                 modifier = Modifier
-                    .weight(if (hasTalk) 2.6f else 3.6f)
+                    .weight(if (hasTalk) 2.15f else 3.35f)
                     .fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
@@ -849,11 +851,11 @@ private fun LcdHandsetFillChannelBlock(
                 // Scale the channel name to fill the block — height-capped, then
                 // narrowed if the label is long so a wide name still fits.
                 val channelFont = with(density) {
-                    val byHeight = constraints.maxHeight * 0.82f
+                    val byHeight = constraints.maxHeight * 0.68f
                     val byWidth = constraints.maxWidth /
                         (channelText.length.coerceAtLeast(3) * 0.66f)
                     minOf(byHeight, byWidth).toSp()
-                }.value.coerceIn(40f, 190f).sp
+                }.value.coerceIn(32f, 132f).sp
                 Text(
                     text = channelText,
                     style = styles.channel.copy(
@@ -880,8 +882,6 @@ private fun LcdHandsetFillChannelBlock(
                 channelValue = channelValue,
                 radiosValue = radiosValue,
                 radiosKnown = state.radiosOnlineOnChannel != null,
-                timeLabel = state.systemTime.uppercase(Locale.US),
-                timeColor = if (state.isEmergencyActive) Color.White else p.textPrimary,
                 onEvent = onEvent,
                 styles = styles,
             )
@@ -904,7 +904,7 @@ private fun LcdHandsetFillChannelBlock(
                     nameColor = talkColor.copy(alpha = 0.9f),
                     styles = styles,
                     modifier = Modifier
-                        .weight(1.45f)
+                        .weight(1.75f)
                         .fillMaxWidth(),
                 )
             }
@@ -944,8 +944,6 @@ private fun LcdHandsetStatsRow(
     channelValue: String,
     radiosValue: String,
     radiosKnown: Boolean,
-    timeLabel: String,
-    timeColor: Color,
     onEvent: (RadioUiEvent) -> Unit,
     styles: LcdTextStyles,
 ) {
@@ -979,23 +977,12 @@ private fun LcdHandsetStatsRow(
                 )
             }
         }
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                text = timeLabel,
-                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
-                color = timeColor,
-                maxLines = 1,
-            )
-            Text(
-                text = "SET",
-                style = styles.softKey.copy(fontWeight = FontWeight.Bold, fontSize = 13.sp),
-                color = p.statusBlue,
-                modifier = Modifier.clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
-            )
-        }
+        LcdSettingsIcon(
+            color = p.statusBlue,
+            modifier = Modifier
+                .size(28.dp)
+                .clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
+        )
     }
 }
 
@@ -1024,7 +1011,7 @@ private fun LcdHandsetStat(
     }
 }
 
-/** Single status row: signal → bluetooth → GPS → replay → volume → battery → %. */
+/** Status row: signal → BT → GPS → scan → replay → volume | time → battery → settings. */
 @Composable
 private fun LcdHandsetToolbar(
     state: RadioUiState,
@@ -1035,70 +1022,103 @@ private fun LcdHandsetToolbar(
     val p = RadioLcdTheme.palette
     val online = state.networkLabel == "ONLINE"
     val scanPulse = state.scanBackgroundActive
+    val accentOnEmergency = if (state.isEmergencyActive) Color.White else p.textPrimary
+    val iconSize = 28.dp
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = 36.dp),
+            .heightIn(min = 38.dp),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        LcdSignalBarsIcon(
-            bars = if (online) 4 else 1,
-            maxBars = 4,
-            colorActive = if (online) p.statusGreen else p.statusAmber,
-            colorInactive = p.textMuted,
-            modifier = Modifier.size(40.dp, 28.dp),
-        )
-        LcdBluetoothIcon(
-            on = state.bluetoothOn,
-            active = p.statusBlue,
-            muted = p.textMuted,
-            modifier = Modifier.size(30.dp),
-        )
-        LcdGpsIcon(
-            active = p.statusGreen,
-            muted = p.textMuted,
-            locked = true,
-            modifier = Modifier.size(30.dp),
-        )
-        LcdReplayIcon(
-            ready = p.statusAmber,
-            muted = p.textMuted,
-            playing = state.replayBanner.isNotEmpty(),
-            modifier = Modifier
-                .size(32.dp)
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = { onEvent(RadioUiEvent.PlayLastTransmission) },
-                        onLongPress = { onEvent(RadioUiEvent.ToggleMessageHistory) },
-                    )
-                },
-        )
-        LcdVolumeIcon(
-            muted = p.textMuted,
-            active = p.statusGreen,
-            isMuted = state.listenVolumeMuted,
-            modifier = Modifier
-                .size(34.dp)
-                .clickable { onEvent(RadioUiEvent.ToggleListenVolume) },
-        )
+        Row(
+            modifier = Modifier.weight(1f),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            LcdSignalBarsIcon(
+                bars = if (online) 4 else 1,
+                maxBars = 4,
+                colorActive = if (online) p.statusGreen else p.statusAmber,
+                colorInactive = p.textMuted,
+                modifier = Modifier.size(36.dp, 24.dp),
+            )
+            LcdBluetoothIcon(
+                on = state.bluetoothOn,
+                active = p.statusBlue,
+                muted = p.textMuted,
+                modifier = Modifier.size(iconSize),
+            )
+            LcdGpsIcon(
+                active = p.statusGreen,
+                muted = p.textMuted,
+                locked = true,
+                modifier = Modifier.size(iconSize),
+            )
+            LcdScanIcon(
+                on = state.scanActive,
+                active = if (scanPulse) p.statusAmber else p.statusGreen,
+                muted = p.textMuted,
+                modifier = Modifier
+                    .size(iconSize)
+                    .clickable {
+                        if (state.scanActive) {
+                            onEvent(RadioUiEvent.OpenScanPicker)
+                        } else {
+                            onEvent(RadioUiEvent.ToggleScanLongPress)
+                        }
+                    },
+            )
+            LcdReplayIcon(
+                ready = p.statusAmber,
+                muted = p.textMuted,
+                playing = state.replayBanner.isNotEmpty(),
+                modifier = Modifier
+                    .size(iconSize)
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onTap = { onEvent(RadioUiEvent.PlayLastTransmission) },
+                            onLongPress = { onEvent(RadioUiEvent.ToggleMessageHistory) },
+                        )
+                    },
+            )
+            LcdVolumeIcon(
+                muted = p.textMuted,
+                active = p.statusGreen,
+                isMuted = state.listenVolumeMuted,
+                modifier = Modifier
+                    .size(iconSize)
+                    .clickable { onEvent(RadioUiEvent.ToggleListenVolume) },
+            )
+        }
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
         ) {
+            Text(
+                text = state.systemTime.uppercase(Locale.US),
+                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 17.sp),
+                color = accentOnEmergency,
+                maxLines = 1,
+            )
             LcdBatteryIcon(
                 percent = state.batteryPercent,
-                outline = p.textSecondary,
+                outline = if (state.isEmergencyActive) Color.White else p.textSecondary,
                 fillHigh = p.statusGreen,
                 fillLow = p.statusAmber,
                 fillCritical = p.statusRed,
-                modifier = Modifier.size(width = 36.dp, height = 18.dp),
+                modifier = Modifier.size(width = 32.dp, height = 16.dp),
             )
             Text(
                 text = "${state.batteryPercent}%",
-                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
-                color = p.textSecondary,
+                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
+                color = if (state.isEmergencyActive) Color.White else p.textSecondary,
                 maxLines = 1,
+            )
+            LcdSettingsIcon(
+                color = if (state.isEmergencyActive) Color.White else p.statusBlue,
+                modifier = Modifier
+                    .size(iconSize)
+                    .clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
             )
         }
     }
@@ -2021,54 +2041,56 @@ private fun MessageHistoryRow(
         shape = RoundedCornerShape(4.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Text(
-                    text = item.timeLabel,
-                    style = styles.status.copy(fontWeight = FontWeight.Bold),
-                    color = p.textSecondary,
-                )
-                Text(
-                    text = item.channelName.uppercase(Locale.US),
-                    style = styles.status,
-                    color = p.statusBlue,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            if (item.caption.isNotBlank()) {
-                Text(
-                    text = item.caption,
-                    style = styles.body.copy(fontWeight = FontWeight.Bold),
-                    color = p.textPrimary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            val transcript = item.transcript.ifBlank { "No transcription." }
-            Text(
-                text = transcript,
-                style = styles.body,
-                color = p.textSecondary,
-                maxLines = 4,
-                overflow = TextOverflow.Ellipsis,
-            )
-            TextButton(
+            Surface(
                 onClick = onPlay,
-                colors = ButtonDefaults.textButtonColors(contentColor = p.statusAmber),
+                shape = RoundedCornerShape(4.dp),
+                color = if (playing) p.statusAmber else p.softKeyInactiveFill,
+                modifier = Modifier.size(52.dp),
             ) {
+                Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                    LcdPlayIcon(
+                        color = if (playing) Color.White else p.textOnButton,
+                        modifier = Modifier.size(30.dp),
+                    )
+                }
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = item.timeLabel,
+                        style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
+                        color = p.textSecondary,
+                    )
+                    Text(
+                        text = item.channelName.uppercase(Locale.US),
+                        style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
+                        color = p.statusBlue,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
                 Text(
-                    text = if (playing) "PLAYING…" else "PLAY",
-                    style = styles.softKey.copy(fontWeight = FontWeight.Bold),
+                    text = item.transcript,
+                    style = styles.body.copy(
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 22.sp,
+                        lineHeight = 28.sp,
+                    ),
+                    color = p.textPrimary,
                 )
             }
         }

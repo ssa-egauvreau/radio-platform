@@ -643,12 +643,16 @@ class RadioViewModel(
     private fun buildHistoryItems(): List<RxMessageHistoryItem> {
         val fmt = SimpleDateFormat("HH:mm", Locale.US)
         return rxMessageHistory.snapshot().map { entry ->
+            val who = entry.caption.trim()
+            val transcript = who.ifBlank {
+                "Voice message on ${entry.channelName.ifBlank { "channel" }} — no text caption."
+            }
             RxMessageHistoryItem(
                 id = entry.id,
                 timeLabel = fmt.format(Date(entry.capturedAtMs)),
                 channelName = entry.channelName.ifBlank { "—" },
-                caption = entry.caption,
-                transcript = entry.transcript.ifBlank { entry.caption },
+                caption = who,
+                transcript = transcript,
                 durationMs = entry.durationMs,
             )
         }
@@ -697,7 +701,10 @@ class RadioViewModel(
         _uiState.update {
             it.copy(statusMessage = "REPLAY AUDIO", replayBanner = text)
         }
-        val dismissAfterMs = durationMs.coerceAtLeast(250L) + REPLAY_BANNER_PAD_MS
+        val dismissAfterMs = maxOf(
+            durationMs.coerceAtLeast(250L) + REPLAY_BANNER_PAD_MS,
+            REPLAY_BANNER_MIN_MS,
+        )
         replayJob = viewModelScope.launch {
             delay(dismissAfterMs)
             dismissReplayBanner(clearHistoryPlayingId = true, expectedGeneration = generation)
@@ -764,24 +771,22 @@ class RadioViewModel(
         }
     }
 
-    /** SCAN soft key toggles scan; first enable seeds selection to every channel except tuned home. */
+    /** SCAN soft key toggles scan; enabling starts with no side channels until the user picks them. */
     private fun onScanSoftKeyToggle(state: RadioUiState): RadioUiState {
         val turningOn = !state.scanActive
         val nextScanOn = turningOn
-        val newIncludes = when {
-            !nextScanOn -> state.scanIncludedChannelIndices
-            channelNames.size <= 1 -> emptySet()
-            else -> {
-                val homeExcluded = channelIndex.coerceIn(0, channelNames.lastIndex)
-                channelNames.indices.filter { it != homeExcluded }.toSet()
-            }
+        val newIncludes = if (nextScanOn) emptySet() else state.scanIncludedChannelIndices
+        val status = when {
+            !nextScanOn -> "SCAN OFF"
+            newIncludes.isEmpty() -> "SCAN ON — PICK CHANNELS"
+            else -> "SCAN ON"
         }
         return state.copy(
             scanActive = nextScanOn,
             scanIncludedChannelIndices = newIncludes,
             scanBackgroundActive = if (nextScanOn) state.scanBackgroundActive else false,
             scanBackgroundChannel = if (nextScanOn) state.scanBackgroundChannel else "",
-            statusMessage = if (nextScanOn) "SCAN ON" else "SCAN OFF",
+            statusMessage = status,
         )
     }
 
@@ -1459,6 +1464,8 @@ class RadioViewModel(
                 lastRxAudioRecorder.noteRxContext(
                     channelName = snap.channelLabel,
                     caption = replayCaption.ifBlank { merged },
+                    unitId = talkUnit,
+                    displayName = talkName,
                 )
                 val scanBg = scanBackgroundFromActivity(dto, snap)
                 _uiState.update {
@@ -1647,5 +1654,6 @@ class RadioViewModel(
         const val TM7_HOLD_ACTION_MS = 800L
         /** Extra time so the banner stays up until async AudioTrack playback actually ends. */
         const val REPLAY_BANNER_PAD_MS = 200L
+        const val REPLAY_BANNER_MIN_MS = 2_000L
     }
 }

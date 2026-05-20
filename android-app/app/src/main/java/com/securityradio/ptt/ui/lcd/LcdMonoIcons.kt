@@ -513,3 +513,51 @@ fun LcdBatteryIcon(
         }
     }
 }
+
+/** Gear — opens handset settings / button mapping. */
+@Composable
+fun LcdSettingsIcon(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier) {
+        val stroke = lcdStroke(STATUS_STROKE)
+        val cx = size.width * 0.5f
+        val cy = size.height * 0.5f
+        val rOuter = size.minDimension * 0.34f
+        val rInner = size.minDimension * 0.17f
+        val teeth = 8
+        val toothDepth = size.minDimension * 0.1f
+        val path = Path()
+        for (i in 0 until teeth * 2) {
+            val angle = (i * PI.toFloat() / teeth) - PI.toFloat() / 2f
+            val r = if (i % 2 == 0) rOuter + toothDepth else rOuter
+            val x = cx + cos(angle) * r
+            val y = cy + sin(angle) * r
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.close()
+        drawPath(path, color = color, style = stroke)
+        drawCircle(color = color, radius = rInner, center = Offset(cx, cy), style = stroke)
+    }
+}
+
+/** Filled play triangle for message history. */
+@Composable
+fun LcdPlayIcon(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val pad = size.minDimension * 0.18f
+        val path = Path().apply {
+            moveTo(w * 0.28f, pad)
+            lineTo(w * 0.28f, h - pad)
+            lineTo(w - pad, h * 0.5f)
+            close()
+        }
+        drawPath(path, color = color)
+    }
+}

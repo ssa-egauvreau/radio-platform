@@ -25,14 +25,36 @@ class LastRxAudioRecorder(
     private var lastCompletePcm = ByteArray(0)
     private var lastCaptureChannel = ""
     private var lastCaptureCaption = ""
+    /** Best RX attribution seen during the current inbound burst. */
+    private var burstBestCaption = ""
 
     private var replayTrack: AudioTrack? = null
 
     /** Channel + caption stamped on the current RX burst (for message history). */
-    fun noteRxContext(channelName: String, caption: String) {
+    fun noteRxContext(
+        channelName: String,
+        caption: String,
+        unitId: String = "",
+        displayName: String = "",
+    ) {
         synchronized(lock) {
             if (channelName.isNotBlank()) lastCaptureChannel = channelName.trim()
-            if (caption.isNotBlank()) lastCaptureCaption = caption.trim()
+            val line = caption.trim().ifBlank { formatTalkerLine(unitId, displayName) }
+            if (line.isNotBlank()) {
+                lastCaptureCaption = line
+                burstBestCaption = line
+            }
+        }
+    }
+
+    private fun formatTalkerLine(unitId: String, displayName: String): String {
+        val unit = unitId.trim().uppercase()
+        val name = displayName.trim()
+        return when {
+            unit.isNotEmpty() && name.isNotEmpty() -> "RX: $unit • $name"
+            unit.isNotEmpty() -> "RX: $unit"
+            name.isNotEmpty() -> "RX: $name"
+            else -> ""
         }
     }
 
@@ -45,6 +67,7 @@ class LastRxAudioRecorder(
                 finalizeCurrentTransmissionLocked()
                 currentChunks.clear()
                 currentBytes = 0
+                burstBestCaption = ""
             }
             lastChunkAtMs = now
             val room = MAX_TRANSMISSION_BYTES - currentBytes
@@ -127,11 +150,13 @@ class LastRxAudioRecorder(
             pos += chunk.size
         }
         lastCompletePcm = merged
+        val caption = burstBestCaption.ifBlank { lastCaptureCaption }
         messageHistory?.append(
             pcm = merged,
             channelName = lastCaptureChannel,
-            caption = lastCaptureCaption,
+            caption = caption,
         )
+        burstBestCaption = ""
         currentChunks.clear()
         currentBytes = 0
     }
