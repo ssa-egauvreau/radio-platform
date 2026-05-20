@@ -222,27 +222,10 @@ export function RadioPortal() {
   }, []);
 
   // --- emergency long-press ---
-  const beginEmergencyHold = useCallback(() => {
-    if (busyEmergency) return;
-    setEmergencyArming(true);
-    if (emergencyTimerRef.current !== null) {
-      window.clearTimeout(emergencyTimerRef.current);
-    }
-    emergencyTimerRef.current = window.setTimeout(() => {
-      emergencyTimerRef.current = null;
-      setEmergencyArming(false);
-      fireEmergency();
-    }, EMERGENCY_HOLD_MS);
-  }, [busyEmergency]);
-
-  const cancelEmergencyHold = useCallback(() => {
-    if (emergencyTimerRef.current !== null) {
-      window.clearTimeout(emergencyTimerRef.current);
-      emergencyTimerRef.current = null;
-    }
-    setEmergencyArming(false);
-  }, []);
-
+  // The setTimeout below outlives a render, so it cannot capture `fireEmergency` by closure —
+  // a mid-hold channel switch or emergency-state flip would otherwise activate against stale
+  // values. Keep a ref to the latest fireEmergency and resolve it inside the timer callback.
+  const fireEmergencyRef = useRef<() => void>(() => {});
   async function fireEmergency() {
     const unit = user?.unitId?.trim() || user?.username?.trim() || "WEB";
     setBusyEmergency(true);
@@ -262,6 +245,31 @@ export function RadioPortal() {
       setBusyEmergency(false);
     }
   }
+  // Refresh on every render so the timer always invokes the freshest fireEmergency.
+  useEffect(() => {
+    fireEmergencyRef.current = fireEmergency;
+  });
+
+  const beginEmergencyHold = useCallback(() => {
+    if (busyEmergency) return;
+    setEmergencyArming(true);
+    if (emergencyTimerRef.current !== null) {
+      window.clearTimeout(emergencyTimerRef.current);
+    }
+    emergencyTimerRef.current = window.setTimeout(() => {
+      emergencyTimerRef.current = null;
+      setEmergencyArming(false);
+      fireEmergencyRef.current();
+    }, EMERGENCY_HOLD_MS);
+  }, [busyEmergency]);
+
+  const cancelEmergencyHold = useCallback(() => {
+    if (emergencyTimerRef.current !== null) {
+      window.clearTimeout(emergencyTimerRef.current);
+      emergencyTimerRef.current = null;
+    }
+    setEmergencyArming(false);
+  }, []);
 
   // --- transmission playback ---
   async function playTransmission(id: number) {
@@ -317,7 +325,12 @@ export function RadioPortal() {
     permission,
   ]);
 
-  const canTransmit = voiceState === "listening" && permission !== "listen_only";
+  // Stay enabled while transmitting too — otherwise the button flips to disabled the moment we
+  // start TX, and some browsers don't fire pointerup/pointercancel on disabled controls, which
+  // would leave stopPtt() uncalled and the channel keyed.
+  const canTransmit =
+    (voiceState === "listening" || voiceState === "transmitting") &&
+    permission !== "listen_only";
 
   return (
     <div className="rp-shell">
