@@ -99,6 +99,13 @@ interface ClientMeta {
 /** Throttle for the per-client "channel busy" notice. */
 const BUSY_NOTICE_MS = 750;
 
+/**
+ * Peer-buffer high-water mark before voice fan-out skips that peer. ~64 KB is well over a few
+ * seconds of voice frames (IMBE is ~13 B/20ms; PCM mono 16k is 640 B/20ms) so a healthy peer
+ * never trips it. A backed-up consumer gets dropped frames instead of holding back the channel.
+ */
+const VOICE_PEER_BUFFER_LIMIT_BYTES = 64 * 1024;
+
 type VoiceSlot = {
   ws: WebSocket;
   unitUpper: string;
@@ -163,6 +170,24 @@ export function dropAgencyVoiceConnections(agencyId: number): number {
       ws.close(1008, "agency access revoked");
     } catch {
       /* ignore a socket already gone */
+    }
+    closed++;
+  }
+  return closed;
+}
+
+/**
+ * Closes every open voice socket with a "going away" code (1001). Called from the SIGTERM
+ * handler so a Railway redeploy doesn't slam the underlying TCP — clients see a clean close and
+ * trigger their own reconnect logic instead of a mid-frame audio drop.
+ */
+export function closeAllVoiceConnections(): number {
+  let closed = 0;
+  for (const ws of clientMeta.keys()) {
+    try {
+      ws.close(1001, "server shutting down");
+    } catch {
+      /* already gone */
     }
     closed++;
   }
@@ -323,7 +348,10 @@ export function attachVoiceRelay(
 ): WebSocketServer {
   const requiredKey = options.radioApiKey?.trim();
 
-  const wss = new WebSocketServer({ noServer: true });
+  // Cap per-frame size. Voice frames are ~13 B IMBE or ~640 B/20ms PCM; a JSON control frame is
+  // tiny. The ws library default is 100 MB which would let a buggy/malicious client allocate
+  // hundreds of MB of buffer memory per frame. 64 KB is well over any legitimate frame.
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
 
   /*
    * Periodic ping; if a socket missed the previous round's pong, terminate it. The pong
@@ -493,6 +521,12 @@ export function attachVoiceRelay(
       if (peer === from) continue;
       if (!meta.channelKey || meta.channelKey !== chanKey) continue;
       if (peer.readyState !== WebSocket.OPEN) continue;
+      // Drop frames for a peer whose send buffer has already piled up past the high-water mark.
+      // Without this, one slow consumer (saturated network, paused browser tab, etc.) would let
+      // ws queue frames unbounded, holding memory and adding latency for everyone else on the
+      // channel. Half-duplex voice tolerates drops fine — better a moment of silence on the slow
+      // peer than a backed-up relay on the channel.
+      if (peer.bufferedAmount > VOICE_PEER_BUFFER_LIMIT_BYTES) continue;
       try {
         peer.send(payload);
       } catch {

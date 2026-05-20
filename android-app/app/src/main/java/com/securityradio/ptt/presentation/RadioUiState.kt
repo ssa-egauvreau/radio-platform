@@ -131,6 +131,22 @@ data class RadioUiState(
     /** Scan traffic on a monitored channel while tuned elsewhere (scan icon pulse). */
     val scanBackgroundActive: Boolean = false,
     val scanBackgroundChannel: String = "",
+
+    /**
+     * True when [rxAttributedLine] came from a scan side-channel rather than the tuned home
+     * channel. The home-channel RX chrome (blue wash) is suppressed in this case — scan-only
+     * traffic gets the yellow SCAN RX banner and nothing else.
+     */
+    val rxFromScan: Boolean = false,
+
+    /** 0 = Buttons, 1 = Device, 2 = Audio, 3 = Account. Persisted only in memory across opens. */
+    val settingsTabIndex: Int = 0,
+    /** Mirror of [com.securityradio.ptt.device.RadioPreferences.isNoiseSuppressionEnabled]. */
+    val micNoiseSuppressionEnabled: Boolean = true,
+    /** Mirror of [com.securityradio.ptt.device.RadioPreferences.isMicAutoGainEnabled]. */
+    val micAutoGainEnabled: Boolean = true,
+    /** Mirror of [com.securityradio.ptt.device.RadioPreferences.getMicGainMultiplier]. */
+    val micGainMultiplier: Float = 1.0f,
 ) {
     init {
         require(softKeyLabels.size == SOFT_KEY_COUNT) {
