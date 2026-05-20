@@ -3,7 +3,7 @@ package com.securityradio.ptt.device
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import com.securityradio.ptt.MainActivity
+import com.securityradio.ptt.DisplayRouter
 
 /**
  * Restarts the foreground anchor after reboot; best-effort resumes the radio UI (OEMs may block this).
@@ -24,14 +24,7 @@ class RadioBootReceiver : BroadcastReceiver() {
     private fun launchRadio(context: Context) {
         RadioPresenceService.start(context)
         try {
-            val launch = Intent(context, MainActivity::class.java).apply {
-                addFlags(
-                    Intent.FLAG_ACTIVITY_NEW_TASK or
-                        Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                        Intent.FLAG_ACTIVITY_SINGLE_TOP,
-                )
-            }
-            context.startActivity(launch)
+            DisplayRouter.startMainActivity(context)
         } catch (_: Throwable) {
             /* Some OEMs block background startup; the presence notification can still open MainActivity. */
         }

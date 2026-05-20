@@ -10,7 +10,7 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.securityradio.ptt.MainActivity
+import com.securityradio.ptt.DisplayRouterActivity
 import com.securityradio.ptt.R
 
 /**
@@ -62,8 +62,8 @@ class RadioPresenceService : Service() {
         val openPi = PendingIntent.getActivity(
             this,
             0,
-            Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            Intent(this, DisplayRouterActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             },
             piFlags,
         )
