@@ -19,6 +19,8 @@ const ROSTER_POLL_MS = 5_000;
 const TRANSMISSIONS_POLL_MS = 12_000;
 const TRANSMISSIONS_CAP = 20;
 const EMERGENCY_HOLD_MS = 1500;
+/** Quiet pause between a voice-WS close and the next reconnect attempt. */
+const VOICE_RECONNECT_DELAY_MS = 3000;
 
 /**
  * Mobile-friendly portal for `radio`-role accounts. Renders the same channels / PTT / scan
@@ -53,6 +55,14 @@ export function RadioPortal() {
   const scanRef = useRef<ScanListenClient | null>(null);
   const emergencyTimerRef = useRef<number | null>(null);
   const audioElRef = useRef<HTMLAudioElement | null>(null);
+  /*
+   * Want-to-stay-connected flag: separates "user picked a new channel" / "user signed out" (no
+   * reconnect) from "the WS dropped out from under us" (try to reconnect). Held in a ref so the
+   * long-lived onState callback always sees the current value without re-binding.
+   */
+  const wantConnectedRef = useRef(false);
+  const voiceReconnectTimerRef = useRef<number | null>(null);
+  const [voiceReconnecting, setVoiceReconnecting] = useState(false);
 
   // --- channel list ---
   useEffect(() => {
@@ -72,16 +82,26 @@ export function RadioPortal() {
     };
   }, []);
 
+  function clearVoiceReconnectTimer() {
+    if (voiceReconnectTimerRef.current !== null) {
+      window.clearTimeout(voiceReconnectTimerRef.current);
+      voiceReconnectTimerRef.current = null;
+    }
+  }
+
   // --- main voice client (created on first channel pick, recreated on channel change) ---
   const joinChannel = useCallback((channelName: string) => {
     // Tear down any previous client before connecting the new one so we never have two open.
     voiceRef.current?.close();
     voiceRef.current = null;
+    clearVoiceReconnectTimer();
+    setVoiceReconnecting(false);
     setVoiceState("connecting");
     setVoiceError(null);
     setReceiving(false);
     setTransmitting(false);
     setPermission("listen_only");
+    wantConnectedRef.current = true;
 
     const client = new VoiceChannelClient(channelName, {
       onState: (state, detail) => {
@@ -89,6 +109,30 @@ export function RadioPortal() {
         if (state === "error" && detail) setVoiceError(detail);
         if (state === "transmitting") setTransmitting(true);
         if (state === "listening") setTransmitting(false);
+        if (state === "closed" || state === "error") {
+          setTransmitting(false);
+          setReceiving(false);
+        }
+        /*
+         * Auto-reconnect on a server-driven close (Railway redeploy, transient network blip)
+         * so the operator doesn't have to re-tap the channel button. Errors don't retry —
+         * those usually mean a config or permission issue (not_a_member, channel_lookup_failed)
+         * that another attempt won't fix.
+         */
+        if (state === "closed" && wantConnectedRef.current) {
+          setVoiceReconnecting(true);
+          clearVoiceReconnectTimer();
+          voiceReconnectTimerRef.current = window.setTimeout(() => {
+            voiceReconnectTimerRef.current = null;
+            if (wantConnectedRef.current) {
+              setVoiceReconnecting(false);
+              joinChannel(channelName);
+            }
+          }, VOICE_RECONNECT_DELAY_MS);
+        } else if (state === "error") {
+          wantConnectedRef.current = false;
+          setVoiceReconnecting(false);
+        }
       },
       onPermission: (p) => setPermission(p),
       onReceiving: (r) => setReceiving(r),
@@ -114,6 +158,8 @@ export function RadioPortal() {
   // Cleanup on unmount.
   useEffect(() => {
     return () => {
+      wantConnectedRef.current = false;
+      clearVoiceReconnectTimer();
       voiceRef.current?.close();
       voiceRef.current = null;
       scanRef.current?.closeAll();
@@ -308,6 +354,7 @@ export function RadioPortal() {
     if (!selectedChannel) return "Pick a channel to start";
     if (voiceState === "connecting") return "Connecting…";
     if (voiceState === "error") return voiceError ?? "Voice error";
+    if (voiceReconnecting) return "Reconnecting…";
     if (voiceState === "closed") return "Disconnected";
     if (transmitting) return "TRANSMITTING";
     if (receiving) return "RECEIVING";
@@ -318,6 +365,7 @@ export function RadioPortal() {
     selectedChannel,
     voiceState,
     voiceError,
+    voiceReconnecting,
     transmitting,
     receiving,
     scanActiveChannel,
