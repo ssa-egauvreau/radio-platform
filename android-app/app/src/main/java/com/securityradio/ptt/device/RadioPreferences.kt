@@ -119,19 +119,56 @@ class RadioPreferences(context: Context) {
 
     fun isLoggedIn(): Boolean = getAuthToken().isNotBlank()
 
-    private companion object {
-        const val PREFS_NAME = "security_radio_prefs"
-        const val KEY_THEME = "theme_mode"
-        const val KEY_VOICE_ANNOUNCE_TUNING = "voice_announce_tune"
-        const val KEY_AGENCY_RADIO_KEY = "agency_radio_key"
-        const val KEY_DEVICE_PROFILE = "device_profile_preference"
-        const val KEY_AUTH_TOKEN = "auth_token"
-        const val KEY_SESSION_AGENCY_SLUG = "session_agency_slug"
-        const val KEY_SESSION_USERNAME = "session_username"
-        const val KEY_SESSION_UNIT_ID = "session_unit_id"
-        const val KEY_SESSION_DISPLAY_NAME = "session_display_name"
-        const val KEY_SESSION_INSTALL_TOKEN = "session_install_token"
-        const val KEY_DISPLAY_ROTATED_180 = "display_rotated_180"
-        const val DEFAULT_VOICE_ANNOUNCE = true
+    /** Bind Android's NoiseSuppressor audio effect to the mic capture session. */
+    fun isNoiseSuppressionEnabled(): Boolean =
+        prefs.getBoolean(KEY_MIC_NOISE_SUPPRESSION, DEFAULT_MIC_NOISE_SUPPRESSION)
+
+    fun setNoiseSuppressionEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_MIC_NOISE_SUPPRESSION, enabled).apply()
+    }
+
+    /** When on: hand mic levelling to Android's AutomaticGainControl; manual gain ignored. */
+    fun isMicAutoGainEnabled(): Boolean =
+        prefs.getBoolean(KEY_MIC_AUTO_GAIN, DEFAULT_MIC_AUTO_GAIN)
+
+    fun setMicAutoGainEnabled(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_MIC_AUTO_GAIN, enabled).apply()
+    }
+
+    /** Software gain multiplier applied to outgoing PCM. 1.0 = no change. Range [0.5, 3.0]. */
+    fun getMicGainMultiplier(): Float =
+        prefs.getFloat(KEY_MIC_GAIN_MULTIPLIER, DEFAULT_MIC_GAIN_MULTIPLIER)
+            .coerceIn(MIN_MIC_GAIN, MAX_MIC_GAIN)
+
+    fun setMicGainMultiplier(multiplier: Float) {
+        prefs.edit().putFloat(
+            KEY_MIC_GAIN_MULTIPLIER,
+            multiplier.coerceIn(MIN_MIC_GAIN, MAX_MIC_GAIN),
+        ).apply()
+    }
+
+    companion object {
+        const val MIN_MIC_GAIN: Float = 0.5f
+        const val MAX_MIC_GAIN: Float = 3.0f
+        const val DEFAULT_MIC_GAIN_MULTIPLIER: Float = 1.0f
+        const val DEFAULT_MIC_NOISE_SUPPRESSION: Boolean = true
+        const val DEFAULT_MIC_AUTO_GAIN: Boolean = true
+
+        private const val PREFS_NAME = "security_radio_prefs"
+        private const val KEY_THEME = "theme_mode"
+        private const val KEY_VOICE_ANNOUNCE_TUNING = "voice_announce_tune"
+        private const val KEY_AGENCY_RADIO_KEY = "agency_radio_key"
+        private const val KEY_DEVICE_PROFILE = "device_profile_preference"
+        private const val KEY_AUTH_TOKEN = "auth_token"
+        private const val KEY_SESSION_AGENCY_SLUG = "session_agency_slug"
+        private const val KEY_SESSION_USERNAME = "session_username"
+        private const val KEY_SESSION_UNIT_ID = "session_unit_id"
+        private const val KEY_SESSION_DISPLAY_NAME = "session_display_name"
+        private const val KEY_SESSION_INSTALL_TOKEN = "session_install_token"
+        private const val KEY_DISPLAY_ROTATED_180 = "display_rotated_180"
+        private const val KEY_MIC_NOISE_SUPPRESSION = "mic_noise_suppression"
+        private const val KEY_MIC_AUTO_GAIN = "mic_auto_gain"
+        private const val KEY_MIC_GAIN_MULTIPLIER = "mic_gain_multiplier"
+        private const val DEFAULT_VOICE_ANNOUNCE = true
     }
 }

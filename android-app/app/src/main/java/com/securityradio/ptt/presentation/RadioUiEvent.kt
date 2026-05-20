@@ -27,10 +27,17 @@ sealed interface RadioUiEvent {
 
     data object OpenMappingSettings : RadioUiEvent
     data object CloseMappingSettings : RadioUiEvent
+    /** Which tab is selected inside the settings screen (BUTTONS / DEVICE / AUDIO / ACCOUNT). */
+    data class SelectSettingsTab(val index: Int) : RadioUiEvent
     data class StartListeningForMapping(val action: com.securityradio.ptt.device.HardwareAction) : RadioUiEvent
     data object StopListeningForMapping : RadioUiEvent
     data class ClearMapping(val action: com.securityradio.ptt.device.HardwareAction) : RadioUiEvent
     data class ResetMappingToDefault(val action: com.securityradio.ptt.device.HardwareAction) : RadioUiEvent
+
+    /** Mic tuning panel (AUDIO settings tab). */
+    data class SetMicNoiseSuppression(val enabled: Boolean) : RadioUiEvent
+    data class SetMicAutoGain(val enabled: Boolean) : RadioUiEvent
+    data class SetMicGainMultiplier(val multiplier: Float) : RadioUiEvent
 
     data class UpdatePermissionState(
         val needsAudio: Boolean,
