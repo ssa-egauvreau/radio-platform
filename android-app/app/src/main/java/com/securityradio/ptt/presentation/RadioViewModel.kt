@@ -105,6 +105,8 @@ class RadioViewModel(
 
     /** Clears the replay banner once the replayed clip has finished playing. */
     private var replayJob: Job? = null
+    /** Bumped on each new replay so a stale timer cannot clear a fresh banner. */
+    private var replayBannerGeneration = 0
 
     /** Null until the first connectivity reading; used to fire on edges only. */
     private var lastConnectivityOnline: Boolean? = null
@@ -629,10 +631,10 @@ class RadioViewModel(
     private fun closeMessageHistory() {
         rxMessageHistory.stopReplay()
         historyPlayJob?.cancel()
+        cancelReplayBanner()
         _uiState.update {
             it.copy(
                 messageHistoryVisible = false,
-                historyPlayingId = null,
                 statusMessage = "",
             )
         }
@@ -655,26 +657,22 @@ class RadioViewModel(
     private fun playHistoryMessage(entryId: Long) {
         rxMessageHistory.stopReplay()
         historyPlayJob?.cancel()
-        val durationMs = rxMessageHistory.play(entryId) {
-            _uiState.update { it.copy(historyPlayingId = null, replayBanner = "") }
-        }
+        val durationMs = rxMessageHistory.play(entryId)
         if (durationMs <= 0L) {
             soundPlayer.playChannelSwitch()
             _uiState.update { it.copy(statusMessage = "NO AUDIO FOR MESSAGE") }
             return
         }
         val label = _uiState.value.rxMessageHistory.firstOrNull { it.id == entryId }?.caption.orEmpty()
+        val banner =
+            if (label.isNotBlank()) "REPLAY  $label" else "REPLAYING MESSAGE"
         _uiState.update {
             it.copy(
                 historyPlayingId = entryId,
-                replayBanner = if (label.isNotBlank()) "REPLAY  $label" else "REPLAYING MESSAGE",
                 statusMessage = "REPLAY AUDIO",
             )
         }
-        historyPlayJob = viewModelScope.launch {
-            delay(durationMs)
-            _uiState.update { it.copy(historyPlayingId = null, replayBanner = "") }
-        }
+        showReplayBanner(banner, durationMs)
     }
 
     private fun playLastTransmission() {
@@ -684,19 +682,43 @@ class RadioViewModel(
         }
         val durationMs = lastRxAudioRecorder.playLast()
         if (durationMs > 0L) {
-            replayJob?.cancel()
-            _uiState.update {
-                it.copy(statusMessage = "REPLAY AUDIO", replayBanner = replayBannerText(it))
-            }
-            // Banner shows for exactly the clip length, then the radio returns to normal.
-            replayJob = viewModelScope.launch {
-                delay(durationMs)
-                _uiState.update { it.copy(replayBanner = "") }
-            }
+            showReplayBanner(replayBannerText(_uiState.value), durationMs)
             return
         }
         soundPlayer.playChannelSwitch()
-        _uiState.update { it.copy(statusMessage = "NO LAST RX AUDIO", replayBanner = "") }
+        cancelReplayBanner()
+        _uiState.update { it.copy(statusMessage = "NO LAST RX AUDIO") }
+    }
+
+    /** Shows the replay banner and schedules dismiss; only the latest replay generation may clear it. */
+    private fun showReplayBanner(text: String, durationMs: Long) {
+        replayJob?.cancel()
+        val generation = ++replayBannerGeneration
+        _uiState.update {
+            it.copy(statusMessage = "REPLAY AUDIO", replayBanner = text)
+        }
+        val dismissAfterMs = durationMs.coerceAtLeast(250L) + REPLAY_BANNER_PAD_MS
+        replayJob = viewModelScope.launch {
+            delay(dismissAfterMs)
+            dismissReplayBanner(clearHistoryPlayingId = true, expectedGeneration = generation)
+        }
+    }
+
+    private fun dismissReplayBanner(clearHistoryPlayingId: Boolean, expectedGeneration: Int) {
+        if (expectedGeneration != replayBannerGeneration) return
+        _uiState.update { state ->
+            state.copy(
+                replayBanner = "",
+                historyPlayingId = if (clearHistoryPlayingId) null else state.historyPlayingId,
+            )
+        }
+    }
+
+    private fun cancelReplayBanner() {
+        ++replayBannerGeneration
+        replayJob?.cancel()
+        replayJob = null
+        _uiState.update { it.copy(replayBanner = "", historyPlayingId = null) }
     }
 
     /** "Who was talking" caption for the replay banner, from the last RX attribution. */
@@ -1623,5 +1645,7 @@ class RadioViewModel(
         const val RECONNECTED_BANNER_MS = 2_000L
         const val DAY_NIGHT_HOLD_FLIP_MS = 2_000L
         const val TM7_HOLD_ACTION_MS = 800L
+        /** Extra time so the banner stays up until async AudioTrack playback actually ends. */
+        const val REPLAY_BANNER_PAD_MS = 200L
     }
 }
