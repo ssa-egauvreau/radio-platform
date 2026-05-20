@@ -45,6 +45,12 @@ declare global {
 const envSecret = process.env.JWT_SECRET?.trim();
 const JWT_SECRET = envSecret && envSecret.length > 0 ? envSecret : crypto.randomBytes(48).toString("hex");
 if (!envSecret) {
+  if (process.env.NODE_ENV === "production") {
+    // A random per-process secret in production would silently sign every active session out on
+    // every redeploy / restart — exactly the failure mode this guard exists to prevent.
+    console.error("FATAL: JWT_SECRET env is not set in production. Refusing to start.");
+    process.exit(1);
+  }
   console.warn("JWT_SECRET not set — using a random secret; existing sessions break on every restart.");
 }
 
