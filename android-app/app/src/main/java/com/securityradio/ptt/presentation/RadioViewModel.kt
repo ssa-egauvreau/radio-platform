@@ -34,6 +34,7 @@ import com.securityradio.ptt.device.LocationReporter
 
 import com.securityradio.ptt.device.PttHapticFeedback
 import com.securityradio.ptt.device.PttMicCapture
+import com.securityradio.ptt.DisplayRouter
 import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.RadioUiSoundPlayer
 import com.securityradio.ptt.device.ServerReachabilityMonitor
@@ -200,6 +201,8 @@ class RadioViewModel(
                 micNoiseSuppressionEnabled = radioPreferences.isNoiseSuppressionEnabled(),
                 micAutoGainEnabled = radioPreferences.isMicAutoGainEnabled(),
                 micGainMultiplier = radioPreferences.getMicGainMultiplier(),
+                mp22DualDisplay = DisplayRouter.isMp22StyleDualDisplay(application),
+                mp22UsePhysicalDisplay = radioPreferences.isMp22UsePhysicalDisplay(),
             )
         }
         viewModelScope.launch {
@@ -378,6 +381,18 @@ class RadioViewModel(
     /** Menu / non-PTT control click sound (same as channel switch WAV). */
     fun playUiMenuSound() {
         soundPlayer.playChannelSwitch()
+    }
+
+    /** MP22: track which display the activity is on (for setup vs radio screen hints). */
+    fun refreshMp22DisplayState(displayId: Int) {
+        if (!DisplayRouter.isMp22StyleDualDisplay(application)) return
+        _uiState.update {
+            it.copy(
+                mp22DualDisplay = true,
+                mp22UsePhysicalDisplay = radioPreferences.isMp22UsePhysicalDisplay(),
+                mp22CurrentDisplayId = displayId,
+            )
+        }
     }
 
     /** Call from MainActivity onStart / onStop while this screen is tied to that activity. */
@@ -738,6 +753,14 @@ class RadioViewModel(
             RadioUiEvent.RequestLocationPermission -> Unit
             RadioUiEvent.OpenLocationSettings -> Unit
             RadioUiEvent.OpenGpsSettings -> Unit
+            RadioUiEvent.MoveMp22ToPhysicalDisplay -> {
+                soundPlayer.playChannelSwitch()
+                DisplayRouter.moveToPhysicalDisplay(application)
+            }
+            RadioUiEvent.MoveMp22ToVirtualSetupDisplay -> {
+                soundPlayer.playChannelSwitch()
+                DisplayRouter.moveToVirtualSetupDisplay(application)
+            }
             RadioUiEvent.SignOut -> Unit // Handled in MainActivity (clears session and shows login)
         }
     }

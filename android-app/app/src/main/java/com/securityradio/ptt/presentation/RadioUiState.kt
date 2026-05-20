@@ -155,6 +155,13 @@ data class RadioUiState(
     val micAutoGainEnabled: Boolean = true,
     /** Mirror of [com.securityradio.ptt.device.RadioPreferences.getMicGainMultiplier]. */
     val micGainMultiplier: Float = 1.0f,
+
+    /** MP22 dual-display firmware detected (virtual Display 0 + physical Display 1). */
+    val mp22DualDisplay: Boolean = false,
+    /** MP22: user finished PC setup and wants the app on the physical panel. */
+    val mp22UsePhysicalDisplay: Boolean = false,
+    /** MP22: which display this activity is on (0 = virtual, 1 = physical). */
+    val mp22CurrentDisplayId: Int = 0,
 ) {
     init {
         require(softKeyLabels.size == SOFT_KEY_COUNT) {

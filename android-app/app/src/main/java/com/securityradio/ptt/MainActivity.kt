@@ -8,6 +8,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.view.Display
 import android.provider.Settings
 import android.util.Log
 import android.view.KeyEvent
@@ -169,6 +170,7 @@ class MainActivity : ComponentActivity() {
     override fun onStart() {
         super.onStart()
         radioViewModel?.setMainRadioScreenVisible(true)
+        reportMp22DisplayToViewModel()
     }
 
     override fun onStop() {
@@ -180,17 +182,24 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         checkAllPermissions()
         radioViewModel?.onOverlayPermissionResult(canDrawOverlays())
+        reportMp22DisplayToViewModel()
+    }
+
+    private fun reportMp22DisplayToViewModel() {
+        val displayId =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                display?.displayId ?: Display.DEFAULT_DISPLAY
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                @Suppress("DEPRECATION")
+                windowManager.defaultDisplay?.displayId ?: Display.DEFAULT_DISPLAY
+            } else {
+                Display.DEFAULT_DISPLAY
+            }
+        radioViewModel?.refreshMp22DisplayState(displayId)
     }
 
     private fun bringRadioToForeground() {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            addFlags(
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP,
-            )
-        }
-        startActivity(intent)
+        DisplayRouter.startMainActivity(this)
     }
 
     private fun requestIgnoreBatteryOptimizations() {

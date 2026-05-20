@@ -154,6 +154,17 @@ class RadioPreferences(context: Context) {
         ).apply()
     }
 
+    /**
+     * MP22 dual-display: false = virtual Display 0 (PC/scrcpy can type); true = physical Display 1
+     * (hardware keys). IRC590 and normal devices ignore this.
+     */
+    fun isMp22UsePhysicalDisplay(): Boolean =
+        prefs.getBoolean(KEY_MP22_USE_PHYSICAL_DISPLAY, false)
+
+    fun setMp22UsePhysicalDisplay(usePhysical: Boolean) {
+        prefs.edit().putBoolean(KEY_MP22_USE_PHYSICAL_DISPLAY, usePhysical).apply()
+    }
+
     companion object {
         const val MIN_MIC_GAIN: Float = 0.5f
         const val MAX_MIC_GAIN: Float = 3.0f
@@ -177,6 +188,7 @@ class RadioPreferences(context: Context) {
         private const val KEY_MIC_NOISE_SUPPRESSION = "mic_noise_suppression"
         private const val KEY_MIC_AUTO_GAIN = "mic_auto_gain"
         private const val KEY_MIC_GAIN_MULTIPLIER = "mic_gain_multiplier"
+        private const val KEY_MP22_USE_PHYSICAL_DISPLAY = "mp22_use_physical_display"
         private const val DEFAULT_VOICE_ANNOUNCE = true
     }
 }

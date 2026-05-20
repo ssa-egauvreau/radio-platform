@@ -69,4 +69,10 @@ sealed interface RadioUiEvent {
     data object RequestOverlayPermission : RadioUiEvent
 
     data object SignOut : RadioUiEvent
+
+    /** MP22 only: move app to physical Display 1 (hardware keys; scrcpy cannot control it on Android 8.1). */
+    data object MoveMp22ToPhysicalDisplay : RadioUiEvent
+
+    /** MP22 only: move app back to virtual Display 0 for PC/scrcpy setup. */
+    data object MoveMp22ToVirtualSetupDisplay : RadioUiEvent
 }

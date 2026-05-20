@@ -1393,6 +1393,16 @@ private fun LcdHandsetFillChannelBlock(
                     styles = styles,
                 )
             }
+            if (state.mp22DualDisplay && !state.mp22UsePhysicalDisplay) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "PC SETUP (virtual screen) — open Settings → MOVE TO PHYSICAL RADIO SCREEN when done",
+                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp),
+                    color = p.statusAmber,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
             val isIrc590Handset = state.resolvedDeviceProfile == ResolvedDeviceProfile.IRC590
             if (!showEmergencyBanner && !isIrc590Handset) {
                 LcdPermissionBadge(
@@ -3791,6 +3801,50 @@ private fun DeviceSettingsTab(
             }
         }
         item { HorizontalDivider(color = p.divider) }
+        if (state.mp22DualDisplay) {
+            item {
+                SettingsSectionHeader("MP22 — PC SETUP vs RADIO SCREEN", styles, p)
+                Text(
+                    text = when {
+                        state.mp22UsePhysicalDisplay && state.mp22CurrentDisplayId != 1 ->
+                            "Moving to the physical radio screen… Use hardware keys (PTT, channel) on the device."
+                        state.mp22UsePhysicalDisplay ->
+                            "On the physical screen (Display 1). PC/scrcpy cannot click here on Android 8.1 — use radio buttons."
+                        state.mp22CurrentDisplayId == 0 ->
+                            "On the virtual screen (Display 0). Set up login and settings with scrcpy, then tap the button below."
+                        else ->
+                            "Dual-display MP22 detected. Use virtual screen for PC control, then move to physical for daily use."
+                    },
+                    style = styles.status,
+                    color = p.textMuted,
+                    modifier = Modifier.padding(bottom = 6.dp),
+                )
+                if (!state.mp22UsePhysicalDisplay) {
+                    TextButton(
+                        onClick = { onEvent(RadioUiEvent.MoveMp22ToPhysicalDisplay) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.textButtonColors(
+                            containerColor = p.statusGreen.copy(alpha = 0.2f),
+                            contentColor = p.statusGreen,
+                        ),
+                    ) {
+                        Text("MOVE TO PHYSICAL RADIO SCREEN".uppercase(Locale.US))
+                    }
+                } else {
+                    TextButton(
+                        onClick = { onEvent(RadioUiEvent.MoveMp22ToVirtualSetupDisplay) },
+                        modifier = Modifier.fillMaxWidth(),
+                        colors = ButtonDefaults.textButtonColors(
+                            containerColor = p.softKeyInactiveFill,
+                            contentColor = p.textPrimary,
+                        ),
+                    ) {
+                        Text("OPEN ON PC SETUP SCREEN (VIRTUAL)".uppercase(Locale.US))
+                    }
+                }
+            }
+            item { HorizontalDivider(color = p.divider) }
+        }
         item {
             SettingsSectionHeader("HANDSET LAYOUT", styles, p)
             Text(

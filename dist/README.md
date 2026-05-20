@@ -49,3 +49,17 @@ Every push to **`main`** runs the **Android APK** workflow. On GitHub:
 5. Open **safeT PTT** and sign in with your agency account.
 
 **Note:** This debug APK is preconfigured to use **`https://safet.up.railway.app/`** unless you built with a custom `radio.api.base.url` in `local.properties`.
+
+## MP22 (dual display, Android 8.1, no touch screen)
+
+The MP22 has a **virtual Display 0** (PC can click/type with scrcpy) and a **physical Display 1** (hardware keys only; scrcpy cannot control it on Android 8.1).
+
+**Workflow:**
+
+1. Install the APK and open **safeT PTT** — it starts on the **virtual** screen for setup.
+2. On your PC, mirror **without** `--display-id` (see `Start MP22 Setup Scrcpy.bat` below) so mouse and keyboard work.
+3. Sign in, change settings, map buttons, etc.
+4. In the app: **Settings (gear) → Device → MOVE TO PHYSICAL RADIO SCREEN**.
+5. Use the radio’s **hardware keys** on the physical panel. Optional: scrcpy with `--display-id=1 --no-control` to watch only.
+
+**IRC590 and other radios** are not affected — they launch normally on their only screen.
