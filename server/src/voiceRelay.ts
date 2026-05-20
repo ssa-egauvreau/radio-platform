@@ -31,6 +31,7 @@ import {
   getChannelByName,
   getMembership,
   getSimulcastByName,
+  getUserById,
   resolveAgencyByKey,
   type Permission,
 } from "./store.js";
@@ -158,6 +159,27 @@ export function dropAgencyVoiceConnections(agencyId: number): number {
     }
     try {
       ws.close(1008, "agency access revoked");
+    } catch {
+      /* ignore a socket already gone */
+    }
+    closed++;
+  }
+  return closed;
+}
+
+/**
+ * Closes every account-bound voice socket for one user. Called from the login
+ * handler so a fresh sign-in immediately silences any prior browser session for
+ * the same account. Key-authenticated handsets and the bridge worker are not
+ * user-bound and are intentionally left untouched.
+ */
+export function dropUserVoiceConnections(userId: number): number {
+  let closed = 0;
+  for (const [ws, meta] of clientMeta) {
+    if (meta.identity.kind !== "account") continue;
+    if (meta.identity.user.id !== userId) continue;
+    try {
+      ws.close(1008, "session superseded");
     } catch {
       /* ignore a socket already gone */
     }
@@ -347,6 +369,14 @@ export function attachVoiceRelay(
             const agency = await getAgencyById(user.agencyId).catch(() => null);
             if (!agency || agency.disabled) {
               socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+              socket.destroy();
+              return;
+            }
+            // Newest sign-in wins: reject a stale token here too so an auto-
+            // reconnecting browser cannot briefly resurrect its dropped socket.
+            const dbUser = await getUserById(user.id).catch(() => null);
+            if (!dbUser || user.gen !== dbUser.token_generation) {
+              socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
               socket.destroy();
               return;
             }

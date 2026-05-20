@@ -116,6 +116,9 @@ export async function ensureSchema(): Promise<void> {
   await p.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS agency_id INT REFERENCES agencies(id) ON DELETE CASCADE;`);
   // Device category the admin assigns to an account (unit_radio, handheld, …).
   await p.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS device_type TEXT;`);
+  // Newest sign-in wins: incremented on each login; tokens carry the value as
+  // their `gen` claim and are rejected once the user's row moves past it.
+  await p.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_generation INT NOT NULL DEFAULT 0;`);
 
   await p.query(`
     CREATE TABLE IF NOT EXISTS channel_members (
