@@ -25,9 +25,19 @@ export function getPool(): pg.Pool | null {
     const max = Number.isFinite(parsed)
       ? Math.max(1, Math.min(200, parsed))
       : 20;
+    // Parse the connection string so the SSL toggle keys off the hostname only — substring
+    // matching on "localhost" would also skip TLS for prod URLs that happen to contain that
+    // word anywhere (host segment, query param, password).
+    let isLocal = false;
+    try {
+      const host = new URL(url).hostname;
+      isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
+    } catch {
+      // Malformed URL → leave TLS on; pg will fail to connect and surface the real error.
+    }
     pool = new Pool({
       connectionString: url,
-      ssl: url.includes("localhost") ? false : { rejectUnauthorized: false },
+      ssl: isLocal ? false : { rejectUnauthorized: false },
       max,
     });
     // Statement-level timeout would be nice to bound a runaway query against the shared pool,

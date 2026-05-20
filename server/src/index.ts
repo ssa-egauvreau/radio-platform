@@ -76,7 +76,11 @@ const LEGACY_RADIO_PATHS = new Set([
 ]);
 
 app.use(async (req, res, next) => {
-  if (!LEGACY_RADIO_PATHS.has(req.path)) {
+  // Strip a trailing slash so `/v1/channels/` matches the same handler as `/v1/channels` —
+  // otherwise a hand-typed trailing slash would skip the agency-resolution middleware entirely
+  // and the downstream handler would see a missing `req.agency`.
+  const normalizedPath = req.path.length > 1 ? req.path.replace(/\/+$/, "") : req.path;
+  if (!LEGACY_RADIO_PATHS.has(normalizedPath)) {
     next();
     return;
   }

@@ -14,6 +14,7 @@ import { VoiceChannelClient, type VoiceState } from "../voice/voiceClient";
 import { ScanListenClient } from "../voice/scanListenClient";
 import { useUnitAliasResolver } from "../unitAliases";
 import { formatDuration, formatTime, transcriptOf } from "./TransmissionLog";
+import { sounds } from "../sounds";
 
 const ROSTER_POLL_MS = 5_000;
 const TRANSMISSIONS_POLL_MS = 12_000;
@@ -75,6 +76,9 @@ export function RadioPortal() {
   const wantConnectedRef = useRef(false);
   const voiceReconnectTimerRef = useRef<number | null>(null);
   const [voiceReconnecting, setVoiceReconnecting] = useState(false);
+  // PTT held flag — referenced both by startPtt and by the onBusy callback registered with the
+  // voice client, so it has to live above joinChannel so the joinChannel closure can read it.
+  const pttHeldRef = useRef(false);
 
   // --- channel list ---
   useEffect(() => {
@@ -179,8 +183,12 @@ export function RadioPortal() {
       onReceiving: (r) => setReceiving(r),
       onBusy: () => {
         // The relay rejected our key — already handled inside the client (stopTransmit), just
-        // make sure local UI reflects that we're not transmitting.
+        // make sure local UI reflects that we're not transmitting. Loop the busy tone for as
+        // long as the operator is still holding the PTT button (matches ChannelPanel).
         setTransmitting(false);
+        if (pttHeldRef.current) {
+          sounds.busyLoopStart();
+        }
       },
     });
     voiceRef.current = client;
@@ -196,6 +204,18 @@ export function RadioPortal() {
     }
   }, [selectedChannel]);
 
+  // Warm the audio cache and start auto-refresh of agency-custom tones so PTT permit / busy /
+  // emergency / channel-switch play the agency's uploads when present, falling back to bundled
+  // defaults otherwise. The agency-custom set follows admin uploads without a manual reload.
+  useEffect(() => {
+    sounds.preload();
+    const stop = sounds.startAutoRefresh();
+    return () => {
+      stop();
+      sounds.stopAll();
+    };
+  }, []);
+
   // Cleanup on unmount.
   useEffect(() => {
     return () => {
@@ -208,6 +228,7 @@ export function RadioPortal() {
       if (emergencyTimerRef.current !== null) {
         window.clearTimeout(emergencyTimerRef.current);
       }
+      sounds.busyLoopStop();
       // Stop any in-flight transmission playback so audio doesn't bleed into another page
       // (e.g. after sign-out / navigating away from /radio). Revoke the blob too — onended
       // would otherwise be the only path that releases the URL, and unmount cancels it.
@@ -320,13 +341,14 @@ export function RadioPortal() {
   // finishes (e.g. while the browser is still prompting for mic permission), VoiceChannelClient
   // would otherwise enter transmit AFTER release and leave the channel keyed indefinitely.
   // We check the flag immediately after the await and stop right away if it's already false.
-  const pttHeldRef = useRef(false);
+  // (pttHeldRef is declared above joinChannel so the onBusy callback can read it.)
   const startPtt = useCallback(async () => {
     const client = voiceRef.current;
     if (!client) return;
     pttHeldRef.current = true;
     try {
       await client.startTransmit();
+      sounds.permit();
       // Two race-cancel cases after the await:
       //   1. The user released the button before startTransmit() resolved (typical: mic
       //      permission prompt held the await). pttHeldRef is already false → drop the TX.
@@ -345,6 +367,11 @@ export function RadioPortal() {
     } catch (err) {
       pttHeldRef.current = false;
       const code = err instanceof Error ? err.message : "transmit_failed";
+      if (code === "channel_busy") {
+        // Loop the busy tone for as long as the operator keeps holding the key, matching
+        // the ChannelPanel busy-key behavior. stopPtt clears the loop on release.
+        sounds.busyLoopStart();
+      }
       // Don't surface this error on the new channel's UI if we're already on a different
       // client — the user has moved on.
       if (client !== voiceRef.current) return;
@@ -362,6 +389,7 @@ export function RadioPortal() {
   const stopPtt = useCallback(() => {
     pttHeldRef.current = false;
     voiceRef.current?.stopTransmit();
+    sounds.busyLoopStop();
   }, []);
 
   // --- emergency long-press ---
@@ -382,6 +410,11 @@ export function RadioPortal() {
         message: targetActive ? "Emergency activated from radio portal" : null,
       });
       setEmergencyActive(targetActive);
+      if (targetActive) {
+        // Local audible cue that the emergency went live — matches the radio's behavior. We
+        // intentionally don't play it on clear; clear is silent on the dispatch side too.
+        sounds.emergency();
+      }
     } catch (err) {
       setError(describeError(err));
     } finally {
@@ -395,6 +428,15 @@ export function RadioPortal() {
 
   const beginEmergencyHold = useCallback(() => {
     if (busyEmergency) return;
+    // When already active, clearing is a single tap — no hold required. A short hold would
+    // otherwise be canceled by any finger drift or the user releasing too soon, which is the
+    // bug operators kept hitting (button stuck in EMERGENCY ACTIVE). The asymmetry is
+    // deliberate: triggering an emergency must be intentional (1.5 s hold), but clearing it
+    // shouldn't require a steady finger — if it clears by accident it's trivially re-armed.
+    if (emergencyActive) {
+      fireEmergencyRef.current();
+      return;
+    }
     setEmergencyArming(true);
     if (emergencyTimerRef.current !== null) {
       window.clearTimeout(emergencyTimerRef.current);
@@ -404,7 +446,7 @@ export function RadioPortal() {
       setEmergencyArming(false);
       fireEmergencyRef.current();
     }, EMERGENCY_HOLD_MS);
-  }, [busyEmergency]);
+  }, [busyEmergency, emergencyActive]);
 
   const cancelEmergencyHold = useCallback(() => {
     if (emergencyTimerRef.current !== null) {
@@ -526,7 +568,10 @@ export function RadioPortal() {
                     key={c.id}
                     type="button"
                     className={active ? "rp-channel active" : "rp-channel"}
-                    onClick={() => joinChannel(c.name)}
+                    onClick={() => {
+                      if (c.name !== selectedChannel) sounds.channelSwitch();
+                      joinChannel(c.name);
+                    }}
                   >
                     <span className="rp-channel-name">{c.name}</span>
                     {c.permission === "listen_only" && (
@@ -581,7 +626,7 @@ export function RadioPortal() {
             disabled={busyEmergency || !selectedChannel}
           >
             {emergencyActive
-              ? "Tap-hold to CLEAR emergency"
+              ? "Tap to CLEAR emergency"
               : emergencyArming
                 ? "Keep holding…"
                 : "Hold for EMERGENCY"}

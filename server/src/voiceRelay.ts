@@ -36,6 +36,7 @@ import {
   type Permission,
 } from "./store.js";
 import { recordFrame } from "./recorder.js";
+import { getCachedAuth, setCachedAuth } from "./sessionCache.js";
 
 export const VOICE_WS_PATH = "/v1/voice/stream";
 
@@ -434,20 +435,60 @@ export function attachVoiceRelay(
             return;
           }
           // A token outlives its agency being disabled — reject the upgrade if so.
+          // Honor the 15 s sessionCache (same one the REST router uses) so a reconnect storm
+          // after a Railway redeploy doesn't fan dozens of pg lookups in parallel.
           if (getPool()) {
-            const agency = await getAgencyById(user.agencyId).catch(() => null);
-            if (!agency || agency.disabled) {
-              socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-              socket.destroy();
-              return;
-            }
-            // Newest sign-in wins: reject a stale token here too so an auto-
-            // reconnecting browser cannot briefly resurrect its dropped socket.
-            const dbUser = await getUserById(user.id).catch(() => null);
-            if (!dbUser || user.gen !== dbUser.token_generation) {
-              socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-              socket.destroy();
-              return;
+            const cached = getCachedAuth(user.id);
+            if (cached) {
+              if (cached.userDisabled || cached.agencyDisabled) {
+                socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+                socket.destroy();
+                return;
+              }
+              if (user.gen !== cached.tokenGeneration) {
+                socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+                socket.destroy();
+                return;
+              }
+            } else {
+              const [agency, dbUser] = await Promise.all([
+                getAgencyById(user.agencyId).catch(() => null),
+                getUserById(user.id).catch(() => null),
+              ]);
+              const agencyDisabled = !agency || agency.disabled;
+              if (!dbUser || dbUser.disabled || agencyDisabled) {
+                // Cache the negative result too so a reconnect storm against a freshly
+                // disabled user/agency doesn't keep hitting pg on every retry.
+                setCachedAuth(user.id, {
+                  tokenGeneration: dbUser?.token_generation ?? 0,
+                  userDisabled: !dbUser || !!dbUser.disabled,
+                  agencyDisabled,
+                });
+                socket.write(
+                  agencyDisabled || (dbUser && dbUser.disabled)
+                    ? "HTTP/1.1 403 Forbidden\r\n\r\n"
+                    : "HTTP/1.1 401 Unauthorized\r\n\r\n",
+                );
+                socket.destroy();
+                return;
+              }
+              // Newest sign-in wins: reject a stale token here too so an auto-
+              // reconnecting browser cannot briefly resurrect its dropped socket.
+              if (user.gen !== dbUser.token_generation) {
+                setCachedAuth(user.id, {
+                  tokenGeneration: dbUser.token_generation,
+                  userDisabled: false,
+                  agencyDisabled: false,
+                });
+                socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+                socket.destroy();
+                return;
+              }
+              setCachedAuth(user.id, {
+                tokenGeneration: dbUser.token_generation,
+                userDisabled: false,
+                agencyDisabled: false,
+              });
             }
           }
           const runBridgeRaw = url.searchParams.get("runBridge");
