@@ -330,7 +330,8 @@ class RadioViewModel(
         offlineJob?.cancel()
         _uiState.update { it.copy(networkLabel = "OFFLINE") }
         offlineJob = viewModelScope.launch {
-            soundPlayer.playBusyTone()
+            soundPlayer.stopBusyLoop()
+            soundPlayer.playBusyAlert()
             var sinceToneMs = 0L
             var showNoConnection = true
             while (isActive) {
@@ -344,7 +345,7 @@ class RadioViewModel(
                 delay(OFFLINE_BANNER_CYCLE_MS)
                 sinceToneMs += OFFLINE_BANNER_CYCLE_MS
                 if (sinceToneMs >= OFFLINE_TONE_INTERVAL_MS) {
-                    soundPlayer.playBusyTone()
+                    soundPlayer.playBusyAlert()
                     sinceToneMs = 0L
                 }
             }
@@ -355,6 +356,8 @@ class RadioViewModel(
     private fun onConnectionRestored() {
         offlineJob?.cancel()
         offlineJob = null
+        soundPlayer.stopBusyAlert()
+        soundPlayer.stopBusyLoop()
         soundPlayer.playChannelSwitch()
         _uiState.update { it.copy(connectivityBanner = RadioUiState.BANNER_RECONNECTED) }
         reconnectClearJob?.cancel()
@@ -1168,7 +1171,11 @@ class RadioViewModel(
                         soundPlayer.stopTalkPermitLoop()
                         pttMicCapture.stopCapture()
                         pttMicLiveThisHold = false
-                        soundPlayer.startBusyLoop()
+                        if (online) {
+                            soundPlayer.startBusyLoop()
+                        } else {
+                            soundPlayer.stopBusyLoop()
+                        }
                     } else {
                         soundPlayer.stopBusyLoop()
                         if (!micLive) {
@@ -2024,7 +2031,7 @@ class RadioViewModel(
         const val CATALOG_POLL_MS = 15_000L
         const val PROFILE_POLL_MS = 15_000L
         const val OFFLINE_BANNER_CYCLE_MS = 2_000L
-        const val OFFLINE_TONE_INTERVAL_MS = 10_000L
+        const val OFFLINE_TONE_INTERVAL_MS = 15_000L
         const val RECONNECTED_BANNER_MS = 2_000L
         const val DAY_NIGHT_HOLD_FLIP_MS = 2_000L
         const val TM7_HOLD_ACTION_MS = 800L

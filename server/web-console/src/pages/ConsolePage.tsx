@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { sounds } from "../sounds";
+import { bindLostLinkBusyAlerts, sounds } from "../sounds";
 import { Topbar } from "../Topbar";
 import { MapPanel } from "./MapPanel";
 import { AlertsPanel } from "./AlertsPanel";
@@ -10,7 +10,12 @@ import { PopOutSection } from "./PopOutSection";
 export function ConsolePage() {
   useEffect(() => {
     sounds.preload();
-    return sounds.startAutoRefresh();
+    const stopSoundSync = sounds.startAutoRefresh();
+    const stopLostLink = bindLostLinkBusyAlerts();
+    return () => {
+      stopSoundSync();
+      stopLostLink();
+    };
   }, []);
 
   return (

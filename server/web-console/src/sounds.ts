@@ -45,6 +45,16 @@ const active = new Set<HTMLAudioElement>();
 /** The single looping channel-busy clip, while an operator keys a busy channel. */
 let busyLoopClip: HTMLAudioElement | null = null;
 
+/** One-shot lost-link clip (same busy.wav, stopped after 1.5s). */
+let busyAlertClip: HTMLAudioElement | null = null;
+let busyAlertStopTimer: number | null = null;
+
+/** Repeats the 1.5s lost-link alert every 15s while the browser reports offline. */
+let lostLinkAlertInterval: number | null = null;
+
+const BUSY_ALERT_MS = 1500;
+const LOST_LINK_ALERT_INTERVAL_MS = 15_000;
+
 /** Server tone-set version last seen — a change means the tones must be re-pulled. */
 let soundsVersion: string | null = null;
 
@@ -168,6 +178,55 @@ export const sounds = {
   channelSwitch: () => play("channelSwitch"),
   /** Emergency alert tone. */
   emergency: () => play("emergency"),
+  /** Plays ~1.5s of the busy clip for no-connection / lost-link (not looped). */
+  busyAlert: () => {
+    if (busyAlertStopTimer !== null) {
+      window.clearTimeout(busyAlertStopTimer);
+      busyAlertStopTimer = null;
+    }
+    if (busyAlertClip) {
+      busyAlertClip.pause();
+      busyAlertClip.currentTime = 0;
+      active.delete(busyAlertClip);
+      busyAlertClip = null;
+    }
+    const clip = template(resolved.busy).cloneNode(true) as HTMLAudioElement;
+    clip.loop = false;
+    clip.volume = SOUNDS.busy.volume;
+    busyAlertClip = clip;
+    active.add(clip);
+    clip.addEventListener("ended", () => {
+      if (busyAlertClip === clip) {
+        active.delete(clip);
+        busyAlertClip = null;
+      }
+    });
+    void clip.play().catch(() => undefined);
+    busyAlertStopTimer = window.setTimeout(() => {
+      busyAlertStopTimer = null;
+      if (!busyAlertClip) {
+        return;
+      }
+      busyAlertClip.pause();
+      busyAlertClip.currentTime = 0;
+      active.delete(busyAlertClip);
+      busyAlertClip = null;
+    }, BUSY_ALERT_MS);
+  },
+  /** Stops a lost-link alert mid-play; also when connectivity returns. */
+  busyAlertStop: () => {
+    if (busyAlertStopTimer !== null) {
+      window.clearTimeout(busyAlertStopTimer);
+      busyAlertStopTimer = null;
+    }
+    if (!busyAlertClip) {
+      return;
+    }
+    busyAlertClip.pause();
+    busyAlertClip.currentTime = 0;
+    active.delete(busyAlertClip);
+    busyAlertClip = null;
+  },
   /** Starts the channel-busy tone looping — held while an operator keys a busy channel. */
   busyLoopStart: () => {
     if (busyLoopClip) {
@@ -193,6 +252,11 @@ export const sounds = {
   /** Stop All Sounds — silences every alert/page tone currently playing. */
   stopAll: () => {
     busyLoopClip = null;
+    if (busyAlertStopTimer !== null) {
+      window.clearTimeout(busyAlertStopTimer);
+      busyAlertStopTimer = null;
+    }
+    busyAlertClip = null;
     for (const clip of active) {
       clip.pause();
       clip.currentTime = 0;
@@ -209,3 +273,45 @@ export const sounds = {
   /** Starts watching for admin tone uploads; returns a stop function. */
   startAutoRefresh,
 };
+
+function startLostLinkBusyAlerts(): void {
+  if (lostLinkAlertInterval !== null) {
+    return;
+  }
+  sounds.busyAlert();
+  lostLinkAlertInterval = window.setInterval(() => {
+    sounds.busyAlert();
+  }, LOST_LINK_ALERT_INTERVAL_MS);
+}
+
+function stopLostLinkBusyAlerts(): void {
+  if (lostLinkAlertInterval !== null) {
+    window.clearInterval(lostLinkAlertInterval);
+    lostLinkAlertInterval = null;
+  }
+  sounds.busyAlertStop();
+  sounds.busyLoopStop();
+}
+
+/**
+ * While offline: play 1.5s of busy.wav immediately, then every 15s until online.
+ * Stops all busy audio when the browser reports connectivity again.
+ */
+export function bindLostLinkBusyAlerts(): () => void {
+  const onOffline = (): void => {
+    startLostLinkBusyAlerts();
+  };
+  const onOnline = (): void => {
+    stopLostLinkBusyAlerts();
+  };
+  window.addEventListener("offline", onOffline);
+  window.addEventListener("online", onOnline);
+  if (!navigator.onLine) {
+    onOffline();
+  }
+  return () => {
+    window.removeEventListener("offline", onOffline);
+    window.removeEventListener("online", onOnline);
+    stopLostLinkBusyAlerts();
+  };
+}

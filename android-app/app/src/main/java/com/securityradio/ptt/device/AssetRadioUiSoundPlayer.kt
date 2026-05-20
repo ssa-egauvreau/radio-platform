@@ -19,7 +19,7 @@ import android.os.Looper
  * - channel_switch.wav
  * - ptt_permit.wav
  * - emergency.wav
- * - busy.wav (repeater busy / no path to air; looped while PTT is held and air is busy)
+ * - busy.wav (channel busy + listen-only loop while PTT held; 1.5s bursts when link is lost)
  */
 class AssetRadioUiSoundPlayer(
     private val app: Application,
@@ -37,6 +37,8 @@ class AssetRadioUiSoundPlayer(
 
     private var talkPermitPlayer: MediaPlayer? = null
     private var busyTonePlayer: MediaPlayer? = null
+    private var busyAlertPlayer: MediaPlayer? = null
+    private var busyAlertCutoffRunnable: Runnable? = null
     private var volumeCheckPlayer: MediaPlayer? = null
     private var volumeCheckCutoffRunnable: Runnable? = null
     private var volumeCheckLoopRestartRunnable: Runnable? = null
@@ -151,11 +153,12 @@ class AssetRadioUiSoundPlayer(
         main.post { stopBusyLoopInternal() }
     }
 
-    override fun playBusyTone() {
-        // One-shot lost-link alert: same UI stream as every other tone so the volume slider
-        // controls all of them together. (Earlier this used USAGE_ALARM, which is on a different
-        // volume slider — and was the cause of the busy tone sounding quiet against the other tones.)
-        playOneShot(FILE_BUSY)
+    override fun playBusyAlert() {
+        main.post { playBusyAlertCapped(BUSY_ALERT_MAX_MS) }
+    }
+
+    override fun stopBusyAlert() {
+        main.post { stopBusyAlertInternal() }
     }
 
     override fun playEmergencyAlert() {
@@ -234,6 +237,7 @@ class AssetRadioUiSoundPlayer(
         main.post {
             stopTalkPermitLoopInternal()
             stopBusyLoopInternal()
+            stopBusyAlertInternal()
             stopVolumeCheckLoopInternal()
             stopEmergencyAlertInternal()
         }
@@ -255,6 +259,58 @@ class AssetRadioUiSoundPlayer(
             release()
         }
         busyTonePlayer = null
+    }
+
+    private fun cancelBusyAlertCutoff() {
+        busyAlertCutoffRunnable?.let { main.removeCallbacks(it) }
+        busyAlertCutoffRunnable = null
+    }
+
+    private fun stopBusyAlertInternal() {
+        cancelBusyAlertCutoff()
+        busyAlertPlayer?.runCatching {
+            setOnCompletionListener(null)
+            if (isPlaying) {
+                pause()
+            }
+            release()
+        }
+        busyAlertPlayer = null
+    }
+
+    /** Lost-link alert: same busy.wav, capped so it does not loop (re-triggered every 15s offline). */
+    private fun playBusyAlertCapped(maxMs: Long) {
+        stopBusyAlertInternal()
+        val player = MediaPlayer().applyUiAudio()
+        if (!applySource(player, FILE_BUSY)) {
+            player.release()
+            return
+        }
+        busyAlertPlayer = player
+        try {
+            player.setOnPreparedListener { prepared ->
+                prepared.start()
+                val cutoff = Runnable { stopBusyAlertInternal() }
+                busyAlertCutoffRunnable = cutoff
+                main.postDelayed(cutoff, maxMs)
+            }
+            player.setOnCompletionListener { completed ->
+                cancelBusyAlertCutoff()
+                if (busyAlertPlayer === completed) busyAlertPlayer = null
+                completed.release()
+            }
+            player.setOnErrorListener { mp, _, _ ->
+                cancelBusyAlertCutoff()
+                if (busyAlertPlayer === mp) busyAlertPlayer = null
+                mp.release()
+                true
+            }
+            player.prepareAsync()
+        } catch (_: Exception) {
+            cancelBusyAlertCutoff()
+            busyAlertPlayer = null
+            player.release()
+        }
     }
 
     private fun cancelVolumeCheckCutoff() {
@@ -536,6 +592,8 @@ class AssetRadioUiSoundPlayer(
         const val FILE_TALK_PERMIT = "ptt_permit.wav"
         const val FILE_EMERGENCY = "emergency.wav"
         const val FILE_BUSY = "busy.wav"
+        /** No-connection / lost-link: play this much of busy.wav, then silence until the next alert. */
+        const val BUSY_ALERT_MAX_MS = 1_500L
         const val FILE_VOLUME_CHECK = "volume.wav"
         /** TM7 volume knob: one short beep, not the entire WAV. */
         const val VOLUME_CHECK_MAX_MS = 1_000L

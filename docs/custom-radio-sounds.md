@@ -29,3 +29,21 @@ Copy and rename to exactly `marker_1033.wav`, then rebuild/redeploy the web cons
 Agencies can also upload a custom marker under **Admin → Sounds → 10-33 channel marker**.
 
 The marker replays every **12 seconds** while 10-33 is active on a channel panel.
+
+## Busy / out-of-range tone (Android handsets + web console)
+
+**Source (your PC):**
+
+`C:\Users\Evan Gauvreau\Downloads\Busy-OutofRange.wav`
+
+**Destinations (copy and rename to exactly `busy.wav`):**
+
+- `android-app/app/src/main/assets/sounds/busy.wav`
+- `server/web-console/public/sounds/busy.wav`
+
+**Behavior:**
+
+- **Channel busy** or **listen-only** while you hold PTT: the tone **loops** until you release PTT.
+- **No connection / lost link**: play **1.5 seconds**, then stop; if still offline after **15 seconds**, play 1.5s again. When connection returns, the sound **stops immediately**.
+
+Agencies can also upload a custom busy tone under **Admin → Sounds → busy** (server kind `busy`).

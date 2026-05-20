@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { sounds } from "../sounds";
+import { bindLostLinkBusyAlerts, sounds } from "../sounds";
 import { ChannelListPanel } from "./ChannelListPanel";
 import { OnAirPanel } from "./OnAirPanel";
 import { AlertsPanel } from "./AlertsPanel";
@@ -11,9 +11,11 @@ function useConsoleWindow(title: string): void {
     document.title = `${title} — safeT PTT`;
     sounds.preload();
     const stopSoundSync = sounds.startAutoRefresh();
+    const stopLostLink = bindLostLinkBusyAlerts();
     return () => {
       document.title = previous;
       stopSoundSync();
+      stopLostLink();
     };
   }, [title]);
 }

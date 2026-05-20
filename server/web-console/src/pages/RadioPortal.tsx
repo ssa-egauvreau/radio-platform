@@ -14,7 +14,7 @@ import { VoiceChannelClient, type VoiceState } from "../voice/voiceClient";
 import { ScanListenClient } from "../voice/scanListenClient";
 import { useUnitAliasResolver } from "../unitAliases";
 import { formatDuration, formatTime, transcriptOf } from "./TransmissionLog";
-import { sounds } from "../sounds";
+import { bindLostLinkBusyAlerts, sounds } from "../sounds";
 
 const ROSTER_POLL_MS = 5_000;
 const TRANSMISSIONS_POLL_MS = 12_000;
@@ -210,8 +210,10 @@ export function RadioPortal() {
   useEffect(() => {
     sounds.preload();
     const stop = sounds.startAutoRefresh();
+    const stopLostLink = bindLostLinkBusyAlerts();
     return () => {
       stop();
+      stopLostLink();
       sounds.stopAll();
     };
   }, []);

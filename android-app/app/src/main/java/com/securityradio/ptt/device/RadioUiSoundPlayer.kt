@@ -3,7 +3,9 @@ package com.securityradio.ptt.device
 /**
  * Plays short UI cues from packaged assets. Implementations must be safe if files are missing.
  *
- * Busy tone ([startBusyLoop]) loops while air is unavailable. Talk permit plays **once** after the
+ * Busy tone ([startBusyLoop]) loops while the channel is busy or listen-only and PTT is held.
+ * [playBusyAlert] plays 1.5s of the same clip for lost-link (repeats every 15s while offline).
+ * Talk permit plays **once** after the
  * server grants the channel ([playTalkPermitThen]); microphone capture should begin **after**
  * `onFinished` runs (implementations invoke it on the main thread).
  */
@@ -21,8 +23,10 @@ interface RadioUiSoundPlayer {
     fun stopTalkPermitLoop()
     fun startBusyLoop()
     fun stopBusyLoop()
-    /** One-shot busy/alert tone — used as the periodic lost-link alert. */
-    fun playBusyTone()
+    /** Plays ~1.5s of the busy clip for no-connection / lost-link (not looped). */
+    fun playBusyAlert()
+    /** Stops a lost-link alert mid-play; also called when connectivity returns. */
+    fun stopBusyAlert()
     fun playEmergencyAlert()
     /** One-shot beep at the current volume level (legacy / screen). */
     fun playVolumeCheck()
