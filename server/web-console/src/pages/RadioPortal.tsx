@@ -245,12 +245,24 @@ export function RadioPortal() {
   // --- PTT handlers ---
   // The same client.startTransmit / stopTransmit gestures dispatch uses; we wire them to a big
   // hold-to-talk button instead of a hardware key.
+  // pttHeldRef lets us race-cancel: if the user releases the button before startTransmit()
+  // finishes (e.g. while the browser is still prompting for mic permission), VoiceChannelClient
+  // would otherwise enter transmit AFTER release and leave the channel keyed indefinitely.
+  // We check the flag immediately after the await and stop right away if it's already false.
+  const pttHeldRef = useRef(false);
   const startPtt = useCallback(async () => {
     const client = voiceRef.current;
     if (!client) return;
+    pttHeldRef.current = true;
     try {
       await client.startTransmit();
+      if (!pttHeldRef.current) {
+        // The user already released while startTransmit() was awaiting (most commonly the mic
+        // permission prompt). Drop the just-started transmission now.
+        client.stopTransmit();
+      }
     } catch (err) {
+      pttHeldRef.current = false;
       const code = err instanceof Error ? err.message : "transmit_failed";
       setVoiceError(
         code === "listen_only"
@@ -264,6 +276,7 @@ export function RadioPortal() {
     }
   }, []);
   const stopPtt = useCallback(() => {
+    pttHeldRef.current = false;
     voiceRef.current?.stopTransmit();
   }, []);
 
