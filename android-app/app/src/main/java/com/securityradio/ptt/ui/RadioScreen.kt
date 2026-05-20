@@ -105,7 +105,7 @@ import com.securityradio.ptt.ui.theme.RadioLcdPalette
 import com.securityradio.ptt.ui.theme.RadioLcdTheme
 import java.util.Locale
 
-private val HANDSET_CLOCK_FONT_IRC590 = 36.sp
+private val HANDSET_CLOCK_FONT_IRC590 = 44.sp
 private val HANDSET_CLOCK_FONT_TM7 = 28.sp
 private const val HANDSET_EMERGENCY_FLASH_LO = 0.38f
 private const val HANDSET_EMERGENCY_FLASH_HI = 0.92f
@@ -116,8 +116,8 @@ private const val HANDSET_EMERGENCY_WASH_LO = 0.28f
 private const val HANDSET_EMERGENCY_WASH_HI = 0.92f
 private const val HANDSET_IDLE_CHANNEL_MIN_SP = 28f
 private const val HANDSET_IDLE_CHANNEL_MAX_SP = 64f
-private const val HANDSET_IDLE_CHANNEL_MIN_SP_IRC590 = 36f
-private const val HANDSET_IDLE_CHANNEL_MAX_SP_IRC590 = 76f
+private const val HANDSET_IDLE_CHANNEL_MIN_SP_IRC590 = 40f
+private const val HANDSET_IDLE_CHANNEL_MAX_SP_IRC590 = 82f
 
 private fun handsetIdleChannelSpRange(profile: ResolvedDeviceProfile): ClosedFloatingPointRange<Float> =
     when (profile) {
@@ -1040,7 +1040,7 @@ private fun LcdHandsetFillChannelBlock(
                                     0.88f
                                 }
                                 val widthFactor = when {
-                                    homeChannelLarge && irc590Idle -> 0.36f
+                                    homeChannelLarge && irc590Idle -> 0.34f
                                     homeChannelLarge -> 0.42f
                                     else -> 0.5f
                                 }
@@ -1050,7 +1050,7 @@ private fun LcdHandsetFillChannelBlock(
                                             if (scanRxLive) {
                                                 if (irc590Idle) 0.76f else 0.72f
                                             } else {
-                                                if (irc590Idle) 1f else 0.96f
+                                                if (irc590Idle) 1.02f else 0.96f
                                             }
                                     } else {
                                         blockMaxHeight * heightFactor
@@ -1282,6 +1282,7 @@ private fun LcdHandsetToolbarStatusIcons(
     onEvent: (RadioUiEvent) -> Unit,
     modifier: Modifier = Modifier,
     edgeToEdge: Boolean = false,
+    showScanIcon: Boolean = true,
 ) {
     val p = RadioLcdTheme.palette
     val scanIconColor = rememberScanIconActiveColor(
@@ -1316,29 +1317,31 @@ private fun LcdHandsetToolbarStatusIcons(
         locked = true,
         modifier = Modifier.size(iconSize),
     )
-    LcdScanIcon(
-        on = state.scanActive,
-        active = scanIconColor,
-        muted = p.textMuted,
-        modifier = Modifier
-            .size(iconSize)
-            .pointerInput(state.scanActive) {
-                detectTapGestures(
-                    onTap = {
-                        if (state.scanActive) {
-                            onEvent(RadioUiEvent.DisableScan)
-                        } else {
-                            onEvent(RadioUiEvent.ToggleScanLongPress)
-                        }
-                    },
-                    onLongPress = {
-                        if (state.scanActive) {
-                            onEvent(RadioUiEvent.OpenScanPicker)
-                        }
-                    },
-                )
-            },
-    )
+    if (showScanIcon) {
+        LcdScanIcon(
+            on = state.scanActive,
+            active = scanIconColor,
+            muted = p.textMuted,
+            modifier = Modifier
+                .size(iconSize)
+                .pointerInput(state.scanActive) {
+                    detectTapGestures(
+                        onTap = {
+                            if (state.scanActive) {
+                                onEvent(RadioUiEvent.DisableScan)
+                            } else {
+                                onEvent(RadioUiEvent.ToggleScanLongPress)
+                            }
+                        },
+                        onLongPress = {
+                            if (state.scanActive) {
+                                onEvent(RadioUiEvent.OpenScanPicker)
+                            }
+                        },
+                    )
+                },
+        )
+    }
     LcdReplayIcon(
         ready = p.statusAmber,
         muted = p.textMuted,
@@ -1379,7 +1382,7 @@ private fun LcdHandsetToolbarIrc590(
     val scanReceiving = state.scanBackgroundActive
     val accentOnEmergency = if (state.isEmergencyActive) Color.White else p.textPrimary
     val rowPad = 3.dp
-    val statusIconCount = 6
+    val statusIconCount = 5
 
     Column(
         modifier = modifier.fillMaxWidth(),
@@ -1390,7 +1393,7 @@ private fun LcdHandsetToolbarIrc590(
                 .fillMaxWidth()
                 .heightIn(min = 48.dp),
         ) {
-            val batteryReserve = if (showBatteryStatus) 76.dp else 0.dp
+            val batteryReserve = if (showBatteryStatus) 92.dp else 0.dp
             val statusWidth = (maxWidth - batteryReserve).coerceAtLeast(0.dp)
             val squareSize = minOf(statusWidth / statusIconCount, maxHeight * 0.9f)
                 .coerceIn(38.dp, 58.dp)
@@ -1412,8 +1415,10 @@ private fun LcdHandsetToolbarIrc590(
                     onEvent = onEvent,
                     modifier = Modifier.weight(1f),
                     edgeToEdge = true,
+                    showScanIcon = false,
                 )
                 if (showBatteryStatus) {
+                    val batteryTextSp = (squareSize.value * 0.54f).coerceIn(20f, 26f).sp
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -1430,7 +1435,8 @@ private fun LcdHandsetToolbarIrc590(
                             text = "${state.batteryPercent}%",
                             style = styles.status.copy(
                                 fontWeight = FontWeight.Bold,
-                                fontSize = (squareSize.value * 0.42f).coerceIn(15f, 19f).sp,
+                                fontSize = batteryTextSp,
+                                lineHeight = (batteryTextSp.value * 1.1f).sp,
                             ),
                             color = if (state.isEmergencyActive) Color.White else p.textSecondary,
                             maxLines = 1,
@@ -1442,13 +1448,17 @@ private fun LcdHandsetToolbarIrc590(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .heightIn(min = 42.dp),
+                .heightIn(min = 50.dp),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
                 text = state.systemTime.uppercase(Locale.US),
-                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = HANDSET_CLOCK_FONT_IRC590),
+                style = styles.status.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = HANDSET_CLOCK_FONT_IRC590,
+                    lineHeight = (HANDSET_CLOCK_FONT_IRC590.value * 1.08f).sp,
+                ),
                 color = accentOnEmergency,
                 maxLines = 1,
                 textAlign = TextAlign.Center,
