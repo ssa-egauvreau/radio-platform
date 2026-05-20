@@ -40,7 +40,16 @@ export function RadioPortal() {
 
   const [scanEnabled, setScanEnabled] = useState(false);
   const [scanList, setScanList] = useState<Set<string>>(new Set());
-  const [scanActiveChannel, setScanActiveChannel] = useState<string | null>(null);
+  const [scanActiveChannels, setScanActiveChannels] = useState<ReadonlySet<string>>(() => new Set());
+  // Derived: which channel name (if any) to put on the banner. The latched channel is the most
+  // recently added one — preserves the prior "show the channel that just lit up" UX without
+  // dropping the banner when an OTHER channel goes idle.
+  const [scanLatchedChannel, setScanLatchedChannel] = useState<string | null>(null);
+  const scanActiveChannel = scanActiveChannels.size > 0
+    ? (scanLatchedChannel && scanActiveChannels.has(scanLatchedChannel)
+        ? scanLatchedChannel
+        : scanActiveChannels.values().next().value ?? null)
+    : null;
   const [scanPickerOpen, setScanPickerOpen] = useState(false);
 
   const [roster, setRoster] = useState<ChannelMember[]>([]);
@@ -203,20 +212,26 @@ export function RadioPortal() {
   useEffect(() => {
     if (!scanRef.current) {
       scanRef.current = new ScanListenClient(selectedChannel ?? "", {
+        // Track the FULL set of currently-receiving scan channels — not just the latest. If
+        // channels A and B both light up and B subsequently goes idle, the banner should still
+        // show "SCAN RX · A" instead of clearing entirely (A never emits a fresh receiving=true
+        // edge to re-latch it).
         onChannelActivity: (channel, receivingNow) => {
-          // Latch the most recent scan-channel that became active so the banner can name it.
-          if (receivingNow) {
-            setScanActiveChannel(channel);
-          } else {
-            setScanActiveChannel((current) => (current === channel ? null : current));
-          }
+          setScanActiveChannels((current) => {
+            const next = new Set(current);
+            if (receivingNow) next.add(channel);
+            else next.delete(channel);
+            return next;
+          });
+          if (receivingNow) setScanLatchedChannel(channel);
         },
       });
     }
     scanRef.current.setScanList(Array.from(scanList));
     scanRef.current.setEnabled(scanEnabled);
     if (!scanEnabled) {
-      setScanActiveChannel(null);
+      setScanActiveChannels(new Set());
+      setScanLatchedChannel(null);
     }
   }, [scanEnabled, scanList, selectedChannel]);
 
@@ -410,7 +425,8 @@ export function RadioPortal() {
     voiceReconnecting,
     transmitting,
     receiving,
-    scanActiveChannel,
+    scanActiveChannels,
+    scanLatchedChannel,
     emergencyActive,
     permission,
   ]);
