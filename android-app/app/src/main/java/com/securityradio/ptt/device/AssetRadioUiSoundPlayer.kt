@@ -9,6 +9,8 @@ import android.media.MediaPlayer
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 
 /**
  * Plays the radio's UI tones. An agency-custom tone cached by [CustomSoundStore]
@@ -46,6 +48,9 @@ class AssetRadioUiSoundPlayer(
     private var volumeLoopPlayerA: MediaPlayer? = null
     private var volumeLoopPlayerB: MediaPlayer? = null
     private var volumeLoopSwapRunnable: Runnable? = null
+
+    /** Parsed WAV length per clip (key includes custom-file mtime when applicable). */
+    private val clipDurationMsCache = mutableMapOf<String, Long>()
 
     /**
      * Strong reference to the emergency one-shot so the rugged-handset OS (e.g. IRC590) cannot
@@ -468,6 +473,8 @@ class AssetRadioUiSoundPlayer(
                 seekGaplessLoopStart(a)
                 a.start()
                 scheduleGaplessPingPongSwap(
+                    fileName = fileName,
+                    clipDurationMs = resolveClipDurationMs(fileName),
                     current = a,
                     next = b,
                     cancelSwap = cancelSwap,
@@ -498,6 +505,8 @@ class AssetRadioUiSoundPlayer(
     }
 
     private fun scheduleGaplessPingPongSwap(
+        fileName: String,
+        clipDurationMs: Long?,
         current: MediaPlayer,
         next: MediaPlayer,
         cancelSwap: () -> Unit,
@@ -505,13 +514,21 @@ class AssetRadioUiSoundPlayer(
         isActive: () -> Boolean,
     ) {
         cancelSwap()
-        val durationMs =
+        val mediaDurationMs =
             try {
-                current.duration
+                current.duration.toLong()
             } catch (_: Exception) {
-                -1
+                -1L
             }
-        if (durationMs < 100) return
+        val headerDurationMs = clipDurationMs ?: resolveClipDurationMs(fileName)
+        // Some handsets report ~500ms for multi-second WAVs; prefer the RIFF header length.
+        val durationMs =
+            when {
+                headerDurationMs != null && headerDurationMs >= 200L ->
+                    maxOf(headerDurationMs, mediaDurationMs.coerceAtLeast(0L))
+                mediaDurationMs >= 200L -> mediaDurationMs
+                else -> return
+            }
         val delayMs = (durationMs - GAPLESS_LOOP_LEAD_MS).coerceAtLeast(0L)
         val runnable = Runnable {
             setSwapRunnable(null)
@@ -524,6 +541,8 @@ class AssetRadioUiSoundPlayer(
                 current.pause()
                 seekGaplessLoopStart(current)
                 scheduleGaplessPingPongSwap(
+                    fileName = fileName,
+                    clipDurationMs = headerDurationMs,
                     current = next,
                     next = current,
                     cancelSwap = cancelSwap,
@@ -535,6 +554,88 @@ class AssetRadioUiSoundPlayer(
         }
         setSwapRunnable(runnable)
         main.postDelayed(runnable, delayMs)
+    }
+
+    private fun clipDurationCacheKey(fileName: String): String {
+        val custom = customSounds.localFile(fileName) ?: return fileName
+        return "${fileName}:${custom.lastModified()}"
+    }
+
+    /** Length from the WAV RIFF header (reliable on rugged handsets where [MediaPlayer.duration] lies). */
+    private fun resolveClipDurationMs(fileName: String): Long? {
+        val key = clipDurationCacheKey(fileName)
+        clipDurationMsCache[key]?.let { return it }
+        val bytes = loadWavHeaderBytes(fileName) ?: return null
+        val ms = parseWavDurationMs(bytes) ?: return null
+        clipDurationMsCache[key] = ms
+        return ms
+    }
+
+    private fun loadWavHeaderBytes(fileName: String): ByteArray? {
+        customSounds.localFile(fileName)?.let { file ->
+            return try {
+                file.inputStream().use { input ->
+                    val buf = ByteArray(WAV_HEADER_READ_MAX_BYTES)
+                    val read = input.read(buf)
+                    if (read <= 0) null else buf.copyOf(read)
+                }
+            } catch (_: Exception) {
+                null
+            }
+        }
+        return try {
+            app.assets.open("$SOUNDS_DIR/$fileName").use { input ->
+                val buf = ByteArray(WAV_HEADER_READ_MAX_BYTES)
+                val read = input.read(buf)
+                if (read <= 0) null else buf.copyOf(read)
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun parseWavDurationMs(bytes: ByteArray): Long? {
+        if (bytes.size < 44) return null
+        if (!bytes.copyOfRange(0, 4).contentEquals(RIFF_MAGIC) ||
+            !bytes.copyOfRange(8, 12).contentEquals(WAVE_MAGIC)
+        ) {
+            return null
+        }
+        var pos = 12
+        var sampleRate = 0
+        var channels = 0
+        var bitsPerSample = 0
+        var dataSize = 0
+        while (pos + 8 <= bytes.size) {
+            val chunkId = String(bytes, pos, pos + 4)
+            val chunkSize =
+                ByteBuffer.wrap(bytes, pos + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
+            pos += 8
+            if (chunkSize < 0 || pos + chunkSize > bytes.size) break
+            when (chunkId) {
+                "fmt " ->
+                    if (chunkSize >= 16) {
+                        channels =
+                            ByteBuffer.wrap(bytes, pos + 2, 2)
+                                .order(ByteOrder.LITTLE_ENDIAN)
+                                .short
+                                .toInt() and 0xffff
+                        sampleRate =
+                            ByteBuffer.wrap(bytes, pos + 4, 4).order(ByteOrder.LITTLE_ENDIAN).int
+                        bitsPerSample =
+                            ByteBuffer.wrap(bytes, pos + 14, 2)
+                                .order(ByteOrder.LITTLE_ENDIAN)
+                                .short
+                                .toInt() and 0xffff
+                    }
+                "data" -> dataSize = chunkSize
+            }
+            pos += chunkSize + (chunkSize and 1)
+        }
+        if (sampleRate <= 0 || channels <= 0 || bitsPerSample <= 0 || dataSize <= 0) return null
+        val bytesPerFrame = channels * (bitsPerSample / 8)
+        if (bytesPerFrame <= 0) return null
+        return (dataSize.toLong() * 1000L) / (sampleRate.toLong() * bytesPerFrame)
     }
 
     /** Points [player] at the agency-custom tone when one is cached, else the bundled asset. */
@@ -643,5 +744,8 @@ class AssetRadioUiSoundPlayer(
         const val GAPLESS_LOOP_START_MS = 12L
         /** Crossfade window: start the standby player this many ms before the active clip ends. */
         const val GAPLESS_LOOP_LEAD_MS = 72L
+        private const val WAV_HEADER_READ_MAX_BYTES = 512 * 1024
+        private val RIFF_MAGIC = "RIFF".toByteArray(Charsets.US_ASCII)
+        private val WAVE_MAGIC = "WAVE".toByteArray(Charsets.US_ASCII)
     }
 }
