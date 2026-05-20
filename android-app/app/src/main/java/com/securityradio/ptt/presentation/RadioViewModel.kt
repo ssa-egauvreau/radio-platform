@@ -1295,15 +1295,19 @@ class RadioViewModel(
             return
         }
         channelIndex = (channelIndex + delta + channelNames.size) % channelNames.size
-        soundPlayer.playChannelSwitch()
         val tunedLabel = channelNames[channelIndex]
+        // Beep first, then announce the channel name — the TTS engine ran in parallel before, so
+        // the spoken name and the beep overlapped. The callback fires on the main thread after
+        // the WAV ends, which sequences them naturally.
+        soundPlayer.playChannelSwitch {
+            speechHelper.speakChannelTuneIfEnabled(tunedLabel)
+        }
         _uiState.update {
             it.withTuning(channelNames, channelIndex).pruneScanSets().copy(
                 statusMessage = "CHANNEL ${if (delta > 0) "+" else "-"}",
                 currentChannelPermission = currentPermission(),
             )
         }
-        speechHelper.speakChannelTuneIfEnabled(tunedLabel)
         viewModelScope.launch { pulsePresenceHeartbeatAndCount(expectOnline = true) }
         reconcileVoiceTransport()
     }
@@ -1892,6 +1896,11 @@ class RadioViewModel(
         if (tuned.isEmpty() || tuned == "----") return ""
         val main = dto.main
         if (main != null && main.active && channelNamesMatch(main.channel, tuned)) {
+            // The relay keeps the slot occupied for VOICE_AIR_TTL_MS (~2s) after
+            // our last frame, so a freshly released local TX echoes back as the
+            // current talker for a beat. Suppress it so the UI returns to idle
+            // chrome instead of flashing into the blue RX overlay.
+            if (isLocalUnitTalker(s, main)) return ""
             return formatTalker(main, "RX")
         }
         return ""
@@ -1912,11 +1921,18 @@ class RadioViewModel(
             .toSet()
 
         val scanIsOnSideChannel = scanCh in includedNamesLower
-        return if (scanIsOnSideChannel) {
+        return if (scanIsOnSideChannel && !isLocalUnitTalker(s, scanSeg)) {
             formatTalker(scanSeg, "RX")
         } else {
             ""
         }
+    }
+
+    private fun isLocalUnitTalker(s: RadioUiState, talker: TalkerSnapshotDto): Boolean {
+        val talkerUid = talker.unitId?.trim()?.uppercase(Locale.US).orEmpty()
+        if (talkerUid.isEmpty()) return false
+        val local = s.localShortUnitId.trim().uppercase(Locale.US)
+        return local.isNotEmpty() && talkerUid == local
     }
 
     private fun channelNamesMatch(a: String, b: String): Boolean =
