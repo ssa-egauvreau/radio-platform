@@ -925,60 +925,91 @@ private fun LcdHandsetFillChannelBlock(
             LcdPermissionBadge(permission = state.currentChannelPermission, styles = styles)
             val scanRxLive =
                 state.scanBackgroundActive && state.scanBackgroundChannel.isNotBlank()
+            val showHandsetTalker =
+                showTalkPanel && (!scanRxLive || state.isPttPressed || state.isEmergencyActive)
+            val homeChannelLarge = !showHandsetTalker
             val channelBlockWeight =
                 when {
-                    scanRxLive && showTalkPanel -> 1.05f
-                    scanRxLive -> 1.6f
-                    showTalkPanel -> 0.35f
-                    else -> 1.6f
+                    homeChannelLarge -> 2.15f
+                    else -> 0.48f
                 }
             val channelBlockMaxHeight =
-                when {
-                    scanRxLive && showTalkPanel -> 64.dp
-                    scanRxLive -> 80.dp
-                    showTalkPanel -> 36.dp
-                    else -> 80.dp
-                }
+                if (showHandsetTalker) 52.dp else null
             BoxWithConstraints(
                 modifier = Modifier
                     .weight(channelBlockWeight)
                     .fillMaxWidth()
-                    .heightIn(max = channelBlockMaxHeight),
+                    .then(
+                        if (channelBlockMaxHeight != null) {
+                            Modifier.heightIn(max = channelBlockMaxHeight)
+                        } else {
+                            Modifier
+                        },
+                    ),
                 contentAlignment = Alignment.Center,
             ) {
-                if (scanRxLive) {
-                    LcdHandsetScanRxCenter(
-                        channelName = state.scanBackgroundChannel,
-                        styles = styles,
-                        compact = showTalkPanel,
-                        modifier = Modifier.fillMaxSize(),
-                    )
-                } else {
-                    val channelText = state.channelLabel.uppercase(Locale.US)
-                    val density = LocalDensity.current
-                    // Idle: large channel name. TX/RX: compact label so talker text dominates.
-                    val channelFont = with(density) {
-                        val heightFactor = if (showTalkPanel) 0.82f else 0.9f
-                        val widthFactor = if (showTalkPanel) 0.48f else 0.52f
-                        val byHeight = constraints.maxHeight * heightFactor
-                        val byWidth = constraints.maxWidth /
-                            (channelText.length.coerceAtLeast(3) * widthFactor)
-                        minOf(byHeight, byWidth).toSp()
-                    }.value.let { raw ->
-                        if (showTalkPanel) raw.coerceIn(14f, 26f) else raw.coerceIn(18f, 40f)
-                    }.sp
-                    Text(
-                        text = channelText,
-                        style = styles.channel.copy(
-                            fontSize = channelFont,
-                            lineHeight = (channelFont.value * 1.05f).sp,
-                        ),
-                        color = chrome.channelTextColor,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                val channelText = state.channelLabel.uppercase(Locale.US)
+                val density = LocalDensity.current
+                Column(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Box(
+                        modifier = if (homeChannelLarge) {
+                            Modifier
+                                .weight(1f)
+                                .fillMaxWidth()
+                        } else {
+                            Modifier.fillMaxWidth()
+                        },
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        val channelFont = with(density) {
+                            val heightFactor = if (homeChannelLarge) 0.94f else 0.88f
+                            val widthFactor = if (homeChannelLarge) 0.44f else 0.5f
+                            val boxH =
+                                if (homeChannelLarge) {
+                                    constraints.maxHeight * if (scanRxLive) 0.72f else 0.94f
+                                } else {
+                                    constraints.maxHeight * heightFactor
+                                }
+                            val byHeight = boxH
+                            val byWidth = constraints.maxWidth /
+                                (channelText.length.coerceAtLeast(3) * widthFactor)
+                            minOf(byHeight, byWidth).toSp()
+                        }.value.let { raw ->
+                            if (homeChannelLarge) {
+                                raw.coerceIn(26f, 58f)
+                            } else {
+                                raw.coerceIn(16f, 24f)
+                            }
+                        }.sp
+                        Text(
+                            text = channelText,
+                            style = styles.channel.copy(
+                                fontSize = channelFont,
+                                lineHeight = (channelFont.value * 1.05f).sp,
+                            ),
+                            color = chrome.channelTextColor,
+                            maxLines = if (homeChannelLarge) 1 else 2,
+                            overflow = TextOverflow.Ellipsis,
+                            softWrap = !homeChannelLarge,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 4.dp),
+                        )
+                    }
+                    if (scanRxLive) {
+                        LcdHandsetScanRxStrip(
+                            channelName = state.scanBackgroundChannel,
+                            unitId = talkUnit,
+                            displayName = talkName,
+                            styles = styles,
+                            modifier = Modifier.padding(top = 2.dp, bottom = 4.dp),
+                        )
+                    }
                 }
                 if (state.channelTen33) {
                     LcdEmergencyGlyphIcon(
@@ -997,7 +1028,7 @@ private fun LcdHandsetFillChannelBlock(
                         .clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
                 )
             }
-            if (showTalkPanel) {
+            if (showHandsetTalker) {
                 if (showEmergencyBanner) {
                     Text(
                         text = "EMERGENCY",
@@ -1482,55 +1513,61 @@ private fun LcdHandsetWarningRow(
     }
 }
 
-/** Large amber scan-RX line in the main channel area (replaces the home channel name). */
-@Composable
-private fun LcdHandsetScanRxCenter(
+private fun handsetScanRxLabel(
     channelName: String,
+    unitId: String,
+    displayName: String,
+): String {
+    val channel = channelName.trim().uppercase(Locale.US)
+    val unit = unitId.trim().uppercase(Locale.US)
+    val name = displayName.trim()
+    val who =
+        when {
+            unit.isNotEmpty() && name.isNotEmpty() -> "$unit • $name"
+            unit.isNotEmpty() -> unit
+            name.isNotEmpty() -> name.uppercase(Locale.US)
+            else -> ""
+        }
+    return if (who.isNotEmpty()) "SCAN RX · $channel — $who" else "SCAN RX · $channel"
+}
+
+/** Amber scan traffic line under the large home channel name. */
+@Composable
+private fun LcdHandsetScanRxStrip(
+    channelName: String,
+    unitId: String,
+    displayName: String,
     styles: LcdTextStyles,
-    compact: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val p = RadioLcdTheme.palette
     val scanColor = rememberScanIconActiveColor(scanActive = true, scanReceiving = true)
-    val label = "SCAN RX · ${channelName.uppercase(Locale.US)}"
-    BoxWithConstraints(
-        modifier = modifier,
-        contentAlignment = Alignment.Center,
+    val label = handsetScanRxLabel(channelName, unitId, displayName)
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        val density = LocalDensity.current
-        val iconDp = if (compact) 28.dp else 36.dp
-        val textSp = with(density) {
-            val byHeight = maxHeight.value * if (compact) 0.42f else 0.52f
-            val byWidth = maxWidth.value / (label.length.coerceAtLeast(8) * 0.42f)
-            minOf(byHeight, byWidth).coerceIn(if (compact) 16f else 20f, if (compact) 28f else 40f).sp
-        }
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 4.dp),
-            horizontalArrangement = Arrangement.Center,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            LcdScanIcon(
-                on = true,
-                active = scanColor,
-                muted = p.textMuted,
-                modifier = Modifier.size(iconDp),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = label,
-                style = styles.channel.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = textSp,
-                    lineHeight = (textSp.value * 1.05f).sp,
-                ),
-                color = scanColor,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                textAlign = TextAlign.Center,
-            )
-        }
+        LcdScanIcon(
+            on = true,
+            active = scanColor,
+            muted = p.textMuted,
+            modifier = Modifier.size(22.dp),
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            text = label,
+            style = styles.status.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 17.sp,
+                lineHeight = 21.sp,
+            ),
+            color = scanColor,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.weight(1f, fill = false),
+        )
     }
 }
 
@@ -1550,14 +1587,10 @@ private fun LcdHandsetTalkerBlock(
         val density = LocalDensity.current
         val maxH = maxHeight
         val hasName = displayName.isNotBlank()
-        // Large unit id + name for TX/RX on rugged handset screens (IRC590, TM7).
-        val unitSp = with(density) {
-            val cap = if (hasName) maxH.value * 0.56f else maxH.value * 0.68f
-            cap.coerceIn(36f, 96f).sp
-        }
-        val nameSp = with(density) {
-            val cap = maxH.value * 0.34f
-            cap.coerceIn(22f, 44f).sp
+        val lineCount = if (hasName) 2 else 1
+        val lineSp = with(density) {
+            val cap = maxH.value / (lineCount * 1.15f)
+            cap.coerceIn(26f, 48f).sp
         }
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -1566,9 +1599,10 @@ private fun LcdHandsetTalkerBlock(
         ) {
             Text(
                 text = unitId.uppercase(Locale.US),
-                style = styles.channel.copy(
-                    fontSize = unitSp,
-                    lineHeight = (unitSp.value * 1.05f).sp,
+                style = styles.body.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = lineSp,
+                    lineHeight = (lineSp.value * 1.08f).sp,
                 ),
                 color = unitColor,
                 maxLines = 1,
@@ -1577,16 +1611,16 @@ private fun LcdHandsetTalkerBlock(
                 modifier = Modifier.fillMaxWidth(),
             )
             if (hasName) {
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     text = displayName.uppercase(Locale.US),
                     style = styles.body.copy(
                         fontWeight = FontWeight.Bold,
-                        fontSize = nameSp,
-                        lineHeight = (nameSp.value * 1.12f).sp,
+                        fontSize = lineSp,
+                        lineHeight = (lineSp.value * 1.08f).sp,
                     ),
                     color = nameColor,
-                    maxLines = 1,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     textAlign = TextAlign.Center,
                     modifier = Modifier.fillMaxWidth(),
