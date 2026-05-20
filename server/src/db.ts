@@ -19,11 +19,13 @@ export function getPool(): pg.Pool | null {
       connectionString: url,
       ssl: url.includes("localhost") ? false : { rejectUnauthorized: false },
       max: 5,
-      // A runaway query (missing index, accidental cross-join) used to hold a pool connection
-      // forever, choking every other request that needed one. Cap at 30 s — well above any
-      // legitimate query in this codebase but a hard ceiling for the pathological case.
-      statement_timeout: 30_000,
     });
+    // Statement-level timeout would be nice to bound a runaway query against the shared pool,
+    // but setting it on the Pool would also apply to ensureSchema()'s bootstrap migrations
+    // (full-table backfills, CREATE INDEX) that can legitimately exceed any short ceiling on
+    // a populated database. Re-introducing this safely needs either a separate migration pool
+    // or per-request scoping (`SET LOCAL statement_timeout`); skip for now rather than risk a
+    // half-applied schema on boot.
   }
   return pool;
 }
