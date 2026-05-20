@@ -102,6 +102,16 @@ import com.securityradio.ptt.ui.theme.RadioLcdPalette
 import com.securityradio.ptt.ui.theme.RadioLcdTheme
 import java.util.Locale
 
+private val HANDSET_CLOCK_FONT_IRC590 = 36.sp
+private val HANDSET_CLOCK_FONT_TM7 = 28.sp
+private const val HANDSET_EMERGENCY_FLASH_LO = 0.38f
+private const val HANDSET_EMERGENCY_FLASH_HI = 0.92f
+private const val HANDSET_EMERGENCY_PANEL_LO = 0.42f
+private const val HANDSET_EMERGENCY_PANEL_HI = 0.95f
+private const val HANDSET_EMERGENCY_BORDER_LO = 0.65f
+private const val HANDSET_EMERGENCY_WASH_LO = 0.28f
+private const val HANDSET_EMERGENCY_WASH_HI = 0.92f
+
 /**
  * Outer frame: day / night LCD cross-fade and palette scope.
  */
@@ -191,16 +201,15 @@ fun RadioScreen(
 
         Box(modifier = Modifier.fillMaxSize()) {
             if (layout.handsetStatusDisplay && state.isEmergencyActive) {
-                val flashLo =
-                    if (state.resolvedDeviceProfile == ResolvedDeviceProfile.TM7_PLUS) 0.52f else 0.38f
-                val flashHi =
-                    if (state.resolvedDeviceProfile == ResolvedDeviceProfile.TM7_PLUS) 0.97f else 0.92f
                 Box(
                     modifier = Modifier
                         .matchParentSize()
                         .background(
                             palette.statusEmergency.copy(
-                                alpha = emergencyFlashAlpha.coerceIn(flashLo, flashHi),
+                                alpha = emergencyFlashAlpha.coerceIn(
+                                    HANDSET_EMERGENCY_FLASH_LO,
+                                    HANDSET_EMERGENCY_FLASH_HI,
+                                ),
                             ),
                         ),
                 )
@@ -426,7 +435,7 @@ private fun LcdStatusBar(
             } else {
                 Text(
                     text = state.systemTime.uppercase(Locale.US),
-                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
+                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 22.sp),
                     color = p.textPrimary,
                 )
                 Row(
@@ -513,7 +522,7 @@ private fun LcdStatusBar(
         ) {
             Text(
                 text = state.systemTime.uppercase(Locale.US),
-                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 20.sp),
+                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 24.sp),
                 color = p.textPrimary,
             )
             Row(
@@ -850,12 +859,14 @@ private fun LcdHandsetFillChannelBlock(
     modifier: Modifier = Modifier,
 ) {
     val p = RadioLcdTheme.palette
-    val isTm7 = state.resolvedDeviceProfile == ResolvedDeviceProfile.TM7_PLUS
     val panelBackground =
         if (state.isEmergencyActive) {
-            val lo = if (isTm7) 0.48f else 0.42f
-            val hi = if (isTm7) 0.98f else 0.95f
-            p.statusEmergency.copy(alpha = emergencyFlashAlpha.coerceIn(lo, hi))
+            p.statusEmergency.copy(
+                alpha = emergencyFlashAlpha.coerceIn(
+                    HANDSET_EMERGENCY_PANEL_LO,
+                    HANDSET_EMERGENCY_PANEL_HI,
+                ),
+            )
         } else {
             p.lcdAlt
         }
@@ -875,7 +886,7 @@ private fun LcdHandsetFillChannelBlock(
     val emergencyBorderColor =
         if (state.isEmergencyActive) {
             p.statusEmergency.copy(
-                alpha = emergencyFlashAlpha.coerceIn(if (isTm7) 0.75f else 0.65f, 1f),
+                alpha = emergencyFlashAlpha.coerceIn(HANDSET_EMERGENCY_BORDER_LO, 1f),
             )
         } else {
             chrome.borderColor
@@ -1340,7 +1351,7 @@ private fun LcdHandsetToolbarIrc590(
         ) {
             Text(
                 text = state.systemTime.uppercase(Locale.US),
-                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 30.sp),
+                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = HANDSET_CLOCK_FONT_IRC590),
                 color = accentOnEmergency,
                 maxLines = 1,
                 textAlign = TextAlign.Center,
@@ -1395,7 +1406,7 @@ private fun LcdHandsetToolbarTm7(
     val iconGap = 5.dp
     val signalWidth = 34.dp
     val signalHeight = 22.dp
-    val timeFontSize = 20.sp
+    val timeFontSize = HANDSET_CLOCK_FONT_TM7
     val minHeight = 40.dp
 
     Column(modifier = modifier) {
@@ -1685,7 +1696,7 @@ private fun channelDisplayChrome(
         state.isEmergencyActive -> {
             val washAlpha =
                 if (handsetLayout) {
-                    emergencyFlashAlpha.coerceIn(0.35f, 0.9f)
+                    emergencyFlashAlpha.coerceIn(HANDSET_EMERGENCY_WASH_LO, HANDSET_EMERGENCY_WASH_HI)
                 } else {
                     emergencyFlashAlpha.coerceIn(0.2f, 0.75f)
                 }
