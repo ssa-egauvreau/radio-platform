@@ -174,10 +174,10 @@ class VoiceRelayTransport(
                         return
                     }
             val pcm16LittleEndian = P25ImbeNative.Frames.upsampleDup8kToLe16Mono(pcm8k160)
-            inbound.writePcm(pcm16LittleEndian)
+            inbound.writePcmFromMain(pcm16LittleEndian)
             return
         }
-        inbound.writePcm(payload)
+        inbound.writePcmFromMain(payload)
     }
 
     /** One-shot load so mates' IMBE frames work even before user opens the PTT screen (RX path). */

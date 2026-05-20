@@ -76,6 +76,7 @@ class RadioViewModel(
     private val speechHelper: ChannelSpeechHelper,
     private val voiceRelay: VoiceRelayTransport,
     private val scanVoiceListen: ScanVoiceListenTransport,
+    private val scanRxActivity: kotlinx.coroutines.flow.SharedFlow<String>,
     private val locationReporter: LocationReporter,
     private val customSoundDownloader: CustomSoundDownloader,
     private val lastRxAudioRecorder: LastRxAudioRecorder,
@@ -136,6 +137,9 @@ class RadioViewModel(
     @Volatile
     private var replayHistoryToggledThisHold: Boolean = false
     private var historyPlayJob: Job? = null
+
+    /** Clears the scan-RX banner after voice activity stops. */
+    private var scanRxBannerClearJob: Job? = null
 
     @Volatile
     private var pttMicLiveThisHold: Boolean = false
@@ -211,6 +215,9 @@ class RadioViewModel(
         }
         viewModelScope.launch {
             pollTalkHints()
+        }
+        viewModelScope.launch {
+            scanRxActivity.collect { channel -> onScanVoiceHeard(channel) }
         }
         viewModelScope.launch {
             voiceRelay.controlEvents.collect { event ->
@@ -463,6 +470,56 @@ class RadioViewModel(
         reconcileVoiceTransport()
     }
 
+    private fun disableScan() {
+        soundPlayer.playChannelSwitch()
+        scanRxBannerClearJob?.cancel()
+        _uiState.update {
+            it.copy(
+                scanActive = false,
+                scanPickerVisible = false,
+                scanIncludedChannelIndices = emptySet(),
+                scanBackgroundActive = false,
+                scanBackgroundChannel = "",
+                statusMessage = "SCAN OFF",
+            )
+        }
+        reconcileVoiceTransport()
+    }
+
+    private fun onScanVoiceHeard(channelName: String) {
+        val label = channelName.trim().uppercase(Locale.US)
+        if (label.isEmpty()) return
+        val snap = _uiState.value
+        if (!snap.scanActive) return
+        val included = snap.scanIncludedChannelIndices
+            .mapNotNull { ix -> snap.channelCatalog.getOrNull(ix)?.trim() }
+            .any { channelNamesMatch(it, channelName) }
+        if (!included) return
+        if (channelNamesMatch(channelName, snap.channelLabel)) return
+        scanRxBannerClearJob?.cancel()
+        _uiState.update {
+            it.copy(
+                scanBackgroundActive = true,
+                scanBackgroundChannel = label,
+                statusMessage = "SCAN RX · $label",
+            )
+        }
+        scanRxBannerClearJob = viewModelScope.launch {
+            delay(SCAN_RX_BANNER_HOLD_MS)
+            _uiState.update { s ->
+                if (s.scanBackgroundChannel.equals(label, ignoreCase = true)) {
+                    s.copy(
+                        scanBackgroundActive = false,
+                        scanBackgroundChannel = "",
+                        statusMessage = if (s.scanActive) "SCAN ON" else "SCAN OFF",
+                    )
+                } else {
+                    s
+                }
+            }
+        }
+    }
+
     /** Rotates the whole LCD 180° (IRC590 day/night key long-press) and persists it. */
     private fun flipDisplay180() {
         val next = !_uiState.value.displayRotated180
@@ -506,6 +563,7 @@ class RadioViewModel(
             RadioUiEvent.ChannelUp -> bumpChannel(+1)
             RadioUiEvent.ChannelDown -> bumpChannel(-1)
             RadioUiEvent.ToggleScanLongPress -> onTm7ScanLongPressToggle()
+            RadioUiEvent.DisableScan -> disableScan()
             RadioUiEvent.OpenScanPicker -> {
                 soundPlayer.playChannelSwitch()
                 if (_uiState.value.channelCatalog.size > 1) {
@@ -1728,6 +1786,7 @@ class RadioViewModel(
         const val RECONNECTED_BANNER_MS = 2_000L
         const val DAY_NIGHT_HOLD_FLIP_MS = 2_000L
         const val TM7_HOLD_ACTION_MS = 800L
+        const val SCAN_RX_BANNER_HOLD_MS = 3_000L
         /** Extra time so the banner stays up until async AudioTrack playback actually ends. */
         const val REPLAY_BANNER_PAD_MS = 200L
         const val REPLAY_BANNER_MIN_MS = 2_000L

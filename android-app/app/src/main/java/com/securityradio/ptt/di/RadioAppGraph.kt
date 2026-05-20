@@ -66,8 +66,14 @@ class RadioAppGraph(val application: Application) {
 
     val lastRxAudioRecorder = LastRxAudioRecorder(messageHistory = rxMessageHistory)
 
+    private val _scanRxActivity = MutableSharedFlow<String>(extraBufferCapacity = 16)
+
+    /** Emits the scan channel label whenever scan listen sockets deliver voice. */
+    val scanRxActivity: SharedFlow<String> = _scanRxActivity.asSharedFlow()
+
     private val inboundVoicePlayer = InboundVoicePlayer(
         lastRxRecorder = lastRxAudioRecorder,
+        onScanRxActivity = { channel -> _scanRxActivity.tryEmit(channel) },
     )
 
     private val authTokenProvider: () -> String = { radioPreferences.getAuthToken() }
@@ -145,6 +151,7 @@ class RadioAppGraph(val application: Application) {
     fun signOut() {
         radioPreferences.clearAuthSession()
         voiceRelay.disconnect()
+        scanVoiceListen.disconnect()
     }
 
     val locationReporter: LocationReporter = LocationReporter(application, radioApi)

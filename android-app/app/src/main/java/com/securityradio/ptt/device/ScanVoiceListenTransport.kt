@@ -39,6 +39,7 @@ class ScanVoiceListenTransport(
 
     private val imbeWsMagic = byteArrayOf(0xF5.toByte(), 0xAB.toByte())
 
+    /** Lowercase channel label → live socket. */
     private val channels = ConcurrentHashMap<String, ScanChannelConnection>()
 
     @Volatile
@@ -57,7 +58,7 @@ class ScanVoiceListenTransport(
         pendingUnitId = unitIdUpper.trim().uppercase(Locale.US)
         val home = homeChannel.trim()
         wantListen = networkOnline && scanActive && pendingUnitId.isNotEmpty()
-        val desired = if (wantListen) {
+        val desiredByKey: Map<String, String> = if (wantListen) {
             scanChannels
                 .map { it.trim() }
                 .filter { ch ->
@@ -65,20 +66,25 @@ class ScanVoiceListenTransport(
                         ch != "----" &&
                         !ch.equals(home, ignoreCase = true)
                 }
-                .toSet()
+                .associateBy { it.lowercase(Locale.US) }
         } else {
-            emptySet()
+            emptyMap()
         }
 
-        val stale = channels.keys.filter { it !in desired }
+        val stale = channels.keys.filter { it !in desiredByKey.keys }
         for (key in stale) {
             channels.remove(key)?.close()
         }
-        if (!wantListen) return
-        for (ch in desired) {
-            val key = ch.lowercase(Locale.US)
+        if (!wantListen) {
+            for ((_, conn) in channels) {
+                conn.close()
+            }
+            channels.clear()
+            return
+        }
+        for ((key, label) in desiredByKey) {
             channels.computeIfAbsent(key) {
-                ScanChannelConnection(channelLabel = ch)
+                ScanChannelConnection(channelLabel = label)
             }?.ensureConnected()
         }
     }
@@ -99,6 +105,7 @@ class ScanVoiceListenTransport(
     private inner class ScanChannelConnection(
         private val channelLabel: String,
     ) {
+        private val channelKey = channelLabel.lowercase(Locale.US)
         private val socketReady = AtomicBoolean(false)
         private val reconnectAttempt = AtomicInteger(0)
         private val reconnectPending = AtomicBoolean(false)
@@ -146,6 +153,7 @@ class ScanVoiceListenTransport(
 
         fun close() {
             socketReady.set(false)
+            reconnectPending.set(false)
             webSocket?.close(1001, "scan_off")
             webSocket = null
         }
@@ -183,7 +191,7 @@ class ScanVoiceListenTransport(
 
         private fun scheduleReconnect() {
             if (!wantListen) return
-            if (!channels.containsKey(channelLabel.lowercase(Locale.US))) return
+            if (!channels.containsKey(channelKey)) return
             if (!reconnectPending.compareAndSet(false, true)) return
             val attempt = reconnectAttempt.getAndIncrement()
             val delaySeconds = when {
@@ -195,7 +203,7 @@ class ScanVoiceListenTransport(
                 reconnectExecutor.schedule(
                     {
                         reconnectPending.set(false)
-                        if (wantListen && channels.containsKey(channelLabel.lowercase(Locale.US))) {
+                        if (wantListen && channels.containsKey(channelKey)) {
                             if (webSocket == null) {
                                 openSocket()
                             }
@@ -220,11 +228,10 @@ class ScanVoiceListenTransport(
                 val codeword = payload.copyOfRange(2, 13)
                 val pcm8k160 = P25ImbeNative.decodeCodeword11(codeword) ?: return
                 val pcm16 = P25ImbeNative.Frames.upsampleDup8kToLe16Mono(pcm8k160)
-                inbound.writePcm(pcm16)
+                inbound.writePcmFromScan(channelLabel, pcm16)
                 return
             }
-            inbound.writePcm(payload)
+            inbound.writePcmFromScan(channelLabel, payload)
         }
     }
-
 }

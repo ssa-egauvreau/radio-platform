@@ -857,6 +857,17 @@ private fun LcdHandsetFillChannelBlock(
                     styles = styles,
                     modifier = Modifier.align(Alignment.TopEnd),
                 )
+                if (state.scanActive && state.scanBackgroundChannel.isNotBlank()) {
+                    Text(
+                        text = "▶ ${state.scanBackgroundChannel}",
+                        style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
+                        color = p.statusAmber,
+                        maxLines = 1,
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .padding(top = 2.dp),
+                    )
+                }
                 val channelText = state.channelLabel.uppercase(Locale.US)
                 val density = LocalDensity.current
                 // Scale the channel name to fill the block — height-capped, then
@@ -1069,12 +1080,21 @@ private fun LcdHandsetToolbar(
                     muted = p.textMuted,
                     modifier = Modifier
                         .size(iconSize)
-                        .clickable {
-                            if (state.scanActive) {
-                                onEvent(RadioUiEvent.OpenScanPicker)
-                            } else {
-                                onEvent(RadioUiEvent.ToggleScanLongPress)
-                            }
+                        .pointerInput(state.scanActive) {
+                            detectTapGestures(
+                                onTap = {
+                                    if (state.scanActive) {
+                                        onEvent(RadioUiEvent.DisableScan)
+                                    } else {
+                                        onEvent(RadioUiEvent.ToggleScanLongPress)
+                                    }
+                                },
+                                onLongPress = {
+                                    if (state.scanActive) {
+                                        onEvent(RadioUiEvent.OpenScanPicker)
+                                    }
+                                },
+                            )
                         },
                 )
                 LcdReplayIcon(
@@ -1129,9 +1149,11 @@ private fun LcdHandsetToolbar(
                 Spacer(modifier = Modifier.width(leftIconsWidth))
             }
         }
-        if (scanPulse && state.scanBackgroundChannel.isNotBlank()) {
+        if (state.scanActive && state.scanBackgroundChannel.isNotBlank()) {
             Row(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 2.dp),
                 horizontalArrangement = Arrangement.Center,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
@@ -1139,12 +1161,12 @@ private fun LcdHandsetToolbar(
                     on = true,
                     active = p.statusAmber,
                     muted = p.textMuted,
-                    modifier = Modifier.size(18.dp),
+                    modifier = Modifier.size(20.dp),
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
                     text = "SCAN RX · ${state.scanBackgroundChannel}",
-                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
+                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp),
                     color = p.statusAmber,
                     maxLines = 1,
                 )
@@ -1895,13 +1917,18 @@ private fun ScanChannelPickerFullScreen(
                     color = p.textPrimary,
                 )
                 Text(
-                    text = if (state.scanActive) "SCAN ON" else "SCAN OFF",
+                    text = if (state.scanActive) "TURN SCAN OFF" else "SCAN OFF",
                     style = styles.status.copy(fontWeight = FontWeight.Bold),
-                    color = if (state.scanActive) p.statusGreen else p.textMuted,
+                    color = if (state.scanActive) p.statusAmber else p.textMuted,
+                    modifier = Modifier.clickable {
+                        if (state.scanActive) {
+                            onEvent(RadioUiEvent.DisableScan)
+                        }
+                    },
                 )
             }
             Text(
-                text = "Select channels to monitor. None are selected by default. Home channel always has priority.",
+                text = "Tap channels to add or remove. Tap scan icon again to turn scan off. Home channel always has priority.",
                 style = styles.status,
                 color = p.textMuted,
                 modifier = Modifier.padding(vertical = 8.dp),
