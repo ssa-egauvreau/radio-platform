@@ -184,11 +184,24 @@ fun RadioScreen(
             else -> 58.dp
         }
         val emergencyHeight = if (layout.compactSpacing) 38.dp else 44.dp
+        val emergencyFlashAlpha = rememberEmergencyFlashAlpha(state.isEmergencyActive)
 
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.spacedBy(gap),
-        ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            if (layout.handsetStatusDisplay && state.isEmergencyActive) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .background(
+                            palette.statusEmergency.copy(
+                                alpha = emergencyFlashAlpha.coerceIn(0.38f, 0.92f),
+                            ),
+                        ),
+                )
+            }
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(gap),
+            ) {
             // Handset profiles (IRC590) merge the status icons into the main
             // channel box, so the separate top status bar is omitted here.
             if (!layout.handsetStatusDisplay) {
@@ -232,6 +245,7 @@ fun RadioScreen(
                     tunerEnabled = tunerEnabled,
                     styles = styles,
                     layout = layout,
+                    emergencyFlashAlpha = emergencyFlashAlpha,
                     modifier = Modifier.fillMaxSize(),
                 )
             }
@@ -284,6 +298,7 @@ fun RadioScreen(
                     night = lcdNightEffective,
                     rowHeight = if (layout.compactSpacing) 58.dp else 64.dp,
                 )
+            }
             }
         }
         if (state.resolvedDeviceProfile == ResolvedDeviceProfile.TM7_PLUS) {
@@ -547,6 +562,22 @@ private fun LcdStatusBar(
     }
 }
 
+/** Pulsing alpha for local emergency — always composed so the animation never sticks static. */
+@Composable
+private fun rememberEmergencyFlashAlpha(active: Boolean): Float {
+    val transition = rememberInfiniteTransition(label = "local_emergency_flash")
+    val anim by transition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 0.92f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 500),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "emergency_flash_alpha",
+    )
+    return if (active) anim else 0f
+}
+
 @Composable
 private fun LcdMainChannelBlock(
     state: RadioUiState,
@@ -555,28 +586,16 @@ private fun LcdMainChannelBlock(
     tunerEnabled: Boolean,
     styles: LcdTextStyles,
     layout: RadioLayoutPolicy,
+    emergencyFlashAlpha: Float,
     modifier: Modifier = Modifier,
 ) {
     val p = RadioLcdTheme.palette
-    // The flash animation is always running; its value is only applied while an
-    // emergency is active. Driving it unconditionally avoids any conditional-
-    // composition gap that could leave the orange wash static.
-    val emergencyTransition = rememberInfiniteTransition(label = "local_emergency_flash")
-    val emergencyFlashAnim by emergencyTransition.animateFloat(
-        initialValue = 0.28f,
-        targetValue = 0.72f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 550),
-            repeatMode = RepeatMode.Reverse,
-        ),
-        label = "emergency_flash_alpha",
-    )
-    val emergencyFlash = if (state.isEmergencyActive) emergencyFlashAnim else 0f
-    val chrome = channelDisplayChrome(state, p, emergencyFlash)
+    val chrome = channelDisplayChrome(state, p, emergencyFlashAlpha, layout.handsetStatusDisplay)
     if (layout.handsetStatusDisplay) {
         LcdHandsetFillChannelBlock(
             state = state,
             chrome = chrome,
+            emergencyFlashAlpha = emergencyFlashAlpha,
             onEvent = onEvent,
             onRequestMicPermission = onRequestMicPermission,
             styles = styles,
@@ -750,12 +769,19 @@ private fun LcdMainChannelBlock(
 private fun LcdHandsetFillChannelBlock(
     state: RadioUiState,
     chrome: ChannelDisplayChrome,
+    emergencyFlashAlpha: Float,
     onEvent: (RadioUiEvent) -> Unit,
     onRequestMicPermission: () -> Unit,
     styles: LcdTextStyles,
     modifier: Modifier = Modifier,
 ) {
     val p = RadioLcdTheme.palette
+    val panelBackground =
+        if (state.isEmergencyActive) {
+            p.statusEmergency.copy(alpha = emergencyFlashAlpha.coerceIn(0.42f, 0.95f))
+        } else {
+            p.lcdAlt
+        }
     val zoneValue = state.zoneLabel.filter { it.isDigit() }
         .ifEmpty { state.zoneLabel.trim().uppercase(Locale.US) }
     val channelValue = state.channelPosition.replace(" ", "")
@@ -781,9 +807,9 @@ private fun LcdHandsetFillChannelBlock(
             .fillMaxWidth()
             .clip(RoundedCornerShape(2.dp))
             .border(chrome.borderWidth, chrome.borderColor, RoundedCornerShape(2.dp))
-            .background(p.lcdAlt),
+            .background(panelBackground),
     ) {
-        if (chrome.washColor != Color.Transparent) {
+        if (!state.isEmergencyActive && chrome.washColor != Color.Transparent) {
             Box(
                 modifier = Modifier
                     .matchParentSize()
@@ -1224,15 +1250,27 @@ private fun channelDisplayChrome(
     state: RadioUiState,
     p: RadioLcdPalette,
     emergencyFlashAlpha: Float,
+    handsetLayout: Boolean = false,
 ): ChannelDisplayChrome {
     return when {
-        state.isEmergencyActive -> ChannelDisplayChrome(
-            borderColor = p.statusEmergency,
-            borderWidth = 3.dp,
-            washColor = p.statusEmergency.copy(alpha = emergencyFlashAlpha.coerceIn(0.2f, 0.75f)),
-            channelTextColor = p.statusEmergency,
-            talkLineColor = p.statusEmergency,
-        )
+        state.isEmergencyActive -> {
+            val washAlpha =
+                if (handsetLayout) {
+                    emergencyFlashAlpha.coerceIn(0.35f, 0.9f)
+                } else {
+                    emergencyFlashAlpha.coerceIn(0.2f, 0.75f)
+                }
+            val handsetText = Color.White.copy(
+                alpha = (0.8f + emergencyFlashAlpha * 0.2f).coerceIn(0.8f, 1f),
+            )
+            ChannelDisplayChrome(
+                borderColor = if (handsetLayout) handsetText else p.statusEmergency,
+                borderWidth = 3.dp,
+                washColor = p.statusEmergency.copy(alpha = washAlpha),
+                channelTextColor = if (handsetLayout) handsetText else p.statusEmergency,
+                talkLineColor = if (handsetLayout) handsetText else p.statusEmergency,
+            )
+        }
         state.isPttPressed && state.pttBusyTone -> ChannelDisplayChrome(
             borderColor = p.statusRed,
             borderWidth = 3.dp,
