@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, type ChannelMember } from "../api";
 import { useUnitAliasResolver } from "../unitAliases";
-import { IconUser } from "../icons";
+import { IconUser, IconVolumeMuted } from "../icons";
 
 function formatConnected(ms: number): string {
   const minutes = Math.floor(ms / 60000);
@@ -75,6 +75,11 @@ export function ChannelRoster({ channelName }: { channelName: string }) {
           <div className="roster-row" key={`${member.unit_id}-${index}`}>
             <span className={`roster-dot ${tier(member.connected_ms)}`} title="Connected" />
             <span className="roster-name">{member.display_name || aliasFor(member.unit_id)}</span>
+            {member.muted && (
+              <span title="Device muted">
+                <IconVolumeMuted size={13} />
+              </span>
+            )}
             {member.kind === "legacy" && <span className="roster-tag">radio</span>}
             {CLIENT_LABEL[member.client] && (
               <span className="roster-tag">{CLIENT_LABEL[member.client]}</span>

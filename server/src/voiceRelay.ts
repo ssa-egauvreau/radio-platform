@@ -115,6 +115,8 @@ export interface RosterMember {
   /** Client platform reported on join: android, ios, web, desktop, bridge, or unknown. */
   client: string;
   connected_ms: number;
+  /** True when the member's device is muted (in-app toggle or hardware media volume at 0). */
+  muted: boolean;
 }
 
 interface RosterRecord {
@@ -124,6 +126,7 @@ interface RosterRecord {
   kind: "account" | "legacy" | "bridge";
   client: string;
   joinedAt: number;
+  muted: boolean;
 }
 
 /** Client platforms the relay recognizes; anything else is recorded as "unknown". */
@@ -200,6 +203,7 @@ export function listChannelRoster(agencyId: number, channelRaw: unknown): Roster
         kind: record.kind,
         client: record.client,
         connected_ms: now - record.joinedAt,
+        muted: record.muted,
       });
     }
   }
@@ -527,6 +531,7 @@ export function attachVoiceRelay(
       : null;
     meta.joined = true;
     const prior = voiceRoster.get(ws);
+    const sameChannel = prior && prior.channelKey === chanKey;
     voiceRoster.set(ws, {
       channelKey: chanKey,
       unitId,
@@ -535,7 +540,10 @@ export function attachVoiceRelay(
       client: normalizeClient(json.client),
       // Keep the original join time across re-joins to the same channel
       // (Android re-sends `join` on the same socket periodically).
-      joinedAt: prior && prior.channelKey === chanKey ? prior.joinedAt : Date.now(),
+      joinedAt: sameChannel ? prior!.joinedAt : Date.now(),
+      // Preserve the last known mute state across re-joins; the device re-sends
+      // it right after every join so a fresh value lands within one round-trip.
+      muted: sameChannel ? prior!.muted : false,
     });
     ws.send(JSON.stringify({ type: "joined", channel: channelName, permission, unit_id: unitId }));
   }
@@ -556,9 +564,18 @@ export function attachVoiceRelay(
             channel?: string;
             unit_id?: string;
             client?: string;
+            muted?: unknown;
           };
           if (json.type === "join") {
             void handleJoin(ws, meta, json);
+            return;
+          }
+          if (json.type === "mute") {
+            const record = voiceRoster.get(ws);
+            if (record) {
+              record.muted = Boolean(json.muted);
+            }
+            return;
           }
           return;
         }

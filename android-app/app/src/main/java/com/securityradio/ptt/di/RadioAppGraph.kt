@@ -27,6 +27,7 @@ import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.RadioUiSoundPlayer
 import com.securityradio.ptt.device.ServerReachabilityMonitor
 import com.securityradio.ptt.device.VoiceRelayTransport
+import com.securityradio.ptt.device.VolumeMonitor
 import com.securityradio.ptt.domain.ChannelRepository
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -58,6 +59,9 @@ class RadioAppGraph(val application: Application) {
     /** Backend reachability feed; trips when API calls keep failing even though the OS says we're online. */
     val serverReachabilityMonitor: ServerReachabilityMonitor = ServerReachabilityMonitor()
 
+    /** Hardware media-volume == 0 feed; combined with the in-app toggle for the effective listen-mute state. */
+    val volumeMonitor: VolumeMonitor = VolumeMonitor(application).also { it.start() }
+
     val rxMessageHistory = RxMessageHistory()
 
     val lastRxAudioRecorder = LastRxAudioRecorder(messageHistory = rxMessageHistory)
@@ -65,7 +69,7 @@ class RadioAppGraph(val application: Application) {
     private val inboundVoicePlayer = InboundVoicePlayer(
         lastRxRecorder = lastRxAudioRecorder,
         listenGainProvider = {
-            if (radioPreferences.isListenVolumeMuted()) 0f else 1f
+            if (radioPreferences.isListenVolumeMuted() || volumeMonitor.zero.value) 0f else 1f
         },
     )
 

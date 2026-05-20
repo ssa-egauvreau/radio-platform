@@ -30,6 +30,7 @@ class RadioViewModelFactory(
                 rxMessageHistory = graph.rxMessageHistory,
                 connectivityMonitor = graph.connectivityMonitor,
                 serverReachabilityMonitor = graph.serverReachabilityMonitor,
+                volumeMonitor = graph.volumeMonitor,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel type ${modelClass.name}")

@@ -35,6 +35,7 @@ import com.securityradio.ptt.device.RadioUiSoundPlayer
 import com.securityradio.ptt.device.ServerReachabilityMonitor
 import com.securityradio.ptt.device.VoiceControlEvent
 import com.securityradio.ptt.device.VoiceRelayTransport
+import com.securityradio.ptt.device.VolumeMonitor
 import com.securityradio.ptt.domain.ChannelCatalogOrigin
 import com.securityradio.ptt.domain.ChannelPermission
 import com.securityradio.ptt.domain.ChannelRepository
@@ -77,6 +78,7 @@ class RadioViewModel(
     private val rxMessageHistory: RxMessageHistory,
     private val connectivityMonitor: ConnectivityMonitor,
     private val serverReachabilityMonitor: ServerReachabilityMonitor,
+    private val volumeMonitor: VolumeMonitor,
 ) : ViewModel() {
 
     @Volatile
@@ -114,6 +116,9 @@ class RadioViewModel(
 
     /** Null until the first connectivity reading; used to fire on edges only. */
     private var lastConnectivityOnline: Boolean? = null
+
+    /** Last effective-mute value pushed to the relay; guards against redundant publishes. */
+    private var lastSentMuted: Boolean? = null
 
     /** Resolved device dark-mode, reported by the Compose layer; flips [ThemeMode.AUTO] correctly. */
     @Volatile
@@ -270,6 +275,14 @@ class RadioViewModel(
                 .distinctUntilChanged()
                 .collect { online -> onConnectivityChanged(online) }
         }
+        viewModelScope.launch {
+            combine(
+                radioPreferences.listenVolumeMutedFlow(),
+                volumeMonitor.zero,
+            ) { toggle, hardwareZero -> toggle || hardwareZero }
+                .distinctUntilChanged()
+                .collect { effective -> onEffectiveMuteChanged(effective) }
+        }
     }
 
     /**
@@ -286,6 +299,18 @@ class RadioViewModel(
         } else if (previous != null) {
             onConnectionRestored()
         }
+    }
+
+    /**
+     * Effective listen-mute changed (in-app toggle OR hardware media volume at 0).
+     * Drives the on-screen mute icon and publishes the state to the relay so the
+     * dispatch console can show a muted indicator next to this unit on the roster.
+     */
+    private fun onEffectiveMuteChanged(effective: Boolean) {
+        _uiState.update { it.copy(listenVolumeMuted = effective) }
+        if (lastSentMuted == effective) return
+        lastSentMuted = effective
+        voiceRelay.sendMuteState(effective)
     }
 
     /** Cycles NO CONNECTION / RECONNECTING and re-sounds the busy tone until link returns. */
@@ -576,7 +601,8 @@ class RadioViewModel(
             RadioUiEvent.ToggleListenVolume -> {
                 val muted = !radioPreferences.isListenVolumeMuted()
                 radioPreferences.setListenVolumeMuted(muted)
-                _uiState.update { it.copy(listenVolumeMuted = muted) }
+                // UI state and relay push are driven by the effective-mute collector
+                // wired in init (combines this toggle with hardware-volume-zero).
             }
             is RadioUiEvent.SaveAgencyRadioKey -> {
                 val key = event.key.trim()

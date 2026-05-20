@@ -177,6 +177,8 @@ export interface ChannelMember {
   /** Client platform: android, ios, web, desktop, bridge, or unknown. */
   client: string;
   connected_ms: number;
+  /** True when the member's device is muted (in-app toggle or hardware media volume at 0). */
+  muted: boolean;
 }
 
 export interface UnitAlias {

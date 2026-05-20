@@ -94,6 +94,10 @@ class VoiceRelayTransport(
     private var pendingUnitId: String = ""
     private var pendingChannelRaw: String = ""
 
+    /** Last effective mute we tried to publish; replayed after every (re)join so the server stays in sync. */
+    @Volatile
+    private var pendingMute: Boolean = false
+
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             socketReady.set(true)
@@ -329,6 +333,24 @@ class VoiceRelayTransport(
         val json = """{"type":"join","unit_id":"$uid","channel":"$ch","client":"android"}"""
         try {
             ws.send(json)
+            // Re-publish current mute state on every join so a reconnect doesn't
+            // leave the server (and the dispatch roster) showing the pre-drop value.
+            ws.send("""{"type":"mute","muted":$pendingMute}""")
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * Publishes the operator's effective mute state (in-app toggle OR hardware volume at 0)
+     * to the relay so the dispatch console can show a mute icon next to this unit. Sent on
+     * every state edge; the last value is also replayed after each (re)join from [sendJoin].
+     */
+    fun sendMuteState(muted: Boolean) {
+        pendingMute = muted
+        val ws = webSocketRef.get() ?: return
+        if (!socketReady.get()) return
+        try {
+            ws.send("""{"type":"mute","muted":$muted}""")
         } catch (_: Exception) {
         }
     }

@@ -2,6 +2,9 @@ package com.securityradio.ptt.device
 
 import android.content.Context
 import com.securityradio.ptt.presentation.ThemeMode
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 
 /**
  * Persists user-facing shell preferences (themes, etc.).
@@ -98,10 +101,16 @@ class RadioPreferences(context: Context) {
         prefs.edit().putString(KEY_SESSION_DISPLAY_NAME, name.trim()).apply()
     }
 
-    fun isListenVolumeMuted(): Boolean = prefs.getBoolean(KEY_LISTEN_VOLUME_MUTED, false)
+    private val _listenVolumeMutedFlow = MutableStateFlow(prefs.getBoolean(KEY_LISTEN_VOLUME_MUTED, false))
+
+    fun isListenVolumeMuted(): Boolean = _listenVolumeMutedFlow.value
+
+    /** Observable view of the in-app listen-volume toggle. Combine with hardware volume for the effective state. */
+    fun listenVolumeMutedFlow(): StateFlow<Boolean> = _listenVolumeMutedFlow.asStateFlow()
 
     fun setListenVolumeMuted(muted: Boolean) {
         prefs.edit().putBoolean(KEY_LISTEN_VOLUME_MUTED, muted).apply()
+        _listenVolumeMutedFlow.value = muted
     }
 
     /** Screen flipped 180° (IRC590 day/night key long-press). */
