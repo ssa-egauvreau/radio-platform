@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import compression from "compression";
 import express from "express";
 import { DEFAULT_GREEN_CHANNELS } from "./defaultChannels.js";
 import { ensureSchema, getPool, listChannelsFromDb } from "./db.js";
@@ -12,12 +13,21 @@ import { initServerImbe } from "./imbeServerCodec.js";
 import { authenticate } from "./auth.js";
 import { createApiRouter } from "./apiRoutes.js";
 import { countPresence, heartbeatPresence } from "./presence.js";
-import { VOICE_WS_PATH, attachVoiceRelay, peekVoiceTransmittingTalker } from "./voiceRelay.js";
+import {
+  VOICE_WS_PATH,
+  attachVoiceRelay,
+  closeAllVoiceConnections,
+  peekVoiceTransmittingTalker,
+} from "./voiceRelay.js";
 import { startBridgeWorker } from "./bridgeWorker.js";
 
 const app = express();
 // Tiny info-leak (and a few free bytes per response) — Express ships this header by default.
 app.disable("x-powered-by");
+// gzip every response above ~1 KB (default threshold). Most of what's served is JSON state polls
+// and the Vite bundle — both compress ~70-80 %, which is real money on Railway egress + faster
+// page loads. Excludes the voice WebSocket path (handled outside Express).
+app.use(compression());
 app.use(express.json({ limit: "2mb" }));
 app.use(authenticate);
 
@@ -239,6 +249,32 @@ async function main(): Promise<void> {
     // The radio-bridge worker ingests stream-URL bridges onto their channels.
     startBridgeWorker({ port });
   });
+
+  /**
+   * Graceful shutdown so a Railway redeploy doesn't drop voice mid-frame:
+   *   1. Close every voice WS with code 1001 — Android + console reconnect logic treats this as
+   *      a transient drop and retries, instead of seeing a TCP reset.
+   *   2. Stop accepting new HTTP / WS connections.
+   *   3. Give in-flight HTTP requests up to 10 s to finish, then force-exit.
+   */
+  let shuttingDown = false;
+  function shutdown(signal: string): void {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`Received ${signal}, draining for graceful shutdown`);
+    const closedSockets = closeAllVoiceConnections();
+    console.log(`Closed ${closedSockets} voice socket(s) with code 1001`);
+    server.close((err) => {
+      if (err) console.error("server.close error", err);
+      process.exit(0);
+    });
+    setTimeout(() => {
+      console.warn("Shutdown drain timed out; forcing exit");
+      process.exit(0);
+    }, 10_000).unref();
+  }
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 main().catch((error) => {

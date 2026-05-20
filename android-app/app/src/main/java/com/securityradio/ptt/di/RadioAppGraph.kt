@@ -10,6 +10,7 @@ import com.securityradio.ptt.data.remote.NetworkModule
 import com.securityradio.ptt.data.remote.RadioApi
 import com.securityradio.ptt.device.AssetRadioUiSoundPlayer
 import com.securityradio.ptt.device.AudioRecordPttCapture
+import com.securityradio.ptt.device.MicCaptureConfig
 import com.securityradio.ptt.device.ChannelSpeechHelper
 import com.securityradio.ptt.device.ConnectivityMonitor
 import com.securityradio.ptt.device.ExternalMicMonitor
@@ -125,6 +126,13 @@ class RadioAppGraph(val application: Application) {
     val pttMicCapture: PttMicCapture = AudioRecordPttCapture(
         enableSidetone = false,
         streamingSink = voiceRelay,
+        configProvider = {
+            MicCaptureConfig(
+                noiseSuppression = radioPreferences.isNoiseSuppressionEnabled(),
+                autoGain = radioPreferences.isMicAutoGainEnabled(),
+                gainMultiplier = radioPreferences.getMicGainMultiplier(),
+            )
+        },
     )
 
     private val stubChannelRepository = StubChannelRepository()

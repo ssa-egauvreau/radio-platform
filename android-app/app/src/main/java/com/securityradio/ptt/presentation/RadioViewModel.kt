@@ -193,6 +193,9 @@ class RadioViewModel(
                 agencyRadioKey = radioPreferences.getAgencyRadioKey(),
                 deviceProfilePreference = radioPreferences.getDeviceProfilePreference(),
                 resolvedDeviceProfile = DeviceProfileResolver.resolve(radioPreferences.getDeviceProfilePreference()),
+                micNoiseSuppressionEnabled = radioPreferences.isNoiseSuppressionEnabled(),
+                micAutoGainEnabled = radioPreferences.isMicAutoGainEnabled(),
+                micGainMultiplier = radioPreferences.getMicGainMultiplier(),
             )
         }
         viewModelScope.launch {
@@ -567,6 +570,11 @@ class RadioViewModel(
             RadioUiEvent.ChannelDown -> bumpChannel(-1)
             RadioUiEvent.ToggleScanLongPress -> onTm7ScanLongPressToggle()
             RadioUiEvent.DisableScan -> disableScan()
+            RadioUiEvent.ToggleScanSoftKey -> {
+                soundPlayer.playChannelSwitch()
+                _uiState.update { onScanSoftKeyToggle(it) }
+                reconcileVoiceTransport()
+            }
             RadioUiEvent.OpenScanPicker -> {
                 soundPlayer.playChannelSwitch()
                 if (_uiState.value.channelCatalog.size > 1) {
@@ -609,6 +617,37 @@ class RadioViewModel(
                 soundPlayer.playChannelSwitch()
                 _uiState.update { it.copy(mappingSettingsVisible = false, currentlyMappingAction = null) }
                 mappingJob?.cancel()
+            }
+            is RadioUiEvent.SelectSettingsTab -> {
+                val targetIndex = event.index.coerceIn(0, 3)
+                // Leaving the BUTTONS tab while a mapping session is armed would otherwise
+                // capture the next physical keypress silently and write it to the previously
+                // selected action — cancel the listener so the user has to re-arm explicitly.
+                val leavingButtonsTab =
+                    targetIndex != 0 && _uiState.value.currentlyMappingAction != null
+                if (leavingButtonsTab) {
+                    mappingJob?.cancel()
+                }
+                _uiState.update {
+                    it.copy(
+                        settingsTabIndex = targetIndex,
+                        currentlyMappingAction = if (leavingButtonsTab) null else it.currentlyMappingAction,
+                    )
+                }
+            }
+            is RadioUiEvent.SetMicNoiseSuppression -> {
+                radioPreferences.setNoiseSuppressionEnabled(event.enabled)
+                _uiState.update { it.copy(micNoiseSuppressionEnabled = event.enabled) }
+            }
+            is RadioUiEvent.SetMicAutoGain -> {
+                radioPreferences.setMicAutoGainEnabled(event.enabled)
+                _uiState.update { it.copy(micAutoGainEnabled = event.enabled) }
+            }
+            is RadioUiEvent.SetMicGainMultiplier -> {
+                val clamped = event.multiplier
+                    .coerceIn(RadioPreferences.MIN_MIC_GAIN, RadioPreferences.MAX_MIC_GAIN)
+                radioPreferences.setMicGainMultiplier(clamped)
+                _uiState.update { it.copy(micGainMultiplier = clamped) }
             }
             is RadioUiEvent.StartListeningForMapping -> {
                 soundPlayer.playChannelSwitch()
@@ -1295,15 +1334,19 @@ class RadioViewModel(
             return
         }
         channelIndex = (channelIndex + delta + channelNames.size) % channelNames.size
-        soundPlayer.playChannelSwitch()
         val tunedLabel = channelNames[channelIndex]
+        // Beep first, then announce the channel name — the TTS engine ran in parallel before, so
+        // the spoken name and the beep overlapped. The callback fires on the main thread after
+        // the WAV ends, which sequences them naturally.
+        soundPlayer.playChannelSwitch {
+            speechHelper.speakChannelTuneIfEnabled(tunedLabel)
+        }
         _uiState.update {
             it.withTuning(channelNames, channelIndex).pruneScanSets().copy(
                 statusMessage = "CHANNEL ${if (delta > 0) "+" else "-"}",
                 currentChannelPermission = currentPermission(),
             )
         }
-        speechHelper.speakChannelTuneIfEnabled(tunedLabel)
         viewModelScope.launch { pulsePresenceHeartbeatAndCount(expectOnline = true) }
         reconcileVoiceTransport()
     }
@@ -1722,14 +1765,22 @@ class RadioViewModel(
             } catch (_: Exception) {
                 null
             }
+            // Home-channel attribution wins; scan-side attribution is a separate fall-back so
+            // the UI can tell which one drove the display and suppress the blue RX overlay for
+            // scan-only traffic (#8). Yellow SCAN RX banner uses scanBackgroundActive separately.
+            val homeAirLine = rxLineFromLiveVoice(air, snap)
             val scanAirLine = rxLineFromScanAir(snap)
-            val voiceLine = rxLineFromLiveVoice(air, snap).ifBlank { scanAirLine }
-            val mockLine = dto?.let { mergedRxAttributedLine(it, snap) }.orEmpty()
-            val merged = voiceLine.ifBlank { mockLine }
+            val mockHomeLine = dto?.let { mockMainAttribution(it, snap) }.orEmpty()
+            val mockScanLine = dto?.let { mockScanAttribution(it, snap) }.orEmpty()
+            val homeLine = homeAirLine.ifBlank { mockHomeLine }
+            val scanLine = scanAirLine.ifBlank { mockScanLine }
+            val merged = homeLine.ifBlank { scanLine }
+            val mergedFromScan = homeLine.isBlank() && scanLine.isNotBlank()
             val (talkUnit, talkName) = resolveActiveTalkAttribution(snap, air, dto)
 
             if (merged.isNotEmpty() ||
                 snap.rxAttributedLine.isNotEmpty() ||
+                mergedFromScan != snap.rxFromScan ||
                 talkUnit != snap.activeTalkUnitId ||
                 talkName != snap.activeTalkDisplayName
             ) {
@@ -1751,6 +1802,7 @@ class RadioViewModel(
                 _uiState.update {
                     it.copy(
                         rxAttributedLine = merged,
+                        rxFromScan = mergedFromScan,
                         lastRxReplayCaption = replayCaption,
                         activeTalkUnitId = talkUnit,
                         activeTalkDisplayName = talkName,
@@ -1877,31 +1929,49 @@ class RadioViewModel(
         return (activeOnSide to scanCh.uppercase(Locale.US))
     }
 
-    private fun mergedRxAttributedLine(dto: TalkActivityDto, s: RadioUiState): String {
+    /** RX attribution for the tuned home channel only (talk-activity main segment). */
+    private fun mockMainAttribution(dto: TalkActivityDto, s: RadioUiState): String {
+        val tuned = s.channelLabel.trim()
+        if (tuned.isEmpty() || tuned == "----") return ""
+        val main = dto.main
+        if (main != null && main.active && channelNamesMatch(main.channel, tuned)) {
+            // The relay keeps the slot occupied for VOICE_AIR_TTL_MS (~2s) after
+            // our last frame, so a freshly released local TX echoes back as the
+            // current talker for a beat. Suppress it so the UI returns to idle
+            // chrome instead of flashing into the blue RX overlay.
+            if (isLocalUnitTalker(s, main)) return ""
+            return formatTalker(main, "RX")
+        }
+        return ""
+    }
+
+    /** RX attribution for a side-channel scan hit (talk-activity scan segment). */
+    private fun mockScanAttribution(dto: TalkActivityDto, s: RadioUiState): String {
         val tuned = s.channelLabel.trim()
         if (tuned.isEmpty() || tuned == "----") return ""
 
-        val main = dto.main
-        if (main != null && main.active && channelNamesMatch(main.channel, tuned)) {
-            return formatTalker(main, "RX")
-        }
-
         val scanSeg = dto.scan ?: return ""
+        val scanCh = scanSeg.channel.trim().lowercase(Locale.US)
+        if (!scanSeg.active || scanCh.isEmpty() || !s.scanActive) return ""
+        if (channelNamesMatch(scanSeg.channel, tuned)) return ""
 
         val includedNamesLower = s.scanIncludedChannelIndices
             .mapNotNull { ix -> s.channelCatalog.getOrNull(ix)?.trim()?.lowercase(Locale.US) }
             .toSet()
 
-        val scanCh = scanSeg.channel.trim().lowercase(Locale.US)
-        if (!scanSeg.active || scanCh.isEmpty() || !s.scanActive) return ""
-        if (channelNamesMatch(scanSeg.channel, tuned)) return ""
-
         val scanIsOnSideChannel = scanCh in includedNamesLower
-        return if (scanIsOnSideChannel) {
+        return if (scanIsOnSideChannel && !isLocalUnitTalker(s, scanSeg)) {
             formatTalker(scanSeg, "RX")
         } else {
             ""
         }
+    }
+
+    private fun isLocalUnitTalker(s: RadioUiState, talker: TalkerSnapshotDto): Boolean {
+        val talkerUid = talker.unitId?.trim()?.uppercase(Locale.US).orEmpty()
+        if (talkerUid.isEmpty()) return false
+        val local = s.localShortUnitId.trim().uppercase(Locale.US)
+        return local.isNotEmpty() && talkerUid == local
     }
 
     private fun channelNamesMatch(a: String, b: String): Boolean =

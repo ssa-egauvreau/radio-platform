@@ -16,13 +16,30 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
+/** Snapshot of the user's mic-tuning preferences read once at the start of each capture session. */
+data class MicCaptureConfig(
+    val noiseSuppression: Boolean,
+    val autoGain: Boolean,
+    /** Software gain multiplier applied to outgoing PCM. Ignored while [autoGain] is true. */
+    val gainMultiplier: Float,
+) {
+    companion object {
+        /** Matches the historical fixed behaviour: NS on, AGC on, no manual gain. */
+        val DEFAULT = MicCaptureConfig(noiseSuppression = true, autoGain = true, gainMultiplier = 1.0f)
+    }
+}
+
 /**
  * Capture mic PCM during PTT. Optional sidetone (local playback) and optional
  * upstream sink (e.g. [VoiceRelayTransport]) for relayed VoIP toward peers.
+ *
+ * [configProvider] is consulted at the start of each [startCapture] call so the user's
+ * noise-suppression / gain settings apply on the next PTT without restarting the capture loop.
  */
 class AudioRecordPttCapture(
     private val enableSidetone: Boolean = true,
     private val streamingSink: StreamingPcmSink? = null,
+    private val configProvider: () -> MicCaptureConfig = { MicCaptureConfig.DEFAULT },
 ) : PttMicCapture {
 
     private val supervisor = SupervisorJob()
@@ -61,7 +78,11 @@ class AudioRecordPttCapture(
                 record.release()
                 return
             }
-            attachVoiceProcessing(record.audioSessionId)
+            val config = runCatching { configProvider() }.getOrDefault(MicCaptureConfig.DEFAULT)
+            attachVoiceProcessing(record.audioSessionId, config)
+            // Manual gain only matters when the user opted out of AutomaticGainControl. A 1.0
+            // multiplier is a no-op so the int16 saturation pass is skipped at runtime.
+            val manualGain = if (config.autoGain) 1.0f else config.gainMultiplier
 
             var track: AudioTrack? = null
             if (enableSidetone) {
@@ -117,6 +138,9 @@ class AudioRecordPttCapture(
                 while (isActive && captureActive && record.recordingState == AudioRecord.RECORDSTATE_RECORDING) {
                     val read = record.read(buffer, 0, buffer.size)
                     if (read > 0) {
+                        if (manualGain != 1.0f) {
+                            applyGainInPlace(buffer, read, manualGain)
+                        }
                         streamingSink?.consumePcm(buffer, read)
                         val t = audioTrack
                         if (t != null && t.playState == AudioTrack.PLAYSTATE_PLAYING) {
@@ -128,6 +152,37 @@ class AudioRecordPttCapture(
         }
     }
 
+    /**
+     * Scales 16-bit little-endian PCM samples in place by [gain], with a soft-knee limiter so a
+     * hot input doesn't hit the int16 ceiling as a hard clip (which sounds like a buzzy square
+     * wave). Below ~0.85 of full-scale, samples pass through unchanged. Above the knee, the
+     * excess is attenuated to 30 % of its size, then hard-capped at the ceiling as a final
+     * safety net so wrap-around can't happen even with extreme gain.
+     */
+    private fun applyGainInPlace(buffer: ByteArray, len: Int, gain: Float) {
+        var i = 0
+        while (i + 1 < len) {
+            val lo = buffer[i].toInt() and 0xFF
+            val hi = buffer[i + 1].toInt() // signed sign-extend
+            val sample = (hi shl 8) or lo
+            val scaled = softLimitInt16((sample * gain).toInt())
+            buffer[i] = (scaled and 0xFF).toByte()
+            buffer[i + 1] = ((scaled shr 8) and 0xFF).toByte()
+            i += 2
+        }
+    }
+
+    private fun softLimitInt16(sample: Int): Int {
+        if (sample in -SOFT_KNEE..SOFT_KNEE) return sample
+        return if (sample > 0) {
+            val compressed = SOFT_KNEE + (sample - SOFT_KNEE) * 3 / 10
+            if (compressed > 32767) 32767 else compressed
+        } else {
+            val compressed = -SOFT_KNEE + (sample + SOFT_KNEE) * 3 / 10
+            if (compressed < -32768) -32768 else compressed
+        }
+    }
+
     override fun stopCapture() {
         synchronized(this) {
             stopCaptureInternal()
@@ -135,13 +190,14 @@ class AudioRecordPttCapture(
     }
 
     /**
-     * Bind the platform voice-processing effects (noise suppression, echo
-     * cancellation, mic AGC) to the capture session when the device offers
-     * them. Mirrors the echoCancellation/noiseSuppression/autoGainControl
-     * constraints the web console requests via getUserMedia.
+     * Bind the platform voice-processing effects to the capture session when the device offers
+     * them. Noise suppression and AGC respect the user's mic settings; echo cancellation is
+     * always on (PTT half-duplex still benefits, and there's no use case for turning it off).
+     * Mirrors the echoCancellation/noiseSuppression/autoGainControl constraints the web console
+     * requests via getUserMedia.
      */
-    private fun attachVoiceProcessing(sessionId: Int) {
-        if (NoiseSuppressor.isAvailable()) {
+    private fun attachVoiceProcessing(sessionId: Int, config: MicCaptureConfig) {
+        if (config.noiseSuppression && NoiseSuppressor.isAvailable()) {
             noiseSuppressor = runCatching {
                 NoiseSuppressor.create(sessionId)?.also { it.setEnabled(true) }
             }.getOrNull()
@@ -151,7 +207,7 @@ class AudioRecordPttCapture(
                 AcousticEchoCanceler.create(sessionId)?.also { it.setEnabled(true) }
             }.getOrNull()
         }
-        if (AutomaticGainControl.isAvailable()) {
+        if (config.autoGain && AutomaticGainControl.isAvailable()) {
             autoGainControl = runCatching {
                 AutomaticGainControl.create(sessionId)?.also { it.setEnabled(true) }
             }.getOrNull()
@@ -187,5 +243,10 @@ class AudioRecordPttCapture(
     override fun release() {
         stopCapture()
         supervisor.cancel()
+    }
+
+    private companion object {
+        /** Soft-knee threshold for the manual gain limiter; ~0.85 of int16 full-scale. */
+        const val SOFT_KNEE = 27800
     }
 }
