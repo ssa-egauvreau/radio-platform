@@ -99,6 +99,7 @@ import {
   type TransmissionSort,
 } from "./store.js";
 import { getPool } from "./db.js";
+import { getCachedAuth, invalidateCachedAuth, setCachedAuth } from "./sessionCache.js";
 
 /** Legacy global radio key — lets a handset fetch its agency's custom tones. */
 const radioApiKey = process.env.RADIO_API_KEY?.trim();
@@ -232,6 +233,27 @@ export function createApiRouter(): Router {
         next();
         return;
       }
+      // Fast path: a 15 s in-process cache (sessionCache.ts) lets us skip the user/agency
+      // lookups on the hot Android polling path. Login invalidates the cache explicitly so
+      // "newest sign-in wins" still takes effect on the next request from the old device;
+      // admin-driven disables propagate within TTL.
+      const cached = getCachedAuth(auth.id);
+      if (cached) {
+        if (cached.userDisabled) {
+          res.status(401).json({ error: "account_disabled" });
+          return;
+        }
+        if (auth.gen !== cached.tokenGeneration) {
+          res.status(401).json({ error: "session_superseded" });
+          return;
+        }
+        if (cached.agencyDisabled) {
+          res.status(403).json({ error: "agency_disabled" });
+          return;
+        }
+        next();
+        return;
+      }
       const user = await getUserById(auth.id);
       if (!user || user.disabled) {
         res.status(401).json({ error: "account_disabled" });
@@ -243,13 +265,25 @@ export function createApiRouter(): Router {
         res.status(401).json({ error: "session_superseded" });
         return;
       }
+      let agencyDisabled = false;
       if (auth.agencyId != null) {
         const agency = await getAgencyById(auth.agencyId);
         if (!agency || agency.disabled) {
+          agencyDisabled = true;
+          setCachedAuth(auth.id, {
+            tokenGeneration: user.token_generation,
+            userDisabled: false,
+            agencyDisabled: true,
+          });
           res.status(403).json({ error: "agency_disabled" });
           return;
         }
       }
+      setCachedAuth(auth.id, {
+        tokenGeneration: user.token_generation,
+        userDisabled: false,
+        agencyDisabled,
+      });
       next();
     } catch (error) {
       fail(res, error);
@@ -301,6 +335,10 @@ export function createApiRouter(): Router {
       // Mint a fresh session generation so any token still floating around for
       // this account immediately fails the freshness check on its next call.
       const newGen = getPool() ? await bumpTokenGeneration(user!.id) : 0;
+      // Drop the cached "auth is fine" entry for this user so the next request from any prior
+      // device sees the new token_generation and gets a 401 immediately, instead of waiting
+      // up to TTL for the cache to expire.
+      invalidateCachedAuth(user!.id);
       const evictedSockets = dropUserVoiceConnections(user!.id);
       const authUser: AuthUser = {
         id: user!.id,
