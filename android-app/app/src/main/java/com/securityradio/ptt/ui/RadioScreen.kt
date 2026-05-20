@@ -914,9 +914,9 @@ private fun LcdHandsetFillChannelBlock(
             LcdPermissionBadge(permission = state.currentChannelPermission, styles = styles)
             BoxWithConstraints(
                 modifier = Modifier
-                    .weight(if (showTalkPanel) 0.35f else 1.4f)
+                    .weight(if (showTalkPanel) 0.35f else 1.6f)
                     .fillMaxWidth()
-                    .heightIn(max = if (showTalkPanel) 36.dp else 72.dp),
+                    .heightIn(max = if (showTalkPanel) 36.dp else 80.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 if (state.scanActive && state.scanBackgroundChannel.isNotBlank()) {
@@ -932,13 +932,17 @@ private fun LcdHandsetFillChannelBlock(
                 }
                 val channelText = state.channelLabel.uppercase(Locale.US)
                 val density = LocalDensity.current
-                // Keep the channel label small — most of the panel is for unit id / talker name.
+                // Idle: large channel name. TX/RX: compact label so talker text dominates.
                 val channelFont = with(density) {
-                    val byHeight = constraints.maxHeight * 0.82f
+                    val heightFactor = if (showTalkPanel) 0.82f else 0.9f
+                    val widthFactor = if (showTalkPanel) 0.48f else 0.52f
+                    val byHeight = constraints.maxHeight * heightFactor
                     val byWidth = constraints.maxWidth /
-                        (channelText.length.coerceAtLeast(3) * 0.48f)
+                        (channelText.length.coerceAtLeast(3) * widthFactor)
                     minOf(byHeight, byWidth).toSp()
-                }.value.coerceIn(14f, 26f).sp
+                }.value.let { raw ->
+                    if (showTalkPanel) raw.coerceIn(14f, 26f) else raw.coerceIn(18f, 40f)
+                }.sp
                 Text(
                     text = channelText,
                     style = styles.channel.copy(

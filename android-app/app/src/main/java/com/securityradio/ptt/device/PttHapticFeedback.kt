@@ -2,6 +2,8 @@ package com.securityradio.ptt.device
 
 import android.content.Context
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -13,6 +15,7 @@ import android.os.VibratorManager
 class PttHapticFeedback(context: Context) {
 
     private val appContext = context.applicationContext
+    private val mainHandler = Handler(Looper.getMainLooper())
 
     private val vibrator: Vibrator? =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -27,9 +30,15 @@ class PttHapticFeedback(context: Context) {
         return v.hasVibrator()
     }
 
+    /** 100 ms after permit audio starts, pulse for 100 ms. */
     fun pulseTransmitGranted() {
         if (!hasVibrator()) return
+        mainHandler.postDelayed({ pulseTransmitGrantedNow() }, TRANSMIT_PULSE_DELAY_MS)
+    }
+
+    private fun pulseTransmitGrantedNow() {
         val v = vibrator ?: return
+        if (!v.hasVibrator()) return
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 v.vibrate(
@@ -46,6 +55,7 @@ class PttHapticFeedback(context: Context) {
     }
 
     private companion object {
-        const val TRANSMIT_PULSE_MS = 250L
+        const val TRANSMIT_PULSE_DELAY_MS = 100L
+        const val TRANSMIT_PULSE_MS = 100L
     }
 }

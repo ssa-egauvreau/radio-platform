@@ -1173,7 +1173,7 @@ class RadioViewModel(
         }
     }
 
-    /** 0.25 s vibrate in sync with talk-permit audio on any device that has a vibrator. */
+    /** 100 ms vibrate, 100 ms after permit audio starts (all devices with a vibrator). */
     private fun pulsePttTransmitHapticIfEligible() {
         if (!pttHapticFeedback.hasVibrator()) return
         val s = _uiState.value
