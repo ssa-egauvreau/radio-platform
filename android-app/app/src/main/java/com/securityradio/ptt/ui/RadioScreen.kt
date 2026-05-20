@@ -524,10 +524,9 @@ private fun LcdStatusBar(
                 }
             }
         }
-        if (layout.minimalStatusBar) Row(
+        if (layout.minimalStatusBar) Box(
             modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            contentAlignment = Alignment.Center,
         ) {
             Text(
                 text = state.systemTime.uppercase(Locale.US),
@@ -535,8 +534,9 @@ private fun LcdStatusBar(
                 color = p.textPrimary,
             )
             Row(
+                modifier = Modifier.align(Alignment.CenterEnd),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 LcdBatteryIcon(
                     percent = state.batteryPercent,
@@ -544,11 +544,11 @@ private fun LcdStatusBar(
                     fillHigh = p.statusGreen,
                     fillLow = p.statusAmber,
                     fillCritical = p.statusRed,
-                    modifier = Modifier.size(width = 28.dp, height = 14.dp),
+                    modifier = Modifier.size(width = 36.dp, height = 18.dp),
                 )
                 Text(
                     text = "${state.batteryPercent}%",
-                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 20.sp),
+                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 28.sp),
                     color = p.textSecondary,
                 )
             }
@@ -634,6 +634,23 @@ private fun rememberHandsetLocalEmergencyFlashColor(active: Boolean): Color {
     } else {
         Color.Transparent
     }
+}
+
+/** Throbbing alpha for the 10-33 "emergency traffic only" channel band; 0f when off. */
+@Composable
+private fun rememberTen33PulseAlpha(active: Boolean): Float {
+    if (!active) return 0f
+    val transition = rememberInfiniteTransition(label = "ten33_band_pulse")
+    val phase by transition.animateFloat(
+        initialValue = 0.28f,
+        targetValue = 0.78f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 700),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "ten33_band_pulse_alpha",
+    )
+    return phase
 }
 
 /** Orange when scan is on; pulses while a scan channel is receiving. */
@@ -1027,14 +1044,25 @@ private fun LcdHandsetFillChannelBlock(
                         horizontalAlignment = Alignment.CenterHorizontally,
                         verticalArrangement = Arrangement.Center,
                     ) {
+                        val ten33Alpha = rememberTen33PulseAlpha(state.channelTen33)
                         Box(
-                            modifier = if (homeChannelLarge) {
-                                Modifier
-                                    .weight(1f)
-                                    .fillMaxWidth()
-                            } else {
-                                Modifier.fillMaxWidth()
-                            },
+                            modifier = (
+                                if (homeChannelLarge) {
+                                    Modifier
+                                        .weight(1f)
+                                        .fillMaxWidth()
+                                } else {
+                                    Modifier.fillMaxWidth()
+                                }
+                            ).then(
+                                if (state.channelTen33) {
+                                    Modifier
+                                        .background(p.statusAmber.copy(alpha = ten33Alpha))
+                                        .border(2.dp, p.statusAmber, RoundedCornerShape(2.dp))
+                                } else {
+                                    Modifier
+                                }
+                            ),
                             contentAlignment = Alignment.Center,
                         ) {
                             val idleChannelRange = handsetIdleChannelSpRange(state.resolvedDeviceProfile)
@@ -1072,13 +1100,23 @@ private fun LcdHandsetFillChannelBlock(
                                     raw.coerceIn(16f, 24f)
                                 }
                             }.sp
+                            // While 10-33 is on, the channel name sits inside a pulsing amber
+                            // band that hits alpha ~0.78 at peak. The default light textPrimary
+                            // washes out against that — force a dark color so the name stays
+                            // readable through the brightest part of the pulse.
+                            val channelTextColor =
+                                if (state.channelTen33) {
+                                    Color.Black.copy(alpha = 0.92f)
+                                } else {
+                                    chrome.channelTextColor
+                                }
                             Text(
                                 text = channelText,
                                 style = styles.channel.copy(
                                     fontSize = channelFont,
                                     lineHeight = (channelFont.value * 1.05f).sp,
                                 ),
-                                color = chrome.channelTextColor,
+                                color = channelTextColor,
                                 maxLines = if (homeChannelLarge) 1 else 2,
                                 overflow = TextOverflow.Ellipsis,
                                 softWrap = !homeChannelLarge,
@@ -1098,14 +1136,6 @@ private fun LcdHandsetFillChannelBlock(
                             )
                         }
                     }
-                }
-                if (state.channelTen33) {
-                    LcdEmergencyGlyphIcon(
-                        color = p.statusAmber,
-                        modifier = Modifier
-                            .align(Alignment.TopEnd)
-                            .size(48.dp),
-                    )
                 }
                 if (!remoteEmergencyLive) {
                     LcdSettingsIcon(
