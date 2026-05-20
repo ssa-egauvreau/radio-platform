@@ -880,6 +880,8 @@ private fun LcdHandsetFillChannelBlock(
                 channelValue = channelValue,
                 radiosValue = radiosValue,
                 radiosKnown = state.radiosOnlineOnChannel != null,
+                timeLabel = state.systemTime.uppercase(Locale.US),
+                timeColor = if (state.isEmergencyActive) Color.White else p.textPrimary,
                 onEvent = onEvent,
                 styles = styles,
             )
@@ -942,6 +944,8 @@ private fun LcdHandsetStatsRow(
     channelValue: String,
     radiosValue: String,
     radiosKnown: Boolean,
+    timeLabel: String,
+    timeColor: Color,
     onEvent: (RadioUiEvent) -> Unit,
     styles: LcdTextStyles,
 ) {
@@ -953,29 +957,45 @@ private fun LcdHandsetStatsRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        LcdHandsetStat(value = zoneValue, valueColor = p.textSecondary, styles = styles, compact = true) {
-            LcdZoneIcon(color = p.textSecondary, modifier = Modifier.size(22.dp))
-        }
-        LcdHandsetStat(value = channelValue, valueColor = p.textSecondary, styles = styles, compact = true) {
-            LcdRadioIcon(color = p.textSecondary, modifier = Modifier.size(24.dp))
-        }
-        LcdHandsetStat(
-            value = radiosValue,
-            valueColor = if (radiosKnown) p.statusGreen else p.textMuted,
-            styles = styles,
-            compact = true,
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            LcdGlobeIcon(
-                color = if (radiosKnown) p.statusGreen else p.textMuted,
-                modifier = Modifier.size(24.dp),
+            LcdHandsetStat(value = zoneValue, valueColor = p.textSecondary, styles = styles, compact = true) {
+                LcdZoneIcon(color = p.textSecondary, modifier = Modifier.size(22.dp))
+            }
+            LcdHandsetStat(value = channelValue, valueColor = p.textSecondary, styles = styles, compact = true) {
+                LcdRadioIcon(color = p.textSecondary, modifier = Modifier.size(24.dp))
+            }
+            LcdHandsetStat(
+                value = radiosValue,
+                valueColor = if (radiosKnown) p.statusGreen else p.textMuted,
+                styles = styles,
+                compact = true,
+            ) {
+                LcdGlobeIcon(
+                    color = if (radiosKnown) p.statusGreen else p.textMuted,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = timeLabel,
+                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
+                color = timeColor,
+                maxLines = 1,
+            )
+            Text(
+                text = "SET",
+                style = styles.softKey.copy(fontWeight = FontWeight.Bold, fontSize = 13.sp),
+                color = p.statusBlue,
+                modifier = Modifier.clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
             )
         }
-        Text(
-            text = "SET",
-            style = styles.softKey.copy(fontWeight = FontWeight.Bold, fontSize = 13.sp),
-            color = p.statusBlue,
-            modifier = Modifier.clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
-        )
     }
 }
 
