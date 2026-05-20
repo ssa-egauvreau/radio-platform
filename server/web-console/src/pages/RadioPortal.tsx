@@ -300,14 +300,27 @@ export function RadioPortal() {
     pttHeldRef.current = true;
     try {
       await client.startTransmit();
+      // Two race-cancel cases after the await:
+      //   1. The user released the button before startTransmit() resolved (typical: mic
+      //      permission prompt held the await). pttHeldRef is already false → drop the TX.
+      //   2. The user switched channels (or the component started teardown) while we were
+      //      waiting. voiceRef now points at a NEW client; the original one would otherwise
+      //      transmit on the OLD channel and emit late state transitions that stomp on the
+      //      new channel's UI. stopTransmit() on the captured client undoes the just-started
+      //      transmission; the new client is never touched.
+      if (client !== voiceRef.current) {
+        client.stopTransmit();
+        return;
+      }
       if (!pttHeldRef.current) {
-        // The user already released while startTransmit() was awaiting (most commonly the mic
-        // permission prompt). Drop the just-started transmission now.
         client.stopTransmit();
       }
     } catch (err) {
       pttHeldRef.current = false;
       const code = err instanceof Error ? err.message : "transmit_failed";
+      // Don't surface this error on the new channel's UI if we're already on a different
+      // client — the user has moved on.
+      if (client !== voiceRef.current) return;
       setVoiceError(
         code === "listen_only"
           ? "You can only listen on this channel."
