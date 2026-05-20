@@ -24,6 +24,16 @@ import { startBridgeWorker } from "./bridgeWorker.js";
 const app = express();
 // Tiny info-leak (and a few free bytes per response) — Express ships this header by default.
 app.disable("x-powered-by");
+// Lightweight security headers — no extra dep, just static response headers on every reply.
+// X-Content-Type-Options stops browsers from MIME-sniffing a JSON response as HTML/JS.
+// X-Frame-Options blocks embedding the console in an iframe (cheap clickjacking guard).
+// Referrer-Policy keeps the URL out of cross-origin Referer headers (no tokens leak in URLs).
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  next();
+});
 // gzip every response above ~1 KB (default threshold). Most of what's served is JSON state polls
 // and the Vite bundle — both compress ~70-80 %, which is real money on Railway egress + faster
 // page loads. Excludes the voice WebSocket path (handled outside Express).
@@ -239,6 +249,12 @@ async function main(): Promise<void> {
   void initServerImbe();
 
   const server = createServer(app);
+  // Match an upstream LB / edge proxy's idle timeout (Railway / Cloudflare default ~60 s).
+  // Node's default keepAliveTimeout is 5 s — too short to let a connection survive between LB
+  // reuses, which surfaces as spurious 502s. headersTimeout must be strictly greater so an
+  // already-active connection has time to finish reading request headers.
+  server.keepAliveTimeout = 65_000;
+  server.headersTimeout = 66_000;
   attachVoiceRelay(server, { radioApiKey });
 
   server.listen(port, () => {

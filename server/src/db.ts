@@ -30,6 +30,12 @@ export function getPool(): pg.Pool | null {
       ssl: url.includes("localhost") ? false : { rejectUnauthorized: false },
       max,
     });
+    // Statement-level timeout would be nice to bound a runaway query against the shared pool,
+    // but setting it on the Pool would also apply to ensureSchema()'s bootstrap migrations
+    // (full-table backfills, CREATE INDEX) that can legitimately exceed any short ceiling on
+    // a populated database. Re-introducing this safely needs either a separate migration pool
+    // or per-request scoping (`SET LOCAL statement_timeout`); skip for now rather than risk a
+    // half-applied schema on boot.
   }
   return pool;
 }
