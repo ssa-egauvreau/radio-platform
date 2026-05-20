@@ -39,15 +39,17 @@ class AssetRadioUiSoundPlayer(
     private var busyTonePlayer: MediaPlayer? = null
     private var volumeCheckPlayer: MediaPlayer? = null
     private var volumeCheckCutoffRunnable: Runnable? = null
-    private var busyFocusRequest: AudioFocusRequest? = null
 
-    /** Pre-O [AudioFocusRequest] equivalent; must abandon with same instance. */
-    @Suppress("DEPRECATION")
-    private var busyFocusListener: AudioManager.OnAudioFocusChangeListener? = null
+    /**
+     * Strong reference to the emergency one-shot so the rugged-handset OS (e.g. IRC590) cannot
+     * GC the wrapper while the WAV is still playing — the symptom was the emergency tone cutting
+     * off after ~0.5-1s when triggered locally. Cleared in the completion/error listener.
+     */
+    private var emergencyPlayer: MediaPlayer? = null
+    private var emergencyFocusRequest: AudioFocusRequest? = null
 
     @Suppress("DEPRECATION")
-    private var busySpeakerphoneRestore: Boolean? = null
-    private var busyAudioModeRestore: Int? = null
+    private var emergencyFocusListener: AudioManager.OnAudioFocusChangeListener? = null
 
     private val uiAudioAttrs: AudioAttributes =
         AudioAttributes.Builder()
@@ -55,10 +57,13 @@ class AssetRadioUiSoundPlayer(
             .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
             .build()
 
-    /** Rugged LTE handsets often leave [USAGE_VOICE_COMMUNICATION] inaudible on the loudspeaker. */
-    private val busyAlarmAttrs: AudioAttributes = busyAlarmAudioAttributes()
+    /**
+     * Audibility-enforced alarm attributes so the emergency tone is not ducked or paused by other
+     * audio focus changes, and is loud regardless of the media volume slider.
+     */
+    private val emergencyAttrs: AudioAttributes = emergencyAudioAttributes()
 
-    private fun busyAlarmAudioAttributes(): AudioAttributes {
+    private fun emergencyAudioAttributes(): AudioAttributes {
         val b =
             AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ALARM)
@@ -75,68 +80,45 @@ class AssetRadioUiSoundPlayer(
         return this
     }
 
-    @Suppress("DEPRECATION")
-    private fun activateBusySpeakerRouting() {
-        runCatching {
-            if (busyAudioModeRestore != null || busySpeakerphoneRestore != null) return
-            busyAudioModeRestore = audioManager.mode
-            busySpeakerphoneRestore = audioManager.isSpeakerphoneOn
-            audioManager.mode = AudioManager.MODE_IN_COMMUNICATION
-            audioManager.isSpeakerphoneOn = true
-        }
-    }
-
-    @Suppress("DEPRECATION")
-    private fun deactivateBusySpeakerRouting() {
-        runCatching {
-            busySpeakerphoneRestore?.let { audioManager.isSpeakerphoneOn = it }
-        }
-        busySpeakerphoneRestore = null
-        runCatching {
-            busyAudioModeRestore?.let { audioManager.mode = it }
-        }
-        busyAudioModeRestore = null
-    }
-
-    private fun acquireBusyToneFocus() {
-        abandonBusyToneFocusInternal()
+    private fun acquireEmergencyFocus() {
+        abandonEmergencyFocus()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val req =
-                AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
-                    .setAudioAttributes(busyAlarmAttrs)
+                AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE)
+                    .setAudioAttributes(emergencyAttrs)
                     .setWillPauseWhenDucked(false)
                     .setAcceptsDelayedFocusGain(false)
-                    .setOnAudioFocusChangeListener { /* hold until busy loop stops */ }
+                    .setOnAudioFocusChangeListener { /* keep emergency audible until it ends */ }
                     .build()
-            busyFocusRequest = req
+            emergencyFocusRequest = req
             audioManager.requestAudioFocus(req)
         } else {
             @Suppress("DEPRECATION")
             val listener =
-                AudioManager.OnAudioFocusChangeListener { /* hold until busy loop stops */ }
-            busyFocusListener = listener
+                AudioManager.OnAudioFocusChangeListener { /* keep emergency audible until it ends */ }
+            emergencyFocusListener = listener
             @Suppress("DEPRECATION")
             audioManager.requestAudioFocus(
                 listener,
                 AudioManager.STREAM_ALARM,
-                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT,
+                AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_EXCLUSIVE,
             )
         }
     }
 
-    private fun abandonBusyToneFocusInternal() {
+    private fun abandonEmergencyFocus() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            busyFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
-            busyFocusRequest = null
+            emergencyFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+            emergencyFocusRequest = null
         } else {
             @Suppress("DEPRECATION")
-            busyFocusListener?.let { audioManager.abandonAudioFocus(it) }
-            busyFocusListener = null
+            emergencyFocusListener?.let { audioManager.abandonAudioFocus(it) }
+            emergencyFocusListener = null
         }
     }
 
-    override fun playChannelSwitch() {
-        playOneShot(FILE_CHANNEL_SWITCH)
+    override fun playChannelSwitch(onFinished: (() -> Unit)?) {
+        playOneShot(FILE_CHANNEL_SWITCH, onFinished = onFinished)
     }
 
     override fun playTalkPermitThen(onFinished: () -> Unit, onStarted: (() -> Unit)?) {
@@ -159,13 +141,7 @@ class AssetRadioUiSoundPlayer(
         main.post {
             stopTalkPermitLoopInternal()
             stopBusyLoopInternal()
-            activateBusySpeakerRouting()
-            acquireBusyToneFocus()
-            val player = createBusyLoopMediaPlayer(FILE_BUSY) ?: run {
-                abandonBusyToneFocusInternal()
-                deactivateBusySpeakerRouting()
-                return@post
-            }
+            val player = createBusyLoopMediaPlayer(FILE_BUSY) ?: return@post
             busyTonePlayer = player
         }
     }
@@ -175,12 +151,65 @@ class AssetRadioUiSoundPlayer(
     }
 
     override fun playBusyTone() {
-        // Alarm routing keeps the lost-link alert audible on rugged loudspeakers.
-        playOneShot(FILE_BUSY, busyAlarmAttrs)
+        // One-shot lost-link alert: same UI stream as every other tone so the volume slider
+        // controls all of them together. (Earlier this used USAGE_ALARM, which is on a different
+        // volume slider — and was the cause of the busy tone sounding quiet against the other tones.)
+        playOneShot(FILE_BUSY)
     }
 
     override fun playEmergencyAlert() {
-        playOneShot(FILE_EMERGENCY)
+        main.post {
+            // Drop any prior emergency one-shot still in flight so a fast re-press restarts cleanly.
+            stopEmergencyAlertInternal()
+            acquireEmergencyFocus()
+            val player = MediaPlayer()
+            player.setAudioAttributes(emergencyAttrs)
+            player.setVolume(1f, 1f)
+            if (!applySource(player, FILE_EMERGENCY)) {
+                player.release()
+                abandonEmergencyFocus()
+                return@post
+            }
+            emergencyPlayer = player
+            try {
+                player.setOnPreparedListener { prepared -> prepared.start() }
+                player.setOnCompletionListener { completed ->
+                    if (emergencyPlayer === completed) emergencyPlayer = null
+                    completed.release()
+                    abandonEmergencyFocus()
+                }
+                player.setOnErrorListener { mp, _, _ ->
+                    if (emergencyPlayer === mp) emergencyPlayer = null
+                    mp.release()
+                    abandonEmergencyFocus()
+                    true
+                }
+                player.prepareAsync()
+            } catch (_: Exception) {
+                emergencyPlayer = null
+                player.release()
+                abandonEmergencyFocus()
+            }
+        }
+    }
+
+    private fun stopEmergencyAlertInternal() {
+        val player = emergencyPlayer
+        emergencyPlayer = null
+        if (player != null) {
+            // stop() throws IllegalStateException when the player is still in the Preparing
+            // state (which a fast re-press can hit before onPrepared has fired). Keep release()
+            // in its own runCatching so a stop() throw does not leak the native resources or
+            // leave its listeners alive.
+            runCatching {
+                player.setOnCompletionListener(null)
+                player.setOnPreparedListener(null)
+                player.setOnErrorListener(null)
+            }
+            runCatching { player.stop() }
+            runCatching { player.release() }
+        }
+        abandonEmergencyFocus()
     }
 
     override fun playVolumeCheck() {
@@ -205,6 +234,7 @@ class AssetRadioUiSoundPlayer(
             stopTalkPermitLoopInternal()
             stopBusyLoopInternal()
             stopVolumeCheckLoopInternal()
+            stopEmergencyAlertInternal()
         }
     }
 
@@ -218,14 +248,12 @@ class AssetRadioUiSoundPlayer(
     }
 
     private fun stopBusyLoopInternal() {
-        abandonBusyToneFocusInternal()
         busyTonePlayer?.runCatching {
             setOnCompletionListener(null)
             stop()
             release()
         }
         busyTonePlayer = null
-        deactivateBusySpeakerRouting()
     }
 
     private fun cancelVolumeCheckCutoff() {
@@ -331,13 +359,18 @@ class AssetRadioUiSoundPlayer(
         }
     }
 
-    private fun playOneShot(fileName: String, attrs: AudioAttributes = uiAudioAttrs) {
+    private fun playOneShot(
+        fileName: String,
+        attrs: AudioAttributes = uiAudioAttrs,
+        onFinished: (() -> Unit)? = null,
+    ) {
         main.post {
             val player = MediaPlayer()
             player.setAudioAttributes(attrs)
             player.setVolume(1f, 1f)
             if (!applySource(player, fileName)) {
                 player.release()
+                onFinished?.let { main.post(it) }
                 return@post
             }
             try {
@@ -346,14 +379,17 @@ class AssetRadioUiSoundPlayer(
                 }
                 player.setOnCompletionListener { completed ->
                     completed.release()
+                    onFinished?.let { main.post(it) }
                 }
                 player.setOnErrorListener { mp, _, _ ->
                     mp.release()
+                    onFinished?.let { main.post(it) }
                     true
                 }
                 player.prepareAsync()
             } catch (_: Exception) {
                 player.release()
+                onFinished?.let { main.post(it) }
             }
         }
     }
@@ -395,12 +431,13 @@ class AssetRadioUiSoundPlayer(
     }
 
     /**
-     * Busy loop uses the alarm/sonification path + manual restart: some handset builds ignore
-     * [isLooping] for certain WAV PCM assets while emulators behave.
+     * Busy loop on the UI sonification path (same stream as channel-switch / talk-permit) so its
+     * volume tracks the rest of the radio's tones. Manual seek+restart on completion because some
+     * handset builds ignore [isLooping] for certain WAV PCM assets while emulators behave.
      */
     private fun createBusyLoopMediaPlayer(fileName: String): MediaPlayer? {
         val player = MediaPlayer()
-        player.setAudioAttributes(busyAlarmAttrs)
+        player.setAudioAttributes(uiAudioAttrs)
         player.setVolume(1f, 1f)
         if (!applySource(player, fileName)) {
             player.release()

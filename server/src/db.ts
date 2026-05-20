@@ -15,11 +15,27 @@ export function getPool(): pg.Pool | null {
     return null;
   }
   if (!pool) {
+    // Cap on concurrent Postgres connections per node. Default 20 is comfortable for the typical
+    // polling load (Android handsets at ~5 req/s/user + the dispatch console); the prior cap of
+    // 5 throttled requests under any moderate concurrency. Override via DB_POOL_MAX env when
+    // running multiple Node instances behind a load balancer to keep total pool size sane.
+    // Parse explicitly so DB_POOL_MAX=0 is clamped to 1 (the documented floor) rather than
+    // silently falling through `|| 20` and quietly opening 20 connections.
+    const parsed = Number.parseInt(process.env.DB_POOL_MAX ?? "", 10);
+    const max = Number.isFinite(parsed)
+      ? Math.max(1, Math.min(200, parsed))
+      : 20;
     pool = new Pool({
       connectionString: url,
       ssl: url.includes("localhost") ? false : { rejectUnauthorized: false },
-      max: 5,
+      max,
     });
+    // Statement-level timeout would be nice to bound a runaway query against the shared pool,
+    // but setting it on the Pool would also apply to ensureSchema()'s bootstrap migrations
+    // (full-table backfills, CREATE INDEX) that can legitimately exceed any short ceiling on
+    // a populated database. Re-introducing this safely needs either a separate migration pool
+    // or per-request scoping (`SET LOCAL statement_timeout`); skip for now rather than risk a
+    // half-applied schema on boot.
   }
   return pool;
 }

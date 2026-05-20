@@ -1,18 +1,39 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./auth";
 import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ConsolePage } from "./pages/ConsolePage";
-import { MapWindowPage } from "./pages/MapWindowPage";
 import {
   ChannelsWindowPage,
   OnAirWindowPage,
   AlertsWindowPage,
 } from "./pages/ConsoleWindows";
-import { BridgeRunnerPage } from "./pages/BridgeRunnerPage";
-import { AdminPage } from "./pages/admin/AdminPage";
-import { OwnerPage } from "./pages/owner/OwnerPage";
-import { LegalPage } from "./pages/legal/LegalPage";
+
+/*
+ * Heavy / rarely-accessed pages get pulled in lazily so the initial dispatch bundle stays slim.
+ * Vite splits each into its own chunk; the chunk is fetched the first time the route is visited
+ * and cached by the browser thereafter. A regular dispatcher who never opens Control / Platform /
+ * Map / Bridges / Legal pays for none of that JS on first paint.
+ */
+const MapWindowPage = lazy(() =>
+  import("./pages/MapWindowPage").then((m) => ({ default: m.MapWindowPage })),
+);
+const BridgeRunnerPage = lazy(() =>
+  import("./pages/BridgeRunnerPage").then((m) => ({ default: m.BridgeRunnerPage })),
+);
+const RadioPortal = lazy(() =>
+  import("./pages/RadioPortal").then((m) => ({ default: m.RadioPortal })),
+);
+const AdminPage = lazy(() =>
+  import("./pages/admin/AdminPage").then((m) => ({ default: m.AdminPage })),
+);
+const OwnerPage = lazy(() =>
+  import("./pages/owner/OwnerPage").then((m) => ({ default: m.OwnerPage })),
+);
+const LegalPage = lazy(() =>
+  import("./pages/legal/LegalPage").then((m) => ({ default: m.LegalPage })),
+);
 
 export function App() {
   const { ready, user } = useAuth();
@@ -21,11 +42,18 @@ export function App() {
     return <div className="boot">Loading…</div>;
   }
 
-  // Where a signed-in account lands — platform owners have no agency, so the
-  // radio console is not their home.
-  const home = user?.role === "owner" ? "/owner" : "/console";
+  // Where a signed-in account lands. Platform owners have no agency. Radio-role
+  // accounts get the mobile-friendly radio portal as their home instead of the
+  // dispatch console; dispatch/admin still land on the console.
+  const home =
+    user?.role === "owner"
+      ? "/owner"
+      : user?.role === "radio"
+        ? "/radio"
+        : "/console";
 
   return (
+    <Suspense fallback={<div className="boot">Loading…</div>}>
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/login" element={user ? <Navigate to={home} replace /> : <LoginPage />} />
@@ -36,8 +64,22 @@ export function App() {
             <Navigate to="/login" replace />
           ) : user.role === "owner" ? (
             <Navigate to="/owner" replace />
+          ) : user.role === "radio" ? (
+            <Navigate to="/radio" replace />
           ) : (
             <ConsolePage />
+          )
+        }
+      />
+      <Route
+        path="/radio"
+        element={
+          !user ? (
+            <Navigate to="/login" replace />
+          ) : user.role === "owner" ? (
+            <Navigate to="/owner" replace />
+          ) : (
+            <RadioPortal />
           )
         }
       />
@@ -48,6 +90,8 @@ export function App() {
             <Navigate to="/login" replace />
           ) : user.role === "owner" ? (
             <Navigate to="/owner" replace />
+          ) : user.role === "radio" ? (
+            <Navigate to="/radio" replace />
           ) : (
             <MapWindowPage />
           )
@@ -60,6 +104,8 @@ export function App() {
             <Navigate to="/login" replace />
           ) : user.role === "owner" ? (
             <Navigate to="/owner" replace />
+          ) : user.role === "radio" ? (
+            <Navigate to="/radio" replace />
           ) : (
             <ChannelsWindowPage />
           )
@@ -72,6 +118,8 @@ export function App() {
             <Navigate to="/login" replace />
           ) : user.role === "owner" ? (
             <Navigate to="/owner" replace />
+          ) : user.role === "radio" ? (
+            <Navigate to="/radio" replace />
           ) : (
             <OnAirWindowPage />
           )
@@ -84,6 +132,8 @@ export function App() {
             <Navigate to="/login" replace />
           ) : user.role === "owner" ? (
             <Navigate to="/owner" replace />
+          ) : user.role === "radio" ? (
+            <Navigate to="/radio" replace />
           ) : (
             <AlertsWindowPage />
           )
@@ -96,6 +146,8 @@ export function App() {
             <Navigate to="/login" replace />
           ) : user.role === "owner" ? (
             <Navigate to="/owner" replace />
+          ) : user.role === "radio" ? (
+            <Navigate to="/radio" replace />
           ) : (
             <BridgeRunnerPage />
           )
@@ -120,6 +172,8 @@ export function App() {
             <Navigate to="/login" replace />
           ) : user.role === "admin" ? (
             <AdminPage />
+          ) : user.role === "radio" ? (
+            <Navigate to="/radio" replace />
           ) : (
             <Navigate to="/console" replace />
           )
@@ -130,5 +184,6 @@ export function App() {
       <Route path="/legal/eula" element={<LegalPage doc="eula" />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </Suspense>
   );
 }
