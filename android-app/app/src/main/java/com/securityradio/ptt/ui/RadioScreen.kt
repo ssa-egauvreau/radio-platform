@@ -825,8 +825,20 @@ private fun LcdMainChannelBlock(
                 }
                 Text(
                     text = state.micHint.uppercase(Locale.US),
-                    style = styles.status,
-                    color = p.textMuted,
+                    style = if (state.currentChannelPermission == ChannelPermission.LISTEN_ONLY) {
+                        styles.status.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 16.sp,
+                            lineHeight = 19.sp,
+                        )
+                    } else {
+                        styles.status
+                    },
+                    color = if (state.currentChannelPermission == ChannelPermission.LISTEN_ONLY) {
+                        p.statusRed
+                    } else {
+                        p.textMuted
+                    },
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -1098,28 +1110,34 @@ private fun LcdHandsetFillChannelBlock(
     }
 }
 
-/** Small per-channel permission tag — only shown when the channel isn't plain TALK. */
+/** Per-channel permission tag — only shown when the channel isn't plain TALK. */
 @Composable
 private fun LcdPermissionBadge(
     permission: ChannelPermission,
     styles: LcdTextStyles,
+    modifier: Modifier = Modifier,
 ) {
     if (permission == ChannelPermission.TALK) return
     val p = RadioLcdTheme.palette
-    val (label, color) = when (permission) {
-        ChannelPermission.LISTEN_ONLY -> "LISTEN ONLY" to p.statusRed
-        ChannelPermission.TALK_PRIORITY -> "PRIORITY" to p.statusAmber
+    val (label, color, fontSp) = when (permission) {
+        ChannelPermission.LISTEN_ONLY -> Triple("LISTEN ONLY", p.statusRed, 28.sp)
+        ChannelPermission.TALK_PRIORITY -> Triple("PRIORITY", p.statusAmber, 20.sp)
         else -> return
     }
     Text(
         text = label,
-        style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp),
+        style = styles.status.copy(
+            fontWeight = FontWeight.Bold,
+            fontSize = fontSp,
+            lineHeight = (fontSp.value * 1.08f).sp,
+        ),
         color = color,
         textAlign = TextAlign.Center,
         maxLines = 1,
-        modifier = Modifier
+        overflow = TextOverflow.Ellipsis,
+        modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .padding(vertical = 4.dp),
     )
 }
 
@@ -2036,17 +2054,37 @@ private fun LcdStateBanner(
             else -> Spacer(modifier = Modifier.width(4.dp))
         }
         Column(modifier = Modifier.weight(1f)) {
+            val listenOnlyBanner =
+                state.currentChannelPermission == ChannelPermission.LISTEN_ONLY &&
+                    !state.isEmergencyActive &&
+                    !state.isPttPressed
             Text(
                 text = title,
-                style = styles.banner,
+                style = if (listenOnlyBanner) {
+                    styles.banner.copy(
+                        fontSize = 22.sp,
+                        lineHeight = 26.sp,
+                        fontWeight = FontWeight.Bold,
+                    )
+                } else {
+                    styles.banner
+                },
                 color = accent,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 text = subtitle,
-                style = styles.status,
-                color = p.textMuted,
+                style = if (listenOnlyBanner) {
+                    styles.status.copy(
+                        fontSize = 13.sp,
+                        lineHeight = 16.sp,
+                        fontWeight = FontWeight.Medium,
+                    )
+                } else {
+                    styles.status
+                },
+                color = if (listenOnlyBanner) accent.copy(alpha = 0.85f) else p.textMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
@@ -2436,6 +2474,7 @@ private fun ScanPickerChannelRow(
     label: String,
     selected: Boolean,
     isHome: Boolean,
+    permission: ChannelPermission,
     rowHeight: Dp,
     onToggle: () -> Unit,
     styles: LcdTextStyles,
@@ -2513,6 +2552,17 @@ private fun ScanPickerChannelRow(
                             color = p.statusBlue,
                             maxLines = 1,
                         )
+                    } else if (permission == ChannelPermission.LISTEN_ONLY) {
+                        Text(
+                            text = "LISTEN ONLY",
+                            style = styles.status.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = (titleSp.value * 0.52f).coerceIn(16f, 22f).sp,
+                                lineHeight = (titleSp.value * 0.58f).coerceIn(18f, 24f).sp,
+                            ),
+                            color = p.statusRed,
+                            maxLines = 1,
+                        )
                     }
                 }
             }
@@ -2580,10 +2630,13 @@ private fun ScanChannelPickerFullScreen(
                 itemsIndexed(state.channelCatalog) { index, label ->
                     val isHome = index == homeIdx
                     val selected = index in state.scanIncludedChannelIndices
+                    val permission =
+                        state.channelCatalogPermissions.getOrNull(index) ?: ChannelPermission.TALK
                     ScanPickerChannelRow(
                         label = label,
                         selected = selected,
                         isHome = isHome,
+                        permission = permission,
                         rowHeight = rowHeight,
                         onToggle = { onEvent(RadioUiEvent.ToggleScanIncludeChannel(index)) },
                         styles = styles,
@@ -2767,10 +2820,13 @@ private fun ScanChannelPickerDialog(
                 itemsIndexed(state.channelCatalog) { index, label ->
                     val isHome = index == homeIdx
                     val selected = index in state.scanIncludedChannelIndices
+                    val permission =
+                        state.channelCatalogPermissions.getOrNull(index) ?: ChannelPermission.TALK
                     ScanPickerChannelRow(
                         label = label,
                         selected = selected,
                         isHome = isHome,
+                        permission = permission,
                         rowHeight = 64.dp,
                         onToggle = { onEvent(RadioUiEvent.ToggleScanIncludeChannel(index)) },
                         styles = styles,

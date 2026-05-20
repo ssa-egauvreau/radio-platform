@@ -1514,6 +1514,11 @@ class RadioViewModel(
         return channelPermissions[name.lowercase(Locale.US)] ?: ChannelPermission.TALK
     }
 
+    private fun permissionsForCatalog(names: List<String>): List<ChannelPermission> =
+        names.map { name ->
+            channelPermissions[name.trim().lowercase(Locale.US)] ?: ChannelPermission.TALK
+        }
+
     /**
      * Watches the agency's tone-set version and re-pulls the custom tones when
      * an admin uploads or removes one, so a running handset never keeps stale
@@ -1637,6 +1642,7 @@ class RadioViewModel(
             return copy(
                 scanIncludedChannelIndices = emptySet(),
                 channelCatalog = emptyList(),
+                channelCatalogPermissions = emptyList(),
             )
         }
         val maxI = channelNames.lastIndex
@@ -1646,6 +1652,7 @@ class RadioViewModel(
             .toSet()
         return copy(
             channelCatalog = channelNames,
+            channelCatalogPermissions = permissionsForCatalog(channelNames),
             scanIncludedChannelIndices = pruned,
         )
     }
@@ -1658,6 +1665,7 @@ class RadioViewModel(
                 totalChannels = 0,
                 displayLine2 = "OPERATIONS",
                 channelCatalog = emptyList(),
+                channelCatalogPermissions = emptyList(),
             )
         }
         val safeIndex = index.coerceIn(0, names.lastIndex)
@@ -1668,6 +1676,7 @@ class RadioViewModel(
             totalChannels = names.size,
             displayLine2 = "OPS: ${label.uppercase(Locale.US)}",
             channelCatalog = names,
+            channelCatalogPermissions = permissionsForCatalog(names),
         )
     }
 

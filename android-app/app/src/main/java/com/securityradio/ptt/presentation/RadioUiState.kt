@@ -27,6 +27,8 @@ data class RadioUiState(
     val totalChannels: Int,
     /** Channel names from catalog (for scan picker labels). */
     val channelCatalog: List<String>,
+    /** Parallel to [channelCatalog] — permission for each row in the scan picker. */
+    val channelCatalogPermissions: List<ChannelPermission> = emptyList(),
     /** Indices into [channelCatalog] included in scan when [scanActive] is true (never includes home channel). */
     val scanIncludedChannelIndices: Set<Int>,
     /** Multi-select picker for scan list. */
@@ -152,6 +154,7 @@ data class RadioUiState(
             channelPosition = "-- / --",
             totalChannels = 0,
             channelCatalog = emptyList(),
+            channelCatalogPermissions = emptyList(),
             scanIncludedChannelIndices = emptySet(),
             scanPickerVisible = false,
             displayLine1 = "SUNSET SAFETY AGENCY",
