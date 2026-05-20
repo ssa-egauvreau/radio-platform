@@ -116,6 +116,15 @@ private const val HANDSET_EMERGENCY_WASH_LO = 0.28f
 private const val HANDSET_EMERGENCY_WASH_HI = 0.92f
 private const val HANDSET_IDLE_CHANNEL_MIN_SP = 28f
 private const val HANDSET_IDLE_CHANNEL_MAX_SP = 64f
+private const val HANDSET_IDLE_CHANNEL_MIN_SP_IRC590 = 36f
+private const val HANDSET_IDLE_CHANNEL_MAX_SP_IRC590 = 76f
+
+private fun handsetIdleChannelSpRange(profile: ResolvedDeviceProfile): ClosedFloatingPointRange<Float> =
+    when (profile) {
+        ResolvedDeviceProfile.IRC590 ->
+            HANDSET_IDLE_CHANNEL_MIN_SP_IRC590..HANDSET_IDLE_CHANNEL_MAX_SP_IRC590
+        else -> HANDSET_IDLE_CHANNEL_MIN_SP..HANDSET_IDLE_CHANNEL_MAX_SP
+    }
 
 /**
  * Outer frame: day / night LCD cross-fade and palette scope.
@@ -148,23 +157,14 @@ fun RadioShell(
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
-                    .background(palette.lcdAlt)
-                    .padding(start = 8.dp, end = 8.dp, top = 4.dp, bottom = 6.dp),
+                    .background(palette.lcdMain),
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .border(1.dp, palette.divider)
-                        .background(palette.lcdMain)
-                        .padding(horizontal = 8.dp, vertical = 8.dp),
-                ) {
-                    RadioScreen(
-                        state = state,
-                        lcdNightEffective = night,
-                        onEvent = onEvent,
-                        onRequestMicPermission = onRequestMicPermission,
-                    )
-                }
+                RadioScreen(
+                    state = state,
+                    lcdNightEffective = night,
+                    onEvent = onEvent,
+                    onRequestMicPermission = onRequestMicPermission,
+                )
             }
         }
     }
@@ -944,7 +944,7 @@ private fun LcdHandsetFillChannelBlock(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 14.dp),
+                .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 8.dp),
         ) {
             LcdHandsetToolbar(
                 state = state,
@@ -978,7 +978,8 @@ private fun LcdHandsetFillChannelBlock(
             val homeChannelLarge = !showHandsetTalker
             val channelBlockWeight =
                 when {
-                    remoteEmergencyLive || homeChannelLarge -> 2.25f
+                    remoteEmergencyLive || homeChannelLarge ->
+                        if (state.resolvedDeviceProfile == ResolvedDeviceProfile.IRC590) 2.55f else 2.25f
                     else -> 0.48f
                 }
             val channelBlockMaxHeight =
@@ -1002,6 +1003,7 @@ private fun LcdHandsetFillChannelBlock(
                         unitId = talkUnit,
                         channelColor = chrome.channelTextColor,
                         emergencyColor = p.statusEmergency,
+                        deviceProfile = state.resolvedDeviceProfile,
                         styles = styles,
                         modifier = Modifier.fillMaxSize(),
                     )
@@ -1025,12 +1027,27 @@ private fun LcdHandsetFillChannelBlock(
                             },
                             contentAlignment = Alignment.Center,
                         ) {
+                            val idleChannelRange = handsetIdleChannelSpRange(state.resolvedDeviceProfile)
+                            val irc590Idle = state.resolvedDeviceProfile == ResolvedDeviceProfile.IRC590
                             val channelFont = with(density) {
-                                val heightFactor = if (homeChannelLarge) 0.96f else 0.88f
-                                val widthFactor = if (homeChannelLarge) 0.42f else 0.5f
+                                val heightFactor = if (homeChannelLarge) {
+                                    if (irc590Idle) 1f else 0.96f
+                                } else {
+                                    0.88f
+                                }
+                                val widthFactor = when {
+                                    homeChannelLarge && irc590Idle -> 0.36f
+                                    homeChannelLarge -> 0.42f
+                                    else -> 0.5f
+                                }
                                 val boxH =
                                     if (homeChannelLarge) {
-                                        blockMaxHeight * if (scanRxLive) 0.72f else 0.96f
+                                        blockMaxHeight *
+                                            if (scanRxLive) {
+                                                if (irc590Idle) 0.76f else 0.72f
+                                            } else {
+                                                if (irc590Idle) 1f else 0.96f
+                                            }
                                     } else {
                                         blockMaxHeight * heightFactor
                                     }
@@ -1040,7 +1057,7 @@ private fun LcdHandsetFillChannelBlock(
                                 minOf(byHeight, byWidth).toSp()
                             }.value.let { raw ->
                                 if (homeChannelLarge) {
-                                    raw.coerceIn(HANDSET_IDLE_CHANNEL_MIN_SP, HANDSET_IDLE_CHANNEL_MAX_SP)
+                                    raw.coerceIn(idleChannelRange.start, idleChannelRange.endInclusive)
                                 } else {
                                     raw.coerceIn(16f, 24f)
                                 }
@@ -1340,10 +1357,10 @@ private fun LcdHandsetToolbarIrc590(
     val online = state.networkLabel == "ONLINE"
     val scanReceiving = state.scanBackgroundActive
     val accentOnEmergency = if (state.isEmergencyActive) Color.White else p.textPrimary
-    val iconSize = 28.dp
-    val signalWidth = 36.dp
-    val signalHeight = 24.dp
-    val rowPad = 4.dp
+    val iconSize = 32.dp
+    val signalWidth = 40.dp
+    val signalHeight = 26.dp
+    val rowPad = 3.dp
 
     Column(
         modifier = modifier,
@@ -1611,9 +1628,11 @@ private fun LcdHandsetRemoteEmergencyBlock(
     unitId: String,
     channelColor: Color,
     emergencyColor: Color,
+    deviceProfile: ResolvedDeviceProfile,
     styles: LcdTextStyles,
     modifier: Modifier = Modifier,
 ) {
+    val idleChannelRange = handsetIdleChannelSpRange(deviceProfile)
     val channel = channelName.trim().uppercase(Locale.US)
     val unit = unitId.trim().uppercase(Locale.US)
     BoxWithConstraints(
@@ -1628,8 +1647,8 @@ private fun LcdHandsetRemoteEmergencyBlock(
                 maxWidth = maxWidth,
                 text = channel,
                 heightFraction = 0.36f,
-                minSp = HANDSET_IDLE_CHANNEL_MIN_SP,
-                maxSp = HANDSET_IDLE_CHANNEL_MAX_SP,
+                minSp = idleChannelRange.start,
+                maxSp = idleChannelRange.endInclusive,
                 widthCharsPerSp = 0.42f,
             )
         val emergencySp =
@@ -1649,8 +1668,8 @@ private fun LcdHandsetRemoteEmergencyBlock(
                 maxWidth = maxWidth,
                 text = unit.ifEmpty { "—" },
                 heightFraction = 0.36f,
-                minSp = HANDSET_IDLE_CHANNEL_MIN_SP,
-                maxSp = HANDSET_IDLE_CHANNEL_MAX_SP,
+                minSp = idleChannelRange.start,
+                maxSp = idleChannelRange.endInclusive,
                 widthCharsPerSp = 0.5f,
             )
         Column(
@@ -1906,8 +1925,8 @@ private fun channelDisplayChrome(
             talkLineColor = p.statusEmergency,
         )
         else -> ChannelDisplayChrome(
-            borderColor = p.divider,
-            borderWidth = 1.dp,
+            borderColor = if (handsetLayout) Color.Transparent else p.divider,
+            borderWidth = if (handsetLayout) 0.dp else 1.dp,
             washColor = Color.Transparent,
             channelTextColor = p.textPrimary,
             talkLineColor = p.textSecondary,
