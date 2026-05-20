@@ -1094,13 +1094,23 @@ private fun LcdHandsetFillChannelBlock(
                                     raw.coerceIn(16f, 24f)
                                 }
                             }.sp
+                            // While 10-33 is on, the channel name sits inside a pulsing amber
+                            // band that hits alpha ~0.78 at peak. The default light textPrimary
+                            // washes out against that — force a dark color so the name stays
+                            // readable through the brightest part of the pulse.
+                            val channelTextColor =
+                                if (state.channelTen33) {
+                                    Color.Black.copy(alpha = 0.92f)
+                                } else {
+                                    chrome.channelTextColor
+                                }
                             Text(
                                 text = channelText,
                                 style = styles.channel.copy(
                                     fontSize = channelFont,
                                     lineHeight = (channelFont.value * 1.05f).sp,
                                 ),
-                                color = chrome.channelTextColor,
+                                color = channelTextColor,
                                 maxLines = if (homeChannelLarge) 1 else 2,
                                 overflow = TextOverflow.Ellipsis,
                                 softWrap = !homeChannelLarge,
