@@ -1173,8 +1173,9 @@ class RadioViewModel(
         }
     }
 
-    /** Short vibrate in sync with the talk-permit tone (IRC590 + other handsets). */
+    /** 0.25 s vibrate in sync with talk-permit audio on any device that has a vibrator. */
     private fun pulsePttTransmitHapticIfEligible() {
+        if (!pttHapticFeedback.hasVibrator()) return
         val s = _uiState.value
         if (s.networkLabel == "ONLINE" && s.micPermissionGranted) {
             pttHapticFeedback.pulseTransmitGranted()

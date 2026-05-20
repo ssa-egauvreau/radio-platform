@@ -8,6 +8,7 @@ import android.os.VibratorManager
 
 /**
  * Short vibration when PTT is granted (connected, channel clear, mic allowed).
+ * Used on every handset or phone that has a vibrator (IRC590, TM-7 Plus, S200, etc.).
  */
 class PttHapticFeedback(context: Context) {
 
@@ -21,9 +22,14 @@ class PttHapticFeedback(context: Context) {
             appContext.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
         }
 
+    fun hasVibrator(): Boolean {
+        val v = vibrator ?: return false
+        return v.hasVibrator()
+    }
+
     fun pulseTransmitGranted() {
+        if (!hasVibrator()) return
         val v = vibrator ?: return
-        if (!v.hasVibrator()) return
         runCatching {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 v.vibrate(
