@@ -923,49 +923,63 @@ private fun LcdHandsetFillChannelBlock(
                 )
             }
             LcdPermissionBadge(permission = state.currentChannelPermission, styles = styles)
+            val scanRxLive =
+                state.scanBackgroundActive && state.scanBackgroundChannel.isNotBlank()
+            val channelBlockWeight =
+                when {
+                    scanRxLive && showTalkPanel -> 1.05f
+                    scanRxLive -> 1.6f
+                    showTalkPanel -> 0.35f
+                    else -> 1.6f
+                }
+            val channelBlockMaxHeight =
+                when {
+                    scanRxLive && showTalkPanel -> 64.dp
+                    scanRxLive -> 80.dp
+                    showTalkPanel -> 36.dp
+                    else -> 80.dp
+                }
             BoxWithConstraints(
                 modifier = Modifier
-                    .weight(if (showTalkPanel) 0.35f else 1.6f)
+                    .weight(channelBlockWeight)
                     .fillMaxWidth()
-                    .heightIn(max = if (showTalkPanel) 36.dp else 80.dp),
+                    .heightIn(max = channelBlockMaxHeight),
                 contentAlignment = Alignment.Center,
             ) {
-                if (state.scanActive && state.scanBackgroundChannel.isNotBlank()) {
+                if (scanRxLive) {
+                    LcdHandsetScanRxCenter(
+                        channelName = state.scanBackgroundChannel,
+                        styles = styles,
+                        compact = showTalkPanel,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+                } else {
+                    val channelText = state.channelLabel.uppercase(Locale.US)
+                    val density = LocalDensity.current
+                    // Idle: large channel name. TX/RX: compact label so talker text dominates.
+                    val channelFont = with(density) {
+                        val heightFactor = if (showTalkPanel) 0.82f else 0.9f
+                        val widthFactor = if (showTalkPanel) 0.48f else 0.52f
+                        val byHeight = constraints.maxHeight * heightFactor
+                        val byWidth = constraints.maxWidth /
+                            (channelText.length.coerceAtLeast(3) * widthFactor)
+                        minOf(byHeight, byWidth).toSp()
+                    }.value.let { raw ->
+                        if (showTalkPanel) raw.coerceIn(14f, 26f) else raw.coerceIn(18f, 40f)
+                    }.sp
                     Text(
-                        text = "▶ ${state.scanBackgroundChannel}",
-                        style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
-                        color = p.statusAmber,
+                        text = channelText,
+                        style = styles.channel.copy(
+                            fontSize = channelFont,
+                            lineHeight = (channelFont.value * 1.05f).sp,
+                        ),
+                        color = chrome.channelTextColor,
                         maxLines = 1,
-                        modifier = Modifier
-                            .align(Alignment.TopCenter)
-                            .padding(top = 2.dp),
+                        overflow = TextOverflow.Ellipsis,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
-                val channelText = state.channelLabel.uppercase(Locale.US)
-                val density = LocalDensity.current
-                // Idle: large channel name. TX/RX: compact label so talker text dominates.
-                val channelFont = with(density) {
-                    val heightFactor = if (showTalkPanel) 0.82f else 0.9f
-                    val widthFactor = if (showTalkPanel) 0.48f else 0.52f
-                    val byHeight = constraints.maxHeight * heightFactor
-                    val byWidth = constraints.maxWidth /
-                        (channelText.length.coerceAtLeast(3) * widthFactor)
-                    minOf(byHeight, byWidth).toSp()
-                }.value.let { raw ->
-                    if (showTalkPanel) raw.coerceIn(14f, 26f) else raw.coerceIn(18f, 40f)
-                }.sp
-                Text(
-                    text = channelText,
-                    style = styles.channel.copy(
-                        fontSize = channelFont,
-                        lineHeight = (channelFont.value * 1.05f).sp,
-                    ),
-                    color = chrome.channelTextColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
-                )
                 if (state.channelTen33) {
                     LcdEmergencyGlyphIcon(
                         color = p.statusAmber,
@@ -1403,6 +1417,9 @@ private fun LcdHandsetToolbarScanBanner(
     styles: LcdTextStyles,
 ) {
     val p = RadioLcdTheme.palette
+    if (state.scanBackgroundActive && state.scanBackgroundChannel.isNotBlank()) {
+        return
+    }
     if (state.scanActive && state.scanBackgroundChannel.isNotBlank()) {
         val bannerScanColor = rememberScanIconActiveColor(
             scanActive = true,
@@ -1460,6 +1477,58 @@ private fun LcdHandsetWarningRow(
                 style = styles.softKey,
                 color = p.statusAmber,
                 modifier = Modifier.clickable { onEvent(RadioUiEvent.RetryChannelSync) },
+            )
+        }
+    }
+}
+
+/** Large amber scan-RX line in the main channel area (replaces the home channel name). */
+@Composable
+private fun LcdHandsetScanRxCenter(
+    channelName: String,
+    styles: LcdTextStyles,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val p = RadioLcdTheme.palette
+    val scanColor = rememberScanIconActiveColor(scanActive = true, scanReceiving = true)
+    val label = "SCAN RX · ${channelName.uppercase(Locale.US)}"
+    BoxWithConstraints(
+        modifier = modifier,
+        contentAlignment = Alignment.Center,
+    ) {
+        val density = LocalDensity.current
+        val iconDp = if (compact) 28.dp else 36.dp
+        val textSp = with(density) {
+            val byHeight = maxHeight.value * if (compact) 0.42f else 0.52f
+            val byWidth = maxWidth.value / (label.length.coerceAtLeast(8) * 0.42f)
+            minOf(byHeight, byWidth).coerceIn(if (compact) 16f else 20f, if (compact) 28f else 40f).sp
+        }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LcdScanIcon(
+                on = true,
+                active = scanColor,
+                muted = p.textMuted,
+                modifier = Modifier.size(iconDp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = label,
+                style = styles.channel.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = textSp,
+                    lineHeight = (textSp.value * 1.05f).sp,
+                ),
+                color = scanColor,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
             )
         }
     }
@@ -2170,6 +2239,95 @@ private fun LcdLegendLabel(text: String, styles: LcdTextStyles, color: Color) {
 }
 
 @Composable
+private fun ScanPickerChannelRow(
+    label: String,
+    selected: Boolean,
+    isHome: Boolean,
+    rowHeight: Dp,
+    onToggle: () -> Unit,
+    styles: LcdTextStyles,
+) {
+    val p = RadioLcdTheme.palette
+    Surface(
+        onClick = { if (!isHome) onToggle() },
+        color = when {
+            isHome -> p.lcdAlt
+            selected -> p.softKeyActiveFill
+            else -> p.softKeyInactiveFill
+        },
+        shape = RoundedCornerShape(4.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(rowHeight),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 10.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier.size(rowHeight * 0.72f),
+                contentAlignment = Alignment.Center,
+            ) {
+                Checkbox(
+                    checked = selected,
+                    enabled = !isHome,
+                    onCheckedChange = { if (!isHome) onToggle() },
+                    modifier = Modifier.size(rowHeight * 0.62f),
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            BoxWithConstraints(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxHeight(),
+                contentAlignment = Alignment.CenterStart,
+            ) {
+                val density = LocalDensity.current
+                val upper = label.uppercase(Locale.US)
+                val titleSp = with(density) {
+                    val byHeight = maxHeight.value * 0.58f
+                    val byWidth = maxWidth.value / (upper.length.coerceAtLeast(4) * 0.52f)
+                    minOf(byHeight, byWidth).coerceIn(20f, 34f).sp
+                }
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.Center,
+                ) {
+                    Text(
+                        text = upper,
+                        style = styles.body.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = titleSp,
+                            lineHeight = (titleSp.value * 1.05f).sp,
+                        ),
+                        color = when {
+                            isHome -> p.textMuted
+                            selected -> p.statusAmber
+                            else -> p.textPrimary
+                        },
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (isHome) {
+                        Text(
+                            text = "HOME — PRIORITY RX",
+                            style = styles.status.copy(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = (titleSp.value * 0.42f).coerceIn(11f, 14f).sp,
+                            ),
+                            color = p.statusBlue,
+                            maxLines = 1,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun ScanChannelPickerFullScreen(
     state: RadioUiState,
     onEvent: (RadioUiEvent) -> Unit,
@@ -2189,7 +2347,7 @@ private fun ScanChannelPickerFullScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(12.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -2198,12 +2356,12 @@ private fun ScanChannelPickerFullScreen(
             ) {
                 Text(
                     text = "SCAN CHANNELS",
-                    style = styles.body.copy(fontWeight = FontWeight.Bold, fontSize = 20.sp),
+                    style = styles.body.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
                     color = p.textPrimary,
                 )
                 Text(
                     text = if (state.scanActive) "TURN SCAN OFF" else "SCAN OFF",
-                    style = styles.status.copy(fontWeight = FontWeight.Bold),
+                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp),
                     color = if (state.scanActive) p.statusAmber else p.textMuted,
                     modifier = Modifier.clickable {
                         if (state.scanActive) {
@@ -2213,69 +2371,40 @@ private fun ScanChannelPickerFullScreen(
                 )
             }
             Text(
-                text = "Tap channels to add or remove. Tap scan icon again to turn scan off. Home channel always has priority.",
-                style = styles.status,
+                text = "Tap a channel to scan it. Home channel always has priority.",
+                style = styles.status.copy(fontSize = 12.sp),
                 color = p.textMuted,
-                modifier = Modifier.padding(vertical = 8.dp),
+                modifier = Modifier.padding(top = 4.dp, bottom = 6.dp),
+                maxLines = 2,
             )
+            val rowHeight = 72.dp
             LazyColumn(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(4.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 itemsIndexed(state.channelCatalog) { index, label ->
                     val isHome = index == homeIdx
                     val selected = index in state.scanIncludedChannelIndices
-                    Surface(
-                        onClick = {
-                            if (!isHome) onEvent(RadioUiEvent.ToggleScanIncludeChannel(index))
-                        },
-                        color = when {
-                            isHome -> p.lcdAlt
-                            selected -> p.softKeyActiveFill
-                            else -> p.softKeyInactiveFill
-                        },
-                        shape = RoundedCornerShape(4.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 12.dp, vertical = 14.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Checkbox(
-                                checked = selected,
-                                enabled = !isHome,
-                                onCheckedChange = {
-                                    if (!isHome) onEvent(RadioUiEvent.ToggleScanIncludeChannel(index))
-                                },
-                            )
-                            Column(Modifier.weight(1f)) {
-                                Text(
-                                    text = label.uppercase(Locale.US),
-                                    style = styles.body.copy(fontWeight = FontWeight.Bold),
-                                    color = if (isHome) p.textMuted else p.textPrimary,
-                                )
-                                if (isHome) {
-                                    Text(
-                                        text = "HOME — PRIORITY RX",
-                                        style = styles.status,
-                                        color = p.statusBlue,
-                                    )
-                                }
-                            }
-                        }
-                    }
+                    ScanPickerChannelRow(
+                        label = label,
+                        selected = selected,
+                        isHome = isHome,
+                        rowHeight = rowHeight,
+                        onToggle = { onEvent(RadioUiEvent.ToggleScanIncludeChannel(index)) },
+                        styles = styles,
+                    )
                 }
             }
             TextButton(
                 onClick = { onEvent(RadioUiEvent.CloseScanPicker) },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 40.dp),
                 colors = ButtonDefaults.textButtonColors(contentColor = p.statusBlue),
             ) {
-                Text("DONE", style = styles.softKey.copy(fontWeight = FontWeight.Bold))
+                Text("DONE", style = styles.softKey.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp))
             }
         }
     }
@@ -2438,33 +2567,20 @@ private fun ScanChannelPickerDialog(
         },
         text = {
             LazyColumn(
-                modifier = Modifier.heightIn(max = 380.dp),
+                modifier = Modifier.heightIn(max = 480.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
             ) {
                 itemsIndexed(state.channelCatalog) { index, label ->
                     val isHome = index == homeIdx
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Checkbox(
-                            checked = index in state.scanIncludedChannelIndices,
-                            enabled = !isHome,
-                            onCheckedChange = { if (!isHome) onEvent(RadioUiEvent.ToggleScanIncludeChannel(index)) },
-                        )
-                        Column(Modifier.weight(1f)) {
-                            Text(
-                                text = label.uppercase(Locale.US),
-                                color = if (isHome) p.textMuted else p.textPrimary,
-                            )
-                            if (isHome) {
-                                Text(
-                                    text = "HOME — PRIORITY RX",
-                                    fontSize = 10.sp,
-                                    color = p.statusBlue,
-                                )
-                            }
-                        }
-                    }
+                    val selected = index in state.scanIncludedChannelIndices
+                    ScanPickerChannelRow(
+                        label = label,
+                        selected = selected,
+                        isHome = isHome,
+                        rowHeight = 64.dp,
+                        onToggle = { onEvent(RadioUiEvent.ToggleScanIncludeChannel(index)) },
+                        styles = styles,
+                    )
                 }
             }
         },
