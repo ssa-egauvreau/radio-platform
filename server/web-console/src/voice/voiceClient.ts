@@ -234,6 +234,13 @@ export class VoiceChannelClient {
 
   private setState(state: VoiceState, detail?: string): void {
     this.state = state;
+    // Belt-and-braces: any transition back to "listening" guarantees no in-flight TX state
+    // is left behind. A navigation race or a server-side close that arrives between a TX
+    // start and stop could otherwise leave `this.transmitting === true`, which would make
+    // the next startTransmit() silently early-return and look like a dead PTT button.
+    if (state === "listening" || state === "closed" || state === "error") {
+      this.transmitting = false;
+    }
     this.callbacks.onState(state, detail);
   }
 
