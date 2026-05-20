@@ -131,6 +131,15 @@ data class RadioUiState(
     /** Scan traffic on a monitored channel while tuned elsewhere (scan icon pulse). */
     val scanBackgroundActive: Boolean = false,
     val scanBackgroundChannel: String = "",
+
+    /** 0 = Buttons, 1 = Device, 2 = Audio, 3 = Account. Persisted only in memory across opens. */
+    val settingsTabIndex: Int = 0,
+    /** Mirror of [com.securityradio.ptt.device.RadioPreferences.isNoiseSuppressionEnabled]. */
+    val micNoiseSuppressionEnabled: Boolean = true,
+    /** Mirror of [com.securityradio.ptt.device.RadioPreferences.isMicAutoGainEnabled]. */
+    val micAutoGainEnabled: Boolean = true,
+    /** Mirror of [com.securityradio.ptt.device.RadioPreferences.getMicGainMultiplier]. */
+    val micGainMultiplier: Float = 1.0f,
 ) {
     init {
         require(softKeyLabels.size == SOFT_KEY_COUNT) {
