@@ -349,10 +349,13 @@ export function attachVoiceRelay(
 ): WebSocketServer {
   const requiredKey = options.radioApiKey?.trim();
 
-  // Cap per-frame size. Voice frames are ~13 B IMBE or ~640 B/20ms PCM; a JSON control frame is
-  // tiny. The ws library default is 100 MB which would let a buggy/malicious client allocate
-  // hundreds of MB of buffer memory per frame. 64 KB is well over any legitimate frame.
-  const wss = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 });
+  // Cap per-frame size to bound memory per connection. Voice frames are ~13 B IMBE or
+  // ~640 B/20ms PCM, but custom soundboard tone-outs (playCustomTone) send a whole decoded
+  // PCM clip as ONE frame: at 16 kHz mono int16, a 30-second clip is ~960 KB and a 4-minute
+  // clip from a 4 MB MP3 upload (TONE_OUT_AUDIO_MAX in apiRoutes.ts) can decode to ~8 MB.
+  // 8 MB covers every legitimate clip the agency-side TONE_OUT_AUDIO_MAX permits while still
+  // rejecting outright junk; the ws library's 100 MB default is too generous.
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
 
   /*
    * Periodic ping; if a socket missed the previous round's pong, terminate it. The pong
@@ -451,19 +454,30 @@ export function attachVoiceRelay(
                 return;
               }
             } else {
+              // Differentiate "the lookup returned null because the row is gone or disabled"
+              // (a definitive negative we want to cache so retries don't thrash pg) from
+              // "the lookup threw because pg is transiently unhappy" (must NOT be cached, or a
+              // single bad query would lock the user out for the next 15 s).
+              let lookupErrored = false;
               const [agency, dbUser] = await Promise.all([
-                getAgencyById(user.agencyId).catch(() => null),
-                getUserById(user.id).catch(() => null),
+                getAgencyById(user.agencyId).catch(() => {
+                  lookupErrored = true;
+                  return null;
+                }),
+                getUserById(user.id).catch(() => {
+                  lookupErrored = true;
+                  return null;
+                }),
               ]);
               const agencyDisabled = !agency || agency.disabled;
               if (!dbUser || dbUser.disabled || agencyDisabled) {
-                // Cache the negative result too so a reconnect storm against a freshly
-                // disabled user/agency doesn't keep hitting pg on every retry.
-                setCachedAuth(user.id, {
-                  tokenGeneration: dbUser?.token_generation ?? 0,
-                  userDisabled: !dbUser || !!dbUser.disabled,
-                  agencyDisabled,
-                });
+                if (!lookupErrored) {
+                  setCachedAuth(user.id, {
+                    tokenGeneration: dbUser?.token_generation ?? 0,
+                    userDisabled: !dbUser || !!dbUser.disabled,
+                    agencyDisabled,
+                  });
+                }
                 socket.write(
                   agencyDisabled || (dbUser && dbUser.disabled)
                     ? "HTTP/1.1 403 Forbidden\r\n\r\n"
@@ -475,20 +489,24 @@ export function attachVoiceRelay(
               // Newest sign-in wins: reject a stale token here too so an auto-
               // reconnecting browser cannot briefly resurrect its dropped socket.
               if (user.gen !== dbUser.token_generation) {
+                if (!lookupErrored) {
+                  setCachedAuth(user.id, {
+                    tokenGeneration: dbUser.token_generation,
+                    userDisabled: false,
+                    agencyDisabled: false,
+                  });
+                }
+                socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+                socket.destroy();
+                return;
+              }
+              if (!lookupErrored) {
                 setCachedAuth(user.id, {
                   tokenGeneration: dbUser.token_generation,
                   userDisabled: false,
                   agencyDisabled: false,
                 });
-                socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
-                socket.destroy();
-                return;
               }
-              setCachedAuth(user.id, {
-                tokenGeneration: dbUser.token_generation,
-                userDisabled: false,
-                agencyDisabled: false,
-              });
             }
           }
           const runBridgeRaw = url.searchParams.get("runBridge");

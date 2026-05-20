@@ -365,9 +365,14 @@ export function RadioPortal() {
         client.stopTransmit();
       }
     } catch (err) {
+      // pttHeldRef must be read BEFORE we set it to false so the busy-loop guard sees the
+      // operator's actual held state at the time the relay rejected the TX. Without that gate
+      // a slow rejection arriving after the user already released would start the busy loop
+      // with nothing to stop it.
+      const stillHeld = pttHeldRef.current;
       pttHeldRef.current = false;
       const code = err instanceof Error ? err.message : "transmit_failed";
-      if (code === "channel_busy") {
+      if (code === "channel_busy" && stillHeld) {
         // Loop the busy tone for as long as the operator keeps holding the key, matching
         // the ChannelPanel busy-key behavior. stopPtt clears the loop on release.
         sounds.busyLoopStart();
@@ -623,7 +628,17 @@ export function RadioPortal() {
             onPointerUp={() => cancelEmergencyHold()}
             onPointerCancel={() => cancelEmergencyHold()}
             onPointerLeave={() => cancelEmergencyHold()}
-            disabled={busyEmergency || !selectedChannel}
+            // Belt-and-braces: a regular click also clears the active emergency. Some browsers
+            // route synthetic touch differently than pointer events; this keeps the clear path
+            // working even if onPointerDown is swallowed (e.g. while a parent gesture is hot).
+            onClick={() => {
+              if (emergencyActive && !busyEmergency) fireEmergencyRef.current();
+            }}
+            // Activating still requires a channel selection (the alert is bound to one). Clearing
+            // does not — clearing has to keep working even before the user picks a channel,
+            // otherwise an alert that was hydrated from the server on mount would leave the
+            // operator with no way to dismiss it.
+            disabled={busyEmergency || (!selectedChannel && !emergencyActive)}
           >
             {emergencyActive
               ? "Tap to CLEAR emergency"
