@@ -9,7 +9,11 @@ package com.securityradio.ptt.device
  */
 interface RadioUiSoundPlayer {
     fun playChannelSwitch()
-    fun playTalkPermitThen(onFinished: () -> Unit)
+    /**
+     * @param onStarted Invoked when the permit WAV actually begins playback (same moment as audio).
+     * @param onFinished Invoked when playback ends; start microphone capture here.
+     */
+    fun playTalkPermitThen(onFinished: () -> Unit, onStarted: (() -> Unit)? = null)
     fun stopTalkPermitLoop()
     fun startBusyLoop()
     fun stopBusyLoop()

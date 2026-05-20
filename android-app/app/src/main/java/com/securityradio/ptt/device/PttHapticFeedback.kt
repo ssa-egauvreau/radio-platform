@@ -40,6 +40,6 @@ class PttHapticFeedback(context: Context) {
     }
 
     private companion object {
-        const val TRANSMIT_PULSE_MS = 500L
+        const val TRANSMIT_PULSE_MS = 250L
     }
 }

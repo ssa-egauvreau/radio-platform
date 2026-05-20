@@ -1099,9 +1099,10 @@ class RadioViewModel(
                     } else {
                         soundPlayer.stopBusyLoop()
                         if (!micLive) {
-                            soundPlayer.playTalkPermitThen {
-                                grantMicrophoneAfterVerification()
-                            }
+                            soundPlayer.playTalkPermitThen(
+                                onFinished = { grantMicrophoneAfterVerification() },
+                                onStarted = { pulsePttTransmitHapticIfEligible() },
+                            )
                         }
                     }
                     audioCommittedBusy = useBusy
@@ -1172,15 +1173,20 @@ class RadioViewModel(
         }
     }
 
+    /** Short vibrate in sync with the talk-permit tone (IRC590 + other handsets). */
+    private fun pulsePttTransmitHapticIfEligible() {
+        val s = _uiState.value
+        if (s.networkLabel == "ONLINE" && s.micPermissionGranted) {
+            pttHapticFeedback.pulseTransmitGranted()
+        }
+    }
+
     private fun grantMicrophoneAfterVerification() {
         viewModelScope.launch {
             val s = _uiState.value
             if (!s.isPttPressed || s.pttBusyTone) return@launch
             if (pttMicLiveThisHold) return@launch
             pttMicLiveThisHold = true
-            if (s.networkLabel == "ONLINE" && s.micPermissionGranted) {
-                pttHapticFeedback.pulseTransmitGranted()
-            }
             if (s.micPermissionGranted) {
                 pttMicCapture.startCapture()
             }

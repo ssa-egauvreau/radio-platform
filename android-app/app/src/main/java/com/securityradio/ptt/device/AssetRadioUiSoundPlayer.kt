@@ -139,11 +139,11 @@ class AssetRadioUiSoundPlayer(
         playOneShot(FILE_CHANNEL_SWITCH)
     }
 
-    override fun playTalkPermitThen(onFinished: () -> Unit) {
+    override fun playTalkPermitThen(onFinished: () -> Unit, onStarted: (() -> Unit)?) {
         main.post {
             stopBusyLoopInternal()
             stopTalkPermitLoopInternal()
-            val player = createTalkPermitOneShot(onFinished) ?: run {
+            val player = createTalkPermitOneShot(onFinished, onStarted) ?: run {
                 onFinished()
                 return@post
             }
@@ -358,7 +358,7 @@ class AssetRadioUiSoundPlayer(
         }
     }
 
-    private fun createTalkPermitOneShot(onFinished: () -> Unit): MediaPlayer? {
+    private fun createTalkPermitOneShot(onFinished: () -> Unit, onStarted: (() -> Unit)?): MediaPlayer? {
         val player = MediaPlayer().applyUiAudio()
         if (!applySource(player, FILE_TALK_PERMIT)) {
             player.release()
@@ -367,7 +367,10 @@ class AssetRadioUiSoundPlayer(
         return try {
             player.apply {
                 isLooping = false
-                setOnPreparedListener { it.start() }
+                setOnPreparedListener { prepared ->
+                    onStarted?.invoke()
+                    prepared.start()
+                }
                 setOnCompletionListener { completed ->
                     completed.release()
                     if (talkPermitPlayer === completed) {
