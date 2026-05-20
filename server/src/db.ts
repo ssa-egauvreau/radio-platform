@@ -19,6 +19,10 @@ export function getPool(): pg.Pool | null {
       connectionString: url,
       ssl: url.includes("localhost") ? false : { rejectUnauthorized: false },
       max: 5,
+      // A runaway query (missing index, accidental cross-join) used to hold a pool connection
+      // forever, choking every other request that needed one. Cap at 30 s — well above any
+      // legitimate query in this codebase but a hard ceiling for the pathological case.
+      statement_timeout: 30_000,
     });
   }
   return pool;

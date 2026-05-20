@@ -308,6 +308,15 @@ function releaseAir(ws: WebSocket): void {
   }
 }
 
+/** A NAT or radio dropping a TCP connection without TCP RST/FIN leaves the WS "stuck" on our
+ *  side — heartbeat detects + drops these zombies fast. The interval matches typical NAT idle
+ *  timeouts (~60 s) without being chatty enough to drain handset battery noticeably. */
+const VOICE_WS_HEARTBEAT_MS = 30_000;
+
+interface HeartbeatWs extends WebSocket {
+  isAlive?: boolean;
+}
+
 export function attachVoiceRelay(
   server: HttpServer,
   options: { radioApiKey?: string },
@@ -315,6 +324,32 @@ export function attachVoiceRelay(
   const requiredKey = options.radioApiKey?.trim();
 
   const wss = new WebSocketServer({ noServer: true });
+
+  /*
+   * Periodic ping; if a socket missed the previous round's pong, terminate it. The pong
+   * handler resets isAlive so any TCP that's still answering survives. wss.clients is the
+   * library-tracked set — using it directly avoids drift against our own clientMeta map.
+   */
+  const heartbeatInterval = setInterval(() => {
+    for (const raw of wss.clients) {
+      const ws = raw as HeartbeatWs;
+      if (ws.isAlive === false) {
+        try {
+          ws.terminate();
+        } catch {
+          /* already gone */
+        }
+        continue;
+      }
+      ws.isAlive = false;
+      try {
+        ws.ping();
+      } catch {
+        /* already closing */
+      }
+    }
+  }, VOICE_WS_HEARTBEAT_MS);
+  wss.on("close", () => clearInterval(heartbeatInterval));
 
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     void (async () => {
@@ -579,6 +614,11 @@ export function attachVoiceRelay(
   }
 
   wss.on("connection", (ws: WebSocket) => {
+    // Mark alive at handshake so the next heartbeat tick doesn't immediately tear us down.
+    (ws as HeartbeatWs).isAlive = true;
+    ws.on("pong", () => {
+      (ws as HeartbeatWs).isAlive = true;
+    });
     ws.on("message", (raw: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
       const meta = clientMeta.get(ws);
       if (!meta) {
