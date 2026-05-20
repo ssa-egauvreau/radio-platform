@@ -16,6 +16,7 @@ class RadioViewModelFactory(
                 channelRepository = graph.channelRepository,
                 soundPlayer = graph.soundPlayer,
                 pttMicCapture = graph.pttMicCapture,
+                pttHapticFeedback = graph.pttHapticFeedback,
                 channelsApi = graph.channelsApi,
                 radioApi = graph.radioApi,
                 localUnitIdentifier = graph.localUnitIdentifier,

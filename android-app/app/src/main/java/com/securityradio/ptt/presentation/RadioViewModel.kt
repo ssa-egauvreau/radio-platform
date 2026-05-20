@@ -975,6 +975,9 @@ class RadioViewModel(
             if (!s.isPttPressed || s.pttBusyTone) return@launch
             if (pttMicLiveThisHold) return@launch
             pttMicLiveThisHold = true
+            if (s.networkLabel == "ONLINE" && s.micPermissionGranted) {
+                pttHapticFeedback.pulseTransmitGranted()
+            }
             if (s.micPermissionGranted) {
                 pttMicCapture.startCapture()
             }

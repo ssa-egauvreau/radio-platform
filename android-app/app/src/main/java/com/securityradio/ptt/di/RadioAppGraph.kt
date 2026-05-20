@@ -21,6 +21,7 @@ import com.securityradio.ptt.device.RxMessageHistory
 import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.device.LocationReporter
 import com.securityradio.ptt.device.P25ImbeNative
+import com.securityradio.ptt.device.PttHapticFeedback
 import com.securityradio.ptt.device.PttMicCapture
 import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.RadioUiSoundPlayer
@@ -37,6 +38,8 @@ class RadioAppGraph(val application: Application) {
     }
 
     val radioPreferences = RadioPreferences(application)
+
+    val pttHapticFeedback = PttHapticFeedback(application)
 
     val speechHelper = ChannelSpeechHelper(application, radioPreferences)
 

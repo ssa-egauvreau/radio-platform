@@ -1893,7 +1893,7 @@ private fun ScanChannelPickerFullScreen(
                 )
             }
             Text(
-                text = "Tap channels to monitor while scanning. Home channel always has priority.",
+                text = "Select channels to monitor. None are selected by default. Home channel always has priority.",
                 style = styles.status,
                 color = p.textMuted,
                 modifier = Modifier.padding(vertical = 8.dp),
