@@ -2938,17 +2938,38 @@ private fun MessageHistoryRow(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                Text(
-                    text = item.transcript,
-                    style = styles.body.copy(
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 24.sp,
-                        lineHeight = 30.sp,
-                    ),
-                    color = p.textPrimary,
-                    maxLines = 8,
-                    overflow = TextOverflow.Ellipsis,
-                )
+                // The caption is already formatted by LastRxAudioRecorder as either
+                // "RX: UNIT • NAME" / "RX: UNIT" / "RX: NAME" — strip the "RX:" prefix
+                // so the row reads like a who-said-it tag rather than a status line.
+                val talker = item.caption.trimStart().removePrefix("RX:").trim()
+                if (talker.isNotEmpty()) {
+                    Text(
+                        text = talker,
+                        style = styles.status.copy(fontWeight = FontWeight.SemiBold, fontSize = 14.sp),
+                        color = p.textPrimary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                // RxMessageHistory currently sets transcript = caption as a placeholder until a
+                // real Whisper transcript is wired in. Skip the big body if it would just echo
+                // the speaker line we already rendered above.
+                val transcriptText = item.transcript.trim()
+                val isCaptionEcho = transcriptText.isNotEmpty() &&
+                    transcriptText == item.caption.trim()
+                if (transcriptText.isNotEmpty() && !isCaptionEcho) {
+                    Text(
+                        text = transcriptText,
+                        style = styles.body.copy(
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 24.sp,
+                            lineHeight = 30.sp,
+                        ),
+                        color = p.textPrimary,
+                        maxLines = 8,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
             }
         }
     }
