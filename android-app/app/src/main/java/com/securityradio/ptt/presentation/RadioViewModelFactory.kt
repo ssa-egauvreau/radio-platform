@@ -24,6 +24,7 @@ class RadioViewModelFactory(
                 radioPreferences = graph.radioPreferences,
                 speechHelper = graph.speechHelper,
                 voiceRelay = graph.voiceRelay,
+                scanVoiceListen = graph.scanVoiceListen,
                 locationReporter = graph.locationReporter,
                 customSoundDownloader = graph.customSoundDownloader,
                 lastRxAudioRecorder = graph.lastRxAudioRecorder,

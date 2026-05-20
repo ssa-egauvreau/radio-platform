@@ -26,6 +26,7 @@ import com.securityradio.ptt.device.PttHapticFeedback
 import com.securityradio.ptt.device.PttMicCapture
 import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.RadioUiSoundPlayer
+import com.securityradio.ptt.device.ScanVoiceListenTransport
 import com.securityradio.ptt.device.VoiceRelayTransport
 import com.securityradio.ptt.domain.ChannelRepository
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -97,6 +98,13 @@ class RadioAppGraph(val application: Application) {
     )
 
     val voiceRelay: VoiceRelayTransport = VoiceRelayTransport(
+        httpApiBaseUrl = BuildConfig.API_BASE_URL,
+        authTokenProvider = authTokenProvider,
+        apiKeyProvider = radioApiKeyProvider,
+        inbound = inboundVoicePlayer,
+    )
+
+    val scanVoiceListen: ScanVoiceListenTransport = ScanVoiceListenTransport(
         httpApiBaseUrl = BuildConfig.API_BASE_URL,
         authTokenProvider = authTokenProvider,
         apiKeyProvider = radioApiKeyProvider,

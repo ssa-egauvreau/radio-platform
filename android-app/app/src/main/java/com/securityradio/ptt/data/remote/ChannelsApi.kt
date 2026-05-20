@@ -18,9 +18,12 @@ interface ChannelsApi {
     @GET("/v1/air")
     suspend fun airState(@Query("channel") channel: String? = null): AirStateDto
 
-    /** Optional telemetry for who is keyed on primary vs scan channels (mock via Railway env vars). */
+    /** Live talker hints: home channel plus optional comma-separated scan channel names. */
     @GET("/v1/talk-activity")
-    suspend fun talkActivity(): TalkActivityDto
+    suspend fun talkActivity(
+        @Query("home") home: String? = null,
+        @Query("scan") scan: String? = null,
+    ): TalkActivityDto
 
     /** Register this handset on its tuned channel so the server can approximate channel population. */
     @POST("/v1/presence/heartbeat")

@@ -847,6 +847,14 @@ private fun LcdHandsetFillChannelBlock(
                     .fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
+                LcdHandsetMetaRow(
+                    zoneValue = zoneValue,
+                    channelValue = channelValue,
+                    radiosValue = radiosValue,
+                    radiosKnown = state.radiosOnlineOnChannel != null,
+                    styles = styles,
+                    modifier = Modifier.align(Alignment.TopEnd),
+                )
                 val channelText = state.channelLabel.uppercase(Locale.US)
                 val density = LocalDensity.current
                 // Scale the channel name to fill the block — height-capped, then
@@ -878,11 +886,7 @@ private fun LcdHandsetFillChannelBlock(
                     )
                 }
             }
-            LcdHandsetStatsRow(
-                zoneValue = zoneValue,
-                channelValue = channelValue,
-                radiosValue = radiosValue,
-                radiosKnown = state.radiosOnlineOnChannel != null,
+            LcdHandsetSettingsRow(
                 onEvent = onEvent,
                 styles = styles,
             )
@@ -938,13 +942,45 @@ private fun LcdPermissionBadge(
     )
 }
 
-/** Compact zone / channel / radios row below the channel name — keeps the title unobstructed. */
+/** Zone / channel position / radios — top-right of the channel block. */
 @Composable
-private fun LcdHandsetStatsRow(
+private fun LcdHandsetMetaRow(
     zoneValue: String,
     channelValue: String,
     radiosValue: String,
     radiosKnown: Boolean,
+    styles: LcdTextStyles,
+    modifier: Modifier = Modifier,
+) {
+    val p = RadioLcdTheme.palette
+    Row(
+        modifier = modifier.padding(top = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LcdHandsetStat(value = zoneValue, valueColor = p.textSecondary, styles = styles, compact = true) {
+            LcdZoneIcon(color = p.textSecondary, modifier = Modifier.size(22.dp))
+        }
+        LcdHandsetStat(value = channelValue, valueColor = p.textSecondary, styles = styles, compact = true) {
+            LcdRadioIcon(color = p.textSecondary, modifier = Modifier.size(24.dp))
+        }
+        LcdHandsetStat(
+            value = radiosValue,
+            valueColor = if (radiosKnown) p.statusGreen else p.textMuted,
+            styles = styles,
+            compact = true,
+        ) {
+            LcdGlobeIcon(
+                color = if (radiosKnown) p.statusGreen else p.textMuted,
+                modifier = Modifier.size(24.dp),
+            )
+        }
+    }
+}
+
+/** Single settings control — bottom-right under the channel name. */
+@Composable
+private fun LcdHandsetSettingsRow(
     onEvent: (RadioUiEvent) -> Unit,
     styles: LcdTextStyles,
 ) {
@@ -953,31 +989,9 @@ private fun LcdHandsetStatsRow(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
+        horizontalArrangement = Arrangement.End,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            LcdHandsetStat(value = zoneValue, valueColor = p.textSecondary, styles = styles, compact = true) {
-                LcdZoneIcon(color = p.textSecondary, modifier = Modifier.size(22.dp))
-            }
-            LcdHandsetStat(value = channelValue, valueColor = p.textSecondary, styles = styles, compact = true) {
-                LcdRadioIcon(color = p.textSecondary, modifier = Modifier.size(24.dp))
-            }
-            LcdHandsetStat(
-                value = radiosValue,
-                valueColor = if (radiosKnown) p.statusGreen else p.textMuted,
-                styles = styles,
-                compact = true,
-            ) {
-                LcdGlobeIcon(
-                    color = if (radiosKnown) p.statusGreen else p.textMuted,
-                    modifier = Modifier.size(24.dp),
-                )
-            }
-        }
         LcdSettingsIcon(
             color = p.statusBlue,
             modifier = Modifier
@@ -1012,7 +1026,7 @@ private fun LcdHandsetStat(
     }
 }
 
-/** Status row: signal → BT → GPS → scan → replay → volume | time → (battery) → settings. */
+/** Status row: icons left, clock centered, optional battery on the right (TM7 has no battery). */
 @Composable
 private fun LcdHandsetToolbar(
     state: RadioUiState,
@@ -1028,20 +1042,18 @@ private fun LcdHandsetToolbar(
     val iconSize = if (showBatteryStatus) 28.dp else 32.dp
     val iconGap = if (showBatteryStatus) 6.dp else 8.dp
     val timeFontSize = if (showBatteryStatus) 17.sp else 22.sp
-    Row(
+    val minHeight = if (showBatteryStatus) 38.dp else 42.dp
+    Box(
         modifier = modifier
             .fillMaxWidth()
-            .heightIn(min = if (showBatteryStatus) 38.dp else 42.dp),
-        verticalAlignment = Alignment.CenterVertically,
+            .heightIn(min = minHeight),
     ) {
         Row(
-            modifier = Modifier.weight(1f),
+            modifier = Modifier
+                .align(Alignment.CenterStart)
+                .fillMaxWidth(0.55f),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = if (showBatteryStatus) {
-                Arrangement.spacedBy(iconGap)
-            } else {
-                Arrangement.SpaceEvenly
-            },
+            horizontalArrangement = Arrangement.spacedBy(iconGap),
         ) {
             LcdSignalBarsIcon(
                 bars = if (online) 4 else 1,
@@ -1099,17 +1111,19 @@ private fun LcdHandsetToolbar(
                 modifier = Modifier.size(iconSize),
             )
         }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(iconGap),
-        ) {
-            Text(
-                text = state.systemTime.uppercase(Locale.US),
-                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = timeFontSize),
-                color = accentOnEmergency,
-                maxLines = 1,
-            )
-            if (showBatteryStatus) {
+        Text(
+            text = state.systemTime.uppercase(Locale.US),
+            style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = timeFontSize),
+            color = accentOnEmergency,
+            maxLines = 1,
+            modifier = Modifier.align(Alignment.Center),
+        )
+        if (showBatteryStatus) {
+            Row(
+                modifier = Modifier.align(Alignment.CenterEnd),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(iconGap),
+            ) {
                 LcdBatteryIcon(
                     percent = state.batteryPercent,
                     outline = if (state.isEmergencyActive) Color.White else p.textSecondary,
@@ -1125,12 +1139,6 @@ private fun LcdHandsetToolbar(
                     maxLines = 1,
                 )
             }
-            LcdSettingsIcon(
-                color = if (state.isEmergencyActive) Color.White else p.statusBlue,
-                modifier = Modifier
-                    .size(iconSize)
-                    .clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
-            )
         }
     }
     if (scanPulse && state.scanBackgroundChannel.isNotBlank()) {

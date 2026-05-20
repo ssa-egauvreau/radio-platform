@@ -140,32 +140,43 @@ app.get("/v1/presence/count", (req, res) => {
 });
 
 /**
- * Optional talker hints for UI ("who is keyed"). Android merges with main vs scan priority locally.
- * Railway env (optional):
- *   MOCK_TALK_MAIN_ACTIVE, MOCK_TALK_MAIN_CHANNEL, MOCK_TALK_MAIN_UNIT, MOCK_TALK_MAIN_USER
- *   MOCK_TALK_SCAN_ACTIVE, MOCK_TALK_SCAN_CHANNEL, MOCK_TALK_SCAN_UNIT, MOCK_TALK_SCAN_USER
+ * Talker hints for UI ("who is keyed") from live voice relay air state.
+ * Query: `home` = tuned channel; `scan` = comma-separated side channels to watch.
  */
-app.get("/v1/talk-activity", (_req, res) => {
-  const truthy = (v: string | undefined): boolean => {
-    const t = (v ?? "").trim().toLowerCase();
-    return t === "1" || t === "true" || t === "yes";
-  };
+app.get("/v1/talk-activity", (req, res) => {
+  const agencyId = req.agency?.id ?? 0;
+  const homeRaw = typeof req.query.home === "string" ? req.query.home.trim() : "";
+  const scanRaw = typeof req.query.scan === "string" ? req.query.scan.trim() : "";
 
-  const mainActive = truthy(process.env.MOCK_TALK_MAIN_ACTIVE);
-  const scanActive = truthy(process.env.MOCK_TALK_SCAN_ACTIVE);
+  const mainTalker = homeRaw ? peekVoiceTransmittingTalker(agencyId, homeRaw) : null;
+
+  const scanChannels = scanRaw
+    ? scanRaw.split(",").map((s) => s.trim()).filter((s) => s.length > 0)
+    : [];
+
+  let scanChannel = "";
+  let scanTalker: { unit_id: string; display_name: string | null } | null = null;
+  for (const ch of scanChannels) {
+    const talker = peekVoiceTransmittingTalker(agencyId, ch);
+    if (talker) {
+      scanChannel = ch;
+      scanTalker = talker;
+      break;
+    }
+  }
 
   res.json({
     main: {
-      channel: (process.env.MOCK_TALK_MAIN_CHANNEL ?? "Green 1").trim(),
-      active: mainActive,
-      unit_id: process.env.MOCK_TALK_MAIN_UNIT?.trim() ?? null,
-      username: process.env.MOCK_TALK_MAIN_USER?.trim() ?? null,
+      channel: homeRaw,
+      active: mainTalker !== null,
+      unit_id: mainTalker?.unit_id ?? null,
+      username: mainTalker?.display_name ?? null,
     },
     scan: {
-      channel: (process.env.MOCK_TALK_SCAN_CHANNEL ?? "Green 2").trim(),
-      active: scanActive,
-      unit_id: process.env.MOCK_TALK_SCAN_UNIT?.trim() ?? null,
-      username: process.env.MOCK_TALK_SCAN_USER?.trim() ?? null,
+      channel: scanChannel,
+      active: scanTalker !== null,
+      unit_id: scanTalker?.unit_id ?? null,
+      username: scanTalker?.display_name ?? null,
     },
   });
 });
