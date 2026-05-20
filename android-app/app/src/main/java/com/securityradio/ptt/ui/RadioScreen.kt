@@ -234,11 +234,22 @@ fun RadioScreen(
                 )
             }
             if (state.replayBanner.isNotEmpty()) {
-                LcdAlertBanner(
-                    text = state.replayBanner,
-                    accent = palette.statusAmber,
-                    styles = styles,
-                )
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    LcdAlertBanner(
+                        text = state.replayBanner,
+                        accent = palette.statusAmber,
+                        styles = styles,
+                    )
+                    if (state.replayTranscript.isNotBlank()) {
+                        LcdReplayTranscriptBanner(
+                            text = state.replayTranscript,
+                            styles = styles,
+                        )
+                    }
+                }
             }
             Box(
                 modifier = Modifier
@@ -1706,6 +1717,35 @@ private fun LcdAlertBanner(
             style = styles.banner,
             color = accent,
             maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
+    }
+}
+
+/** Whisper transcript shown under the replay caption while audio plays. */
+@Composable
+private fun LcdReplayTranscriptBanner(
+    text: String,
+    styles: LcdTextStyles,
+) {
+    val p = RadioLcdTheme.palette
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(2.dp))
+            .background(p.lcdAlt)
+            .border(1.dp, p.textMuted.copy(alpha = 0.5f), RoundedCornerShape(2.dp))
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+    ) {
+        Text(
+            text = text,
+            style = styles.body.copy(
+                fontWeight = FontWeight.Medium,
+                fontSize = 18.sp,
+                lineHeight = 24.sp,
+            ),
+            color = p.textPrimary,
+            maxLines = 4,
             overflow = TextOverflow.Ellipsis,
         )
     }

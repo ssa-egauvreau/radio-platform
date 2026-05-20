@@ -106,6 +106,8 @@ data class RadioUiState(
 
     /** Non-blank while the last RX is replaying; holds the "who was talking" caption. */
     val replayBanner: String,
+    /** Whisper transcript for quick replay (shown under [replayBanner]). */
+    val replayTranscript: String = "",
 
     /** Screen flipped 180° (IRC590 day/night key long-press). */
     val displayRotated180: Boolean,
@@ -190,6 +192,7 @@ data class RadioUiState(
             bluetoothOn = false,
             connectivityBanner = "",
             replayBanner = "",
+            replayTranscript = "",
             displayRotated180 = false,
         )
     }

@@ -43,7 +43,6 @@ import com.securityradio.ptt.device.VoiceRelayTransport
 import com.securityradio.ptt.domain.ChannelCatalogOrigin
 import com.securityradio.ptt.domain.ChannelPermission
 import com.securityradio.ptt.domain.ChannelRepository
-import android.os.Build
 import android.os.SystemClock
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -140,6 +139,7 @@ class RadioViewModel(
     @Volatile
     private var replayHistoryToggledThisHold: Boolean = false
     private var historyPlayJob: Job? = null
+    private var historyTranscriptPollJob: Job? = null
 
     /** Clears the scan-RX banner after voice activity stops. */
     private var scanRxBannerClearJob: Job? = null
@@ -718,10 +718,13 @@ class RadioViewModel(
             val items = buildHistoryItems()
             if (!_uiState.value.messageHistoryVisible) return@launch
             _uiState.update { it.copy(rxMessageHistory = items) }
+            startHistoryTranscriptPolling()
         }
     }
 
     private fun closeMessageHistory() {
+        historyTranscriptPollJob?.cancel()
+        historyTranscriptPollJob = null
         rxMessageHistory.stopReplay()
         historyPlayJob?.cancel()
         cancelReplayBanner()
@@ -735,13 +738,17 @@ class RadioViewModel(
         }
     }
 
-    private suspend fun buildHistoryItems(): List<RxMessageHistoryItem> {
-        val fmt = SimpleDateFormat("HH:mm", Locale.US)
-        val serverTx = try {
-            radioApi.recentTransmissions(limit = 50).transmissions
+    private suspend fun fetchServerTransmissions(): List<RadioTransmissionDto> =
+        try {
+            radioApi.recentTransmissions(limit = 80).transmissions
         } catch (_: Exception) {
             emptyList()
         }
+
+    private suspend fun buildHistoryItems(): List<RxMessageHistoryItem> {
+        val fmt = SimpleDateFormat("HH:mm", Locale.US)
+        val online = _uiState.value.networkLabel == "ONLINE"
+        val serverTx = fetchServerTransmissions()
         return rxMessageHistory.snapshot().map { entry ->
             val who = entry.caption.trim()
             RxMessageHistoryItem(
@@ -749,76 +756,48 @@ class RadioViewModel(
                 timeLabel = fmt.format(Date(entry.capturedAtMs)),
                 channelName = entry.channelName.ifBlank { "—" },
                 caption = who,
-                transcript = resolveHistoryTranscript(entry, serverTx),
+                transcript = TransmissionTranscriptMatcher.resolveTranscript(entry, serverTx, online),
                 durationMs = entry.durationMs,
             )
         }
     }
 
-    private fun resolveHistoryTranscript(
-        entry: RxHistoryEntry,
-        serverTx: List<RadioTransmissionDto>,
-    ): String {
-        val matched = findMatchingTransmission(entry, serverTx)
-        if (matched != null) {
-            val status = matched.transcriptStatus.trim().lowercase(Locale.US)
-            val text = matched.transcript?.trim().orEmpty()
-            when (status) {
-                "done" -> if (text.isNotEmpty()) return text
-                "pending" -> return if (text.isNotEmpty()) text else "Transcribing…"
+    private fun startHistoryTranscriptPolling() {
+        historyTranscriptPollJob?.cancel()
+        historyTranscriptPollJob = viewModelScope.launch {
+            var attempts = 0
+            while (isActive && _uiState.value.messageHistoryVisible && attempts < 24) {
+                delay(if (attempts == 0) 1_500L else 2_500L)
+                attempts++
+                if (!_uiState.value.messageHistoryVisible) break
+                val items = buildHistoryItems()
+                _uiState.update { it.copy(rxMessageHistory = items) }
+                val stillPending = items.any { row ->
+                    row.transcript.equals("Transcribing…", ignoreCase = true) ||
+                        row.transcript.contains("waiting for transcript", ignoreCase = true) ||
+                        row.transcript.contains("Loading transcript", ignoreCase = true)
+                }
+                if (!stillPending) break
             }
-        }
-        return readableCaptionTranscript(entry.caption, entry.channelName)
-    }
-
-    private fun findMatchingTransmission(
-        entry: RxHistoryEntry,
-        serverTx: List<RadioTransmissionDto>,
-    ): RadioTransmissionDto? {
-        val ch = entry.channelName.trim().lowercase(Locale.US)
-        if (ch.isEmpty()) return null
-        var best: RadioTransmissionDto? = null
-        var bestDelta = Long.MAX_VALUE
-        for (tx in serverTx) {
-            if (!tx.channelName.trim().equals(entry.channelName.trim(), ignoreCase = true)) continue
-            val started = parseTransmissionStartedAt(tx.startedAt) ?: continue
-            val delta = kotlin.math.abs(started - entry.capturedAtMs)
-            if (delta < bestDelta) {
-                bestDelta = delta
-                best = tx
-            }
-        }
-        return if (bestDelta <= 120_000L) best else null
-    }
-
-    private fun parseTransmissionStartedAt(raw: String): Long? {
-        val t = raw.trim()
-        if (t.isEmpty()) return null
-        return try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                java.time.Instant.parse(t).toEpochMilli()
-            } else {
-                @Suppress("DEPRECATION")
-                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
-                    timeZone = java.util.TimeZone.getTimeZone("UTC")
-                }.parse(t)?.time
-            }
-        } catch (_: Exception) {
-            null
         }
     }
 
-    private fun readableCaptionTranscript(caption: String, channelName: String): String {
-        val trimmed = caption.trim()
-        if (trimmed.isEmpty()) {
-            return "Voice on ${channelName.ifBlank { "channel" }} — transcript pending."
-        }
-        val afterRx = trimmed.removePrefix("RX:").removePrefix("RX").trim()
-        val parts = afterRx.split('•', limit = 2).map { it.trim() }.filter { it.isNotEmpty() }
-        return when (parts.size) {
-            2 -> "${parts[0]}\n${parts[1]}"
-            1 -> parts[0]
-            else -> afterRx
+    private suspend fun refreshHistoryTranscriptForEntry(entryId: Long) {
+        if (!_uiState.value.messageHistoryVisible) return
+        val serverTx = fetchServerTransmissions()
+        val entry = rxMessageHistory.snapshot().firstOrNull { it.id == entryId } ?: return
+        val transcript = TransmissionTranscriptMatcher.resolveTranscript(
+            entry,
+            serverTx,
+            _uiState.value.networkLabel == "ONLINE",
+        )
+        _uiState.update { state ->
+            if (!state.messageHistoryVisible) return@update state
+            state.copy(
+                rxMessageHistory = state.rxMessageHistory.map { row ->
+                    if (row.id == entryId) row.copy(transcript = transcript) else row
+                },
+            )
         }
     }
 
@@ -876,6 +855,20 @@ class RadioViewModel(
             )
         }
         showReplayBanner(banner, durationMs)
+        viewModelScope.launch { pollHistoryEntryTranscript(entryId) }
+    }
+
+    private suspend fun pollHistoryEntryTranscript(entryId: Long) {
+        repeat(12) {
+            refreshHistoryTranscriptForEntry(entryId)
+            val row = _uiState.value.rxMessageHistory.firstOrNull { it.id == entryId }
+            val pending =
+                row?.transcript.equals("Transcribing…", ignoreCase = true) == true ||
+                    row?.transcript?.contains("waiting for transcript", ignoreCase = true) == true ||
+                    row?.transcript?.contains("Loading transcript", ignoreCase = true) == true
+            if (!pending) return
+            delay(2_500)
+        }
     }
 
     private fun playLastTransmission() {
@@ -886,6 +879,7 @@ class RadioViewModel(
         val durationMs = lastRxAudioRecorder.playLast()
         if (durationMs > 0L) {
             showReplayBanner(replayBannerText(_uiState.value), durationMs)
+            viewModelScope.launch { loadReplayTranscript(durationMs) }
             return
         }
         soundPlayer.playChannelSwitch()
@@ -894,11 +888,41 @@ class RadioViewModel(
     }
 
     /** Shows the replay banner and schedules dismiss; only the latest replay generation may clear it. */
+    private suspend fun loadReplayTranscript(playbackDurationMs: Long, attempt: Int = 0) {
+        if (attempt > 12) return
+        val snap = _uiState.value
+        if (snap.replayBanner.isEmpty()) return
+        val local = rxMessageHistory.snapshot().firstOrNull()
+        val serverTx = fetchServerTransmissions()
+        val transcript =
+            TransmissionTranscriptMatcher.resolveReplayTranscript(
+                channelLabel = snap.channelLabel,
+                durationMs = playbackDurationMs,
+                caption = snap.lastRxReplayCaption,
+                capturedAtMs = System.currentTimeMillis(),
+                serverTx = serverTx,
+                localEntry = local,
+            )
+        if (transcript.isBlank()) return
+        _uiState.update { state ->
+            if (state.replayBanner.isEmpty()) state
+            else state.copy(replayTranscript = transcript)
+        }
+        val pending =
+            transcript == "Transcribing…" ||
+                transcript.contains("waiting for transcript", ignoreCase = true)
+        if (pending) {
+            delay(2_500)
+            if (_uiState.value.replayBanner.isEmpty()) return
+            loadReplayTranscript(playbackDurationMs, attempt + 1)
+        }
+    }
+
     private fun showReplayBanner(text: String, durationMs: Long) {
         replayJob?.cancel()
         val generation = ++replayBannerGeneration
         _uiState.update {
-            it.copy(statusMessage = "REPLAY AUDIO", replayBanner = text)
+            it.copy(statusMessage = "REPLAY AUDIO", replayBanner = text, replayTranscript = "")
         }
         val dismissAfterMs = maxOf(
             durationMs.coerceAtLeast(250L) + REPLAY_BANNER_PAD_MS,
@@ -915,6 +939,7 @@ class RadioViewModel(
         _uiState.update { state ->
             state.copy(
                 replayBanner = "",
+                replayTranscript = "",
                 historyPlayingId = if (clearHistoryPlayingId) null else state.historyPlayingId,
                 historyPlaybackPaused = if (clearHistoryPlayingId) false else state.historyPlaybackPaused,
             )
@@ -926,7 +951,12 @@ class RadioViewModel(
         replayJob?.cancel()
         replayJob = null
         _uiState.update {
-            it.copy(replayBanner = "", historyPlayingId = null, historyPlaybackPaused = false)
+            it.copy(
+                replayBanner = "",
+                replayTranscript = "",
+                historyPlayingId = null,
+                historyPlaybackPaused = false,
+            )
         }
     }
 

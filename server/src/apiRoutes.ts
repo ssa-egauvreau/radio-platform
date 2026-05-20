@@ -188,6 +188,17 @@ function radioAgencyId(req: Request): number {
   return req.agency?.id ?? 0;
 }
 
+/** ISO-8601 UTC for handset clients (pg may return Date or string). */
+function formatTransmissionStartedAt(value: unknown): string {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    return value.trim();
+  }
+  return new Date().toISOString();
+}
+
 /** Requires a signed-in admin or dispatcher within an agency (command-level operators). */
 function requireAgencyOperator(req: Request, res: Response, next: NextFunction): void {
   if (!req.authUser) {
@@ -1773,7 +1784,7 @@ export function createApiRouter(): Router {
         transmissions: transmissions.map((t) => ({
           id: t.id,
           channel_name: t.channel_name,
-          started_at: t.started_at,
+          started_at: formatTransmissionStartedAt(t.started_at),
           duration_ms: t.duration_ms,
           transcript: t.transcript,
           transcript_status: t.transcript_status,
