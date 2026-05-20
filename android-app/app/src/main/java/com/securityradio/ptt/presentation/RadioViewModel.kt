@@ -1295,15 +1295,19 @@ class RadioViewModel(
             return
         }
         channelIndex = (channelIndex + delta + channelNames.size) % channelNames.size
-        soundPlayer.playChannelSwitch()
         val tunedLabel = channelNames[channelIndex]
+        // Beep first, then announce the channel name — the TTS engine ran in parallel before, so
+        // the spoken name and the beep overlapped. The callback fires on the main thread after
+        // the WAV ends, which sequences them naturally.
+        soundPlayer.playChannelSwitch {
+            speechHelper.speakChannelTuneIfEnabled(tunedLabel)
+        }
         _uiState.update {
             it.withTuning(channelNames, channelIndex).pruneScanSets().copy(
                 statusMessage = "CHANNEL ${if (delta > 0) "+" else "-"}",
                 currentChannelPermission = currentPermission(),
             )
         }
-        speechHelper.speakChannelTuneIfEnabled(tunedLabel)
         viewModelScope.launch { pulsePresenceHeartbeatAndCount(expectOnline = true) }
         reconcileVoiceTransport()
     }

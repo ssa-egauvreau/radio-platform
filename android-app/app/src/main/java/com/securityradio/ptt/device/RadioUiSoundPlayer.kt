@@ -8,7 +8,11 @@ package com.securityradio.ptt.device
  * `onFinished` runs (implementations invoke it on the main thread).
  */
 interface RadioUiSoundPlayer {
-    fun playChannelSwitch()
+    /**
+     * @param onFinished Optional: invoked on the main thread when the beep ends. Pair with TTS so the
+     * channel-name announcement starts AFTER the beep instead of stomping it.
+     */
+    fun playChannelSwitch(onFinished: (() -> Unit)? = null)
     /**
      * @param onStarted Invoked when the permit WAV actually begins playback (same moment as audio).
      * @param onFinished Invoked when playback ends; start microphone capture here.
