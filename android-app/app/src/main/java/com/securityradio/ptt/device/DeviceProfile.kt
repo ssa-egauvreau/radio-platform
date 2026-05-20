@@ -46,6 +46,8 @@ data class RadioLayoutPolicy(
     val showHardwareKeyLegend: Boolean = false,
     /** TM-7 Plus is mains-powered — hide battery icon and percentage in the status row. */
     val showBatteryStatus: Boolean = true,
+    /** IRC590: status icons, clock, and zone/channel/radios each on their own row. */
+    val handsetToolbarMultiRow: Boolean = false,
 )
 
 object DeviceProfileResolver {
@@ -94,6 +96,7 @@ object DeviceProfileResolver {
             handsetStatusDisplay = true,
             showHardwareKeyLegend = true,
             showBatteryStatus = false,
+            handsetToolbarMultiRow = false,
         )
         ResolvedDeviceProfile.IRC590 -> RadioLayoutPolicy(
             showSoftKeyRow = false,
@@ -110,6 +113,7 @@ object DeviceProfileResolver {
             showOnScreenPtt = false,
             showOnScreenEmergency = false,
             handsetStatusDisplay = true,
+            handsetToolbarMultiRow = true,
         )
         ResolvedDeviceProfile.RESPONSIVE -> responsivePolicy(isCompact = false, isUltraCompact = false)
     }
