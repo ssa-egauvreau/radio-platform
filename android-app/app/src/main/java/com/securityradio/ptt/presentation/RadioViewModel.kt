@@ -614,7 +614,21 @@ class RadioViewModel(
                 mappingJob?.cancel()
             }
             is RadioUiEvent.SelectSettingsTab -> {
-                _uiState.update { it.copy(settingsTabIndex = event.index.coerceIn(0, 3)) }
+                val targetIndex = event.index.coerceIn(0, 3)
+                // Leaving the BUTTONS tab while a mapping session is armed would otherwise
+                // capture the next physical keypress silently and write it to the previously
+                // selected action — cancel the listener so the user has to re-arm explicitly.
+                val leavingButtonsTab =
+                    targetIndex != 0 && _uiState.value.currentlyMappingAction != null
+                if (leavingButtonsTab) {
+                    mappingJob?.cancel()
+                }
+                _uiState.update {
+                    it.copy(
+                        settingsTabIndex = targetIndex,
+                        currentlyMappingAction = if (leavingButtonsTab) null else it.currentlyMappingAction,
+                    )
+                }
             }
             is RadioUiEvent.SetMicNoiseSuppression -> {
                 radioPreferences.setNoiseSuppressionEnabled(event.enabled)
