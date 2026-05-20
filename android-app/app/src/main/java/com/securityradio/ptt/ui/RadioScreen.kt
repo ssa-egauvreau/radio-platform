@@ -322,7 +322,7 @@ fun RadioScreen(
         if (state.resolvedDeviceProfile == ResolvedDeviceProfile.TM7_PLUS) {
             ScanChannelPickerFullScreen(state = state, onEvent = onEvent, styles = styles)
         } else {
-            ScanChannelPickerDialog(state = state, onEvent = onEvent)
+            ScanChannelPickerDialog(state = state, onEvent = onEvent, styles = styles)
         }
         MessageHistoryScreen(state = state, onEvent = onEvent, styles = styles)
         HardwareMappingDialog(state = state, onEvent = onEvent, styles = styles)
@@ -2551,6 +2551,7 @@ private fun MessageHistoryRow(
 private fun ScanChannelPickerDialog(
     state: RadioUiState,
     onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
 ) {
     if (!state.scanPickerVisible || state.channelCatalog.isEmpty()) return
     val p = RadioLcdTheme.palette

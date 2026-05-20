@@ -180,7 +180,9 @@ internal object TransmissionTranscriptMatcher {
         out.add(raw)
         val spaced = raw.replace(' ', 'T')
         if (spaced != raw) out.add(spaced)
-        if (!raw.endsWith("Z", ignoreCase = true) && !raw.contains('+') && !raw.contains('-', startIndex = 10)) {
+        val hasTimezoneOffset =
+            raw.contains('+') || raw.indexOf('-', startIndex = 10) >= 0
+        if (!raw.endsWith("Z", ignoreCase = true) && !hasTimezoneOffset) {
             out.add("${spaced}Z")
             out.add("${raw}Z")
         }
