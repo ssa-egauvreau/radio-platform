@@ -1393,14 +1393,15 @@ private fun LcdHandsetFillChannelBlock(
                     styles = styles,
                 )
             }
-            if (!showEmergencyBanner) {
+            val isIrc590Handset = state.resolvedDeviceProfile == ResolvedDeviceProfile.IRC590
+            if (!showEmergencyBanner && !isIrc590Handset) {
                 LcdPermissionBadge(
                     permission = state.currentChannelPermission,
                     deviceProfile = state.resolvedDeviceProfile,
                     styles = styles,
                 )
             }
-            if (!showEmergencyBanner) {
+            if (!showEmergencyBanner && !isIrc590Handset) {
                 LcdHandsetZonePositionLine(
                     zoneValue = zoneValue,
                     channelValue = channelValue,
@@ -1452,15 +1453,30 @@ private fun LcdHandsetFillChannelBlock(
                     val density = LocalDensity.current
                     val blockMaxHeight = maxHeight
                     val blockMaxWidth = maxWidth
+                    val irc590IdleLayout =
+                        isIrc590Handset && homeChannelLarge && !remoteEmergencyLive
                     Column(
                         modifier = Modifier.fillMaxSize(),
                         horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Center,
+                        verticalArrangement =
+                            if (irc590IdleLayout) {
+                                Arrangement.Bottom
+                            } else {
+                                Arrangement.Center
+                            },
                     ) {
+                        if (irc590IdleLayout) {
+                            LcdHandsetIrc590ChannelMetaHeader(
+                                state = state,
+                                zoneValue = zoneValue,
+                                channelValue = channelValue,
+                                styles = styles,
+                            )
+                        }
                         val ten33Alpha = rememberTen33PulseAlpha(state.channelTen33)
                         Box(
                             modifier = (
-                                if (homeChannelLarge) {
+                                if (homeChannelLarge && !irc590IdleLayout) {
                                     Modifier
                                         .weight(1f)
                                         .fillMaxWidth()
@@ -1623,8 +1639,54 @@ private fun LcdHandsetZonePositionLine(
         overflow = TextOverflow.Ellipsis,
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 0.dp, bottom = 2.dp),
+            .padding(
+                top = 0.dp,
+                bottom = if (deviceProfile == ResolvedDeviceProfile.IRC590) 0.dp else 2.dp,
+            ),
     )
+}
+
+/** IRC590: clock centered above permission + zone, flush on the large channel name. */
+@Composable
+private fun LcdHandsetIrc590ChannelMetaHeader(
+    state: RadioUiState,
+    zoneValue: String,
+    channelValue: String,
+    styles: LcdTextStyles,
+    modifier: Modifier = Modifier,
+) {
+    val p = RadioLcdTheme.palette
+    val accentOnEmergency = if (state.isEmergencyActive) Color.White else p.textPrimary
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(0.dp),
+    ) {
+        Text(
+            text = state.systemTime.uppercase(Locale.US),
+            style = styles.status.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = HANDSET_CLOCK_FONT_IRC590,
+                lineHeight = (HANDSET_CLOCK_FONT_IRC590.value * 1.05f).sp,
+            ),
+            color = accentOnEmergency,
+            maxLines = 1,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        LcdPermissionBadge(
+            permission = state.currentChannelPermission,
+            deviceProfile = ResolvedDeviceProfile.IRC590,
+            styles = styles,
+            compactVertical = true,
+        )
+        LcdHandsetZonePositionLine(
+            zoneValue = zoneValue,
+            channelValue = channelValue,
+            deviceProfile = ResolvedDeviceProfile.IRC590,
+            styles = styles,
+        )
+    }
 }
 
 /** Per-channel permission tag — only shown when the channel isn't plain TALK. */
@@ -1633,6 +1695,7 @@ private fun LcdPermissionBadge(
     permission: ChannelPermission,
     styles: LcdTextStyles,
     deviceProfile: ResolvedDeviceProfile = ResolvedDeviceProfile.TM7_PLUS,
+    compactVertical: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
     if (permission == ChannelPermission.TALK) return
@@ -1664,7 +1727,7 @@ private fun LcdPermissionBadge(
         overflow = TextOverflow.Ellipsis,
         modifier = modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp),
+            .padding(vertical = if (compactVertical) 0.dp else 2.dp),
     )
 }
 
@@ -1724,7 +1787,7 @@ private fun LcdHandsetStat(
     }
 }
 
-/** Status toolbar — TM7: icons + clock row; IRC590: even icon row + channel/clock row. */
+/** Status toolbar — TM7: icons + clock row; IRC590: icon row only (clock/zone live above channel name). */
 @Composable
 private fun LcdHandsetToolbar(
     state: RadioUiState,
@@ -2088,16 +2151,6 @@ private fun LcdHandsetToolbarIrc590(
             showBatteryStatus = showBatteryStatus,
             onEvent = onEvent,
             styles = styles,
-        )
-        LcdHandsetToolbarClockMetaRow(
-            state = state,
-            channelValue = channelValue,
-            radiosValue = radiosValue,
-            radiosKnown = radiosKnown,
-            clockFontSize = HANDSET_CLOCK_FONT_IRC590,
-            accentOnEmergency = accentOnEmergency,
-            styles = styles,
-            showRadiosOnline = false,
         )
         LcdHandsetToolbarScanBanner(state = state, styles = styles)
     }
