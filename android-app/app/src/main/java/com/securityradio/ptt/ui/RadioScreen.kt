@@ -891,9 +891,9 @@ private fun LcdHandsetFillChannelBlock(
             LcdPermissionBadge(permission = state.currentChannelPermission, styles = styles)
             BoxWithConstraints(
                 modifier = Modifier
-                    .weight(if (showTalkPanel) 0.72f else 1.6f)
+                    .weight(if (showTalkPanel) 0.35f else 1.4f)
                     .fillMaxWidth()
-                    .heightIn(max = if (showTalkPanel) 52.dp else 80.dp),
+                    .heightIn(max = if (showTalkPanel) 36.dp else 72.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 if (state.scanActive && state.scanBackgroundChannel.isNotBlank()) {
@@ -909,13 +909,13 @@ private fun LcdHandsetFillChannelBlock(
                 }
                 val channelText = state.channelLabel.uppercase(Locale.US)
                 val density = LocalDensity.current
-                // Keep the channel label compact so the talker block has most of the height.
+                // Keep the channel label small — most of the panel is for unit id / talker name.
                 val channelFont = with(density) {
-                    val byHeight = constraints.maxHeight * 0.9f
+                    val byHeight = constraints.maxHeight * 0.82f
                     val byWidth = constraints.maxWidth /
-                        (channelText.length.coerceAtLeast(3) * 0.52f)
+                        (channelText.length.coerceAtLeast(3) * 0.48f)
                     minOf(byHeight, byWidth).toSp()
-                }.value.coerceIn(18f, 40f).sp
+                }.value.coerceIn(14f, 26f).sp
                 Text(
                     text = channelText,
                     style = styles.channel.copy(
@@ -968,8 +968,9 @@ private fun LcdHandsetFillChannelBlock(
                     nameColor = talkColor.copy(alpha = 0.9f),
                     styles = styles,
                     modifier = Modifier
-                        .weight(2.35f)
-                        .fillMaxWidth(),
+                        .weight(3.65f)
+                        .fillMaxWidth()
+                        .heightIn(min = 96.dp),
                 )
             }
         }
@@ -1434,15 +1435,14 @@ private fun LcdHandsetTalkerBlock(
         val density = LocalDensity.current
         val maxH = maxHeight
         val hasName = displayName.isNotBlank()
-        // Caps leave headroom so the unit id and name always fit the block —
-        // the name was being clipped at the bottom on the smaller IRC590 screen.
+        // Large unit id + name for TX/RX on rugged handset screens (IRC590, TM7).
         val unitSp = with(density) {
-            val cap = if (hasName) maxH.value * 0.48f else maxH.value * 0.58f
-            cap.coerceIn(26f, 56f).sp
+            val cap = if (hasName) maxH.value * 0.56f else maxH.value * 0.68f
+            cap.coerceIn(36f, 96f).sp
         }
         val nameSp = with(density) {
-            val cap = maxH.value * 0.26f
-            cap.coerceIn(14f, 24f).sp
+            val cap = maxH.value * 0.34f
+            cap.coerceIn(22f, 44f).sp
         }
         Column(
             modifier = Modifier.fillMaxWidth(),
@@ -1466,9 +1466,9 @@ private fun LcdHandsetTalkerBlock(
                 Text(
                     text = displayName.uppercase(Locale.US),
                     style = styles.body.copy(
-                        fontWeight = FontWeight.Normal,
+                        fontWeight = FontWeight.Bold,
                         fontSize = nameSp,
-                        lineHeight = (nameSp.value * 1.15f).sp,
+                        lineHeight = (nameSp.value * 1.12f).sp,
                     ),
                     color = nameColor,
                     maxLines = 1,
