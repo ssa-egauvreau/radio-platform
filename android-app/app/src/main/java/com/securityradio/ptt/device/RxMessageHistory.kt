@@ -6,71 +6,72 @@ import android.media.AudioTrack
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 
 /**
- * Records the most recent completed inbound voice transmission (PCM 16 kHz mono)
- * and can play it back on demand (hardware "replay last message").
+ * Rolling buffer of recent inbound voice transmissions for the message-history screen.
+ * PCM is stored locally; [caption] / [transcript] come from RX attribution at capture time.
  */
-class LastRxAudioRecorder(
-    private val messageHistory: RxMessageHistory? = null,
-) {
+class RxMessageHistory {
+
+    data class Entry(
+        val id: Long,
+        val capturedAtMs: Long,
+        val channelName: String,
+        val caption: String,
+        val transcript: String,
+        val pcm: ByteArray,
+        val durationMs: Long,
+    )
 
     private val main = Handler(Looper.getMainLooper())
     private val lock = Any()
-
-    private val currentChunks = ArrayList<ByteArray>(64)
-    private var currentBytes = 0
-    private var lastChunkAtMs = 0L
-    private var lastCompletePcm = ByteArray(0)
-    private var lastCaptureChannel = ""
-    private var lastCaptureCaption = ""
-
+    private val entries = ArrayDeque<Entry>()
+    private var nextId = 1L
     private var replayTrack: AudioTrack? = null
+    private var playingEntryId: Long? = null
 
-    /** Channel + caption stamped on the current RX burst (for message history). */
-    fun noteRxContext(channelName: String, caption: String) {
+    fun append(
+        pcm: ByteArray,
+        channelName: String,
+        caption: String,
+        capturedAtMs: Long = System.currentTimeMillis(),
+    ) {
+        if (pcm.size < LastRxAudioRecorder.MIN_STORE_BYTES) return
+        val durationMs = pcm.size / 2 * 1000L / VoiceAudioSpecs.SAMPLE_RATE_HZ
+        val transcript = caption.trim()
         synchronized(lock) {
-            if (channelName.isNotBlank()) lastCaptureChannel = channelName.trim()
-            if (caption.isNotBlank()) lastCaptureCaption = caption.trim()
+            entries.addFirst(
+                Entry(
+                    id = nextId++,
+                    capturedAtMs = capturedAtMs,
+                    channelName = channelName.trim(),
+                    caption = caption.trim(),
+                    transcript = transcript,
+                    pcm = pcm,
+                    durationMs = durationMs,
+                ),
+            )
+            while (entries.size > MAX_ENTRIES) {
+                entries.removeLast()
+            }
         }
     }
 
-    /** Append peer PCM from the voice relay (not local sidetone). */
-    fun onInboundPcm(chunk: ByteArray) {
-        if (chunk.isEmpty()) return
-        val now = SystemClock.elapsedRealtime()
-        synchronized(lock) {
-            if (lastChunkAtMs > 0L && now - lastChunkAtMs > RX_GAP_MS) {
-                finalizeCurrentTransmissionLocked()
-                currentChunks.clear()
-                currentBytes = 0
-            }
-            lastChunkAtMs = now
-            val room = MAX_TRANSMISSION_BYTES - currentBytes
-            if (room <= 0) return
-            val take = minOf(chunk.size, room)
-            if (take < chunk.size) {
-                currentChunks.add(chunk.copyOfRange(0, take))
-            } else {
-                currentChunks.add(chunk)
-            }
-            currentBytes += take
-        }
-    }
+    fun snapshot(): List<Entry> = synchronized(lock) { entries.map { it.copy(pcm = it.pcm) } }
 
-    /** Play the last completed RX transmission; returns its length in ms, or 0 if none stored. */
-    fun playLast(): Long {
+    fun play(entryId: Long, onFinished: () -> Unit = {}): Long {
         val pcm = synchronized(lock) {
-            finalizeCurrentTransmissionLocked()
-            if (lastCompletePcm.size < MIN_TRANSMISSION_BYTES) {
-                return 0L
-            }
-            lastCompletePcm.copyOf()
-        }
+            entries.firstOrNull { it.id == entryId }?.pcm?.copyOf()
+        } ?: return 0L
+        val durationMs = pcm.size / 2 * 1000L / VoiceAudioSpecs.SAMPLE_RATE_HZ
         main.post {
             stopReplayLocked()
-            val track = createReplayTrack() ?: return@post
+            playingEntryId = entryId
+            val track = createReplayTrack() ?: run {
+                playingEntryId = null
+                onFinished()
+                return@post
+            }
             replayTrack = track
             try {
                 var offset = 0
@@ -83,6 +84,7 @@ class LastRxAudioRecorder(
                     object : AudioTrack.OnPlaybackPositionUpdateListener {
                         override fun onMarkerReached(track: AudioTrack?) {
                             stopReplayLocked()
+                            onFinished()
                         }
 
                         override fun onPeriodicNotification(track: AudioTrack?) {}
@@ -94,49 +96,29 @@ class LastRxAudioRecorder(
                 }
             } catch (_: Exception) {
                 stopReplayLocked()
+                onFinished()
             }
         }
-        return pcm.size / 2 * 1000L / VoiceAudioSpecs.SAMPLE_RATE_HZ
+        return durationMs
     }
 
     fun stopReplay() {
-        main.post { stopReplayLocked() }
+        main.post {
+            stopReplayLocked()
+        }
     }
 
     fun release() {
         main.post {
             stopReplayLocked()
             synchronized(lock) {
-                currentChunks.clear()
-                currentBytes = 0
-                lastCompletePcm = ByteArray(0)
+                entries.clear()
             }
         }
     }
 
-    private fun finalizeCurrentTransmissionLocked() {
-        if (currentBytes < MIN_TRANSMISSION_BYTES) {
-            currentChunks.clear()
-            currentBytes = 0
-            return
-        }
-        val merged = ByteArray(currentBytes)
-        var pos = 0
-        for (chunk in currentChunks) {
-            System.arraycopy(chunk, 0, merged, pos, chunk.size)
-            pos += chunk.size
-        }
-        lastCompletePcm = merged
-        messageHistory?.append(
-            pcm = merged,
-            channelName = lastCaptureChannel,
-            caption = lastCaptureCaption,
-        )
-        currentChunks.clear()
-        currentBytes = 0
-    }
-
     private fun stopReplayLocked() {
+        playingEntryId = null
         replayTrack?.runCatching {
             setPlaybackPositionUpdateListener(null)
             if (playState == AudioTrack.PLAYSTATE_PLAYING) {
@@ -194,11 +176,7 @@ class LastRxAudioRecorder(
         return t
     }
 
-    companion object {
-        const val RX_GAP_MS = 500L
-        const val MAX_TRANSMISSION_BYTES = 30 * VoiceAudioSpecs.SAMPLE_RATE_HZ * 2
-        const val MIN_TRANSMISSION_BYTES = VoiceAudioSpecs.SAMPLE_RATE_HZ / 5 * 2
-        /** Minimum stored bytes for message history (same threshold as last-RX replay). */
-        val MIN_STORE_BYTES: Int get() = MIN_TRANSMISSION_BYTES
+    private companion object {
+        const val MAX_ENTRIES = 30
     }
 }

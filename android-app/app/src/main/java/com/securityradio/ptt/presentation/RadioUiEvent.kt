@@ -15,6 +15,8 @@ sealed interface RadioUiEvent {
     data object ChannelDown : RadioUiEvent
     data object RetryChannelSync : RadioUiEvent
     /** Open overlay to pick channels that participate in scan. */
+    /** TM7 day/night long-press: toggle scan and open channel picker when enabling. */
+    data object ToggleScanLongPress : RadioUiEvent
     data object OpenScanPicker : RadioUiEvent
     data object CloseScanPicker : RadioUiEvent
     /** Toggle one channel in/out of scan list (excluding home channel — ignored server-side merge). */
@@ -39,6 +41,10 @@ sealed interface RadioUiEvent {
 
     data object ToggleVoiceAnnounceChannelTune : RadioUiEvent
     data object PlayLastTransmission : RadioUiEvent
+    /** Long-press replay: open history, or close if already open (TM7). */
+    data object ToggleMessageHistory : RadioUiEvent
+    data object CloseMessageHistory : RadioUiEvent
+    data class PlayHistoryMessage(val entryId: Long) : RadioUiEvent
     data object ToggleListenVolume : RadioUiEvent
 
     /** Bind this handset to an agency (tenant) by its radio key; blank clears the override. */

@@ -4,6 +4,16 @@ import com.securityradio.ptt.device.DeviceProfilePreference
 import com.securityradio.ptt.device.ResolvedDeviceProfile
 import com.securityradio.ptt.domain.ChannelPermission
 
+/** One row in the RX message-history screen. */
+data class RxMessageHistoryItem(
+    val id: Long,
+    val timeLabel: String,
+    val channelName: String,
+    val caption: String,
+    val transcript: String,
+    val durationMs: Long,
+)
+
 /**
  * Immutable snapshot of the radio shell. The [RadioViewModel] is the single source of truth.
  */
@@ -105,6 +115,16 @@ data class RadioUiState(
 
     /** Talk permission for the currently tuned channel; drives the on-screen badge + local PTT gate. */
     val currentChannelPermission: ChannelPermission = ChannelPermission.TALK,
+
+    /** Full-screen scrollable list of recent RX messages (long-press replay on TM7). */
+    val messageHistoryVisible: Boolean = false,
+    val rxMessageHistory: List<RxMessageHistoryItem> = emptyList(),
+    /** Id of the history row currently playing audio, if any. */
+    val historyPlayingId: Long? = null,
+
+    /** Scan traffic on a monitored channel while tuned elsewhere (scan icon pulse). */
+    val scanBackgroundActive: Boolean = false,
+    val scanBackgroundChannel: String = "",
 ) {
     init {
         require(softKeyLabels.size == SOFT_KEY_COUNT) {

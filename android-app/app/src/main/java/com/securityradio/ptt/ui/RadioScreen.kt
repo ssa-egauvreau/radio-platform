@@ -10,9 +10,11 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -70,6 +72,7 @@ import com.securityradio.ptt.device.HardwareAction
 import com.securityradio.ptt.device.P25ImbeNative
 import com.securityradio.ptt.device.RadioLayoutPolicy
 import com.securityradio.ptt.device.ResolvedDeviceProfile
+import com.securityradio.ptt.presentation.RxMessageHistoryItem
 import com.securityradio.ptt.domain.ChannelPermission
 import com.securityradio.ptt.presentation.RadioUiEvent
 import com.securityradio.ptt.presentation.RadioUiState
@@ -283,7 +286,12 @@ fun RadioScreen(
                 )
             }
         }
-        ScanChannelPickerDialog(state = state, onEvent = onEvent)
+        if (state.resolvedDeviceProfile == ResolvedDeviceProfile.TM7_PLUS) {
+            ScanChannelPickerFullScreen(state = state, onEvent = onEvent, styles = styles)
+        } else {
+            ScanChannelPickerDialog(state = state, onEvent = onEvent)
+        }
+        MessageHistoryScreen(state = state, onEvent = onEvent, styles = styles)
         HardwareMappingDialog(state = state, onEvent = onEvent, styles = styles)
         SetupRequiredDialog(state = state, onEvent = onEvent)
     }
@@ -803,36 +811,10 @@ private fun LcdHandsetFillChannelBlock(
                     styles = styles,
                 )
             }
-            Spacer(modifier = Modifier.height(6.dp))
-            LcdDivider()
-            Spacer(modifier = Modifier.height(6.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                LcdHandsetStat(value = zoneValue, valueColor = p.textSecondary, styles = styles) {
-                    LcdZoneIcon(color = p.textSecondary, modifier = Modifier.size(30.dp))
-                }
-                LcdHandsetStat(value = channelValue, valueColor = p.textSecondary, styles = styles) {
-                    LcdRadioIcon(color = p.textSecondary, modifier = Modifier.size(32.dp))
-                }
-                val radiosKnown = state.radiosOnlineOnChannel != null
-                LcdHandsetStat(
-                    value = radiosValue,
-                    valueColor = if (radiosKnown) p.statusGreen else p.textMuted,
-                    styles = styles,
-                ) {
-                    LcdGlobeIcon(
-                        color = if (radiosKnown) p.statusGreen else p.textMuted,
-                        modifier = Modifier.size(32.dp),
-                    )
-                }
-            }
             LcdPermissionBadge(permission = state.currentChannelPermission, styles = styles)
             BoxWithConstraints(
                 modifier = Modifier
-                    .weight(if (hasTalk) 2.35f else 3.1f)
+                    .weight(if (hasTalk) 2.6f else 3.6f)
                     .fillMaxWidth(),
                 contentAlignment = Alignment.Center,
             ) {
@@ -867,6 +849,14 @@ private fun LcdHandsetFillChannelBlock(
                     )
                 }
             }
+            LcdHandsetStatsRow(
+                zoneValue = zoneValue,
+                channelValue = channelValue,
+                radiosValue = radiosValue,
+                radiosKnown = state.radiosOnlineOnChannel != null,
+                onEvent = onEvent,
+                styles = styles,
+            )
             if (hasTalk) {
                 if (showEmergencyBanner) {
                     Text(
@@ -909,12 +899,58 @@ private fun LcdPermissionBadge(
     }
     Text(
         text = label,
-        style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
+        style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp),
         color = color,
         textAlign = TextAlign.Center,
         maxLines = 1,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
     )
+}
+
+/** Compact zone / channel / radios row below the channel name — keeps the title unobstructed. */
+@Composable
+private fun LcdHandsetStatsRow(
+    zoneValue: String,
+    channelValue: String,
+    radiosValue: String,
+    radiosKnown: Boolean,
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+) {
+    val p = RadioLcdTheme.palette
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 4.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        LcdHandsetStat(value = zoneValue, valueColor = p.textSecondary, styles = styles, compact = true) {
+            LcdZoneIcon(color = p.textSecondary, modifier = Modifier.size(22.dp))
+        }
+        LcdHandsetStat(value = channelValue, valueColor = p.textSecondary, styles = styles, compact = true) {
+            LcdRadioIcon(color = p.textSecondary, modifier = Modifier.size(24.dp))
+        }
+        LcdHandsetStat(
+            value = radiosValue,
+            valueColor = if (radiosKnown) p.statusGreen else p.textMuted,
+            styles = styles,
+            compact = true,
+        ) {
+            LcdGlobeIcon(
+                color = if (radiosKnown) p.statusGreen else p.textMuted,
+                modifier = Modifier.size(24.dp),
+            )
+        }
+        Text(
+            text = "SET",
+            style = styles.softKey.copy(fontWeight = FontWeight.Bold, fontSize = 13.sp),
+            color = p.statusBlue,
+            modifier = Modifier.clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
+        )
+    }
 }
 
 /** One handset stat — an icon with its number — for zone, channel position and radios online. */
@@ -923,23 +959,26 @@ private fun LcdHandsetStat(
     value: String,
     valueColor: Color,
     styles: LcdTextStyles,
+    compact: Boolean = false,
     icon: @Composable () -> Unit,
 ) {
+    val fontSize = if (compact) 16.sp else 27.sp
+    val gap = if (compact) 4.dp else 7.dp
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(7.dp),
+        horizontalArrangement = Arrangement.spacedBy(gap),
     ) {
         icon()
         Text(
             text = value,
-            style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 27.sp),
+            style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = fontSize),
             color = valueColor,
             maxLines = 1,
         )
     }
 }
 
-/** Status icons + clock / battery / SET, spread edge to edge across the handset screen. */
+/** Single status row: signal → bluetooth → GPS → replay → volume → battery → %. */
 @Composable
 private fun LcdHandsetToolbar(
     state: RadioUiState,
@@ -949,86 +988,92 @@ private fun LcdHandsetToolbar(
 ) {
     val p = RadioLcdTheme.palette
     val online = state.networkLabel == "ONLINE"
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+    val scanPulse = state.scanBackgroundActive
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 36.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Row(
+        LcdSignalBarsIcon(
+            bars = if (online) 4 else 1,
+            maxBars = 4,
+            colorActive = if (online) p.statusGreen else p.statusAmber,
+            colorInactive = p.textMuted,
+            modifier = Modifier.size(40.dp, 28.dp),
+        )
+        LcdBluetoothIcon(
+            on = state.bluetoothOn,
+            active = p.statusBlue,
+            muted = p.textMuted,
+            modifier = Modifier.size(30.dp),
+        )
+        LcdGpsIcon(
+            active = p.statusGreen,
+            muted = p.textMuted,
+            locked = true,
+            modifier = Modifier.size(30.dp),
+        )
+        LcdReplayIcon(
+            ready = p.statusAmber,
+            muted = p.textMuted,
+            playing = state.replayBanner.isNotEmpty(),
             modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 40.dp),
+                .size(32.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = { onEvent(RadioUiEvent.PlayLastTransmission) },
+                        onLongPress = { onEvent(RadioUiEvent.ToggleMessageHistory) },
+                    )
+                },
+        )
+        LcdVolumeIcon(
+            muted = p.textMuted,
+            active = p.statusGreen,
+            isMuted = state.listenVolumeMuted,
+            modifier = Modifier
+                .size(34.dp)
+                .clickable { onEvent(RadioUiEvent.ToggleListenVolume) },
+        )
+        Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            LcdSignalBarsIcon(
-                bars = if (online) 4 else 1,
-                maxBars = 4,
-                colorActive = if (online) p.statusGreen else p.statusAmber,
-                colorInactive = p.textMuted,
-                modifier = Modifier.size(46.dp, 32.dp),
+            LcdBatteryIcon(
+                percent = state.batteryPercent,
+                outline = p.textSecondary,
+                fillHigh = p.statusGreen,
+                fillLow = p.statusAmber,
+                fillCritical = p.statusRed,
+                modifier = Modifier.size(width = 36.dp, height = 18.dp),
             )
-            LcdBluetoothIcon(
-                on = state.bluetoothOn,
-                active = p.statusBlue,
-                muted = p.textMuted,
-                modifier = Modifier.size(36.dp),
-            )
-            LcdGpsIcon(
-                active = p.statusGreen,
-                muted = p.textMuted,
-                locked = true,
-                modifier = Modifier.size(36.dp),
-            )
-            LcdReplayIcon(
-                ready = p.statusAmber,
-                muted = p.textMuted,
-                playing = state.replayBanner.isNotEmpty(),
-                modifier = Modifier
-                    .size(38.dp)
-                    .clickable { onEvent(RadioUiEvent.PlayLastTransmission) },
-            )
-            LcdVolumeIcon(
-                muted = p.textMuted,
-                active = p.statusGreen,
-                isMuted = state.listenVolumeMuted,
-                modifier = Modifier
-                    .size(40.dp)
-                    .clickable { onEvent(RadioUiEvent.ToggleListenVolume) },
+            Text(
+                text = "${state.batteryPercent}%",
+                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 18.sp),
+                color = p.textSecondary,
+                maxLines = 1,
             )
         }
+    }
+    if (scanPulse && state.scanBackgroundChannel.isNotBlank()) {
         Row(
             modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
         ) {
-            Text(
-                text = state.systemTime.uppercase(Locale.US),
-                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 28.sp),
-                color = p.textPrimary,
+            LcdScanIcon(
+                on = true,
+                active = p.statusAmber,
+                muted = p.textMuted,
+                modifier = Modifier.size(18.dp),
             )
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                LcdBatteryIcon(
-                    percent = state.batteryPercent,
-                    outline = p.textSecondary,
-                    fillHigh = p.statusGreen,
-                    fillLow = p.statusAmber,
-                    fillCritical = p.statusRed,
-                    modifier = Modifier.size(width = 42.dp, height = 22.dp),
-                )
-                Text(
-                    text = "${state.batteryPercent}%",
-                    style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 28.sp),
-                    color = p.textSecondary,
-                )
-            }
+            Spacer(modifier = Modifier.width(6.dp))
             Text(
-                text = "SET",
-                style = styles.softKey.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
-                color = p.statusBlue,
-                modifier = Modifier.clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
+                text = "SCAN RX · ${state.scanBackgroundChannel}",
+                style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 11.sp),
+                color = p.statusAmber,
+                maxLines = 1,
             )
         }
     }
@@ -1638,7 +1683,10 @@ private fun LcdHardwareKeyLegend(
             LcdLegendLabel(text = "CH+", styles = styles, color = p.textOnButton)
         }
         LcdLegendSeparator(p.divider)
-        LcdLegendKey(onClick = { onEvent(RadioUiEvent.PlayLastTransmission) }) {
+        LcdLegendKey(
+            onClick = { onEvent(RadioUiEvent.PlayLastTransmission) },
+            onLongClick = { onEvent(RadioUiEvent.ToggleMessageHistory) },
+        ) {
             LcdReplayIcon(
                 ready = p.textOnButton,
                 muted = p.textOnButton,
@@ -1647,7 +1695,10 @@ private fun LcdHardwareKeyLegend(
             )
         }
         LcdLegendSeparator(p.divider)
-        LcdLegendKey(onClick = { onEvent(RadioUiEvent.ToggleDayNight) }) {
+        LcdLegendKey(
+            onClick = { onEvent(RadioUiEvent.ToggleDayNight) },
+            onLongClick = { onEvent(RadioUiEvent.ToggleScanLongPress) },
+        ) {
             LcdDayNightIcon(
                 night = night,
                 color = p.textOnButton,
@@ -1661,15 +1712,28 @@ private fun LcdHardwareKeyLegend(
 @Composable
 private fun RowScope.LcdLegendKey(
     onClick: () -> Unit,
+    onLongClick: (() -> Unit)? = null,
     content: @Composable () -> Unit,
 ) {
     val p = RadioLcdTheme.palette
     val interaction = remember { MutableInteractionSource() }
+    val gestureModifier =
+        if (onLongClick != null) {
+            Modifier.pointerInput(onLongClick) {
+                detectTapGestures(
+                    onTap = { onClick() },
+                    onLongPress = { onLongClick() },
+                )
+            }
+        } else {
+            Modifier
+        }
     Surface(
-        onClick = onClick,
+        onClick = if (onLongClick == null) onClick else ({ }),
         modifier = Modifier
             .weight(1f)
-            .fillMaxHeight(),
+            .fillMaxHeight()
+            .then(gestureModifier),
         shape = RoundedCornerShape(0.dp),
         color = p.softKeyInactiveFill,
         interactionSource = interaction,
@@ -1709,6 +1773,247 @@ private fun LcdLegendLabel(text: String, styles: LcdTextStyles, color: Color) {
             color = color,
             maxLines = 1,
         )
+    }
+}
+
+@Composable
+private fun ScanChannelPickerFullScreen(
+    state: RadioUiState,
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+) {
+    if (!state.scanPickerVisible || state.channelCatalog.isEmpty()) return
+    val p = RadioLcdTheme.palette
+    val homeIdx = state.channelCatalog.indexOfFirst {
+        it.equals(state.channelLabel.trim(), ignoreCase = true)
+    }
+    BackHandler { onEvent(RadioUiEvent.CloseScanPicker) }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(p.lcdMain),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = "SCAN CHANNELS",
+                    style = styles.body.copy(fontWeight = FontWeight.Bold, fontSize = 20.sp),
+                    color = p.textPrimary,
+                )
+                Text(
+                    text = if (state.scanActive) "SCAN ON" else "SCAN OFF",
+                    style = styles.status.copy(fontWeight = FontWeight.Bold),
+                    color = if (state.scanActive) p.statusGreen else p.textMuted,
+                )
+            }
+            Text(
+                text = "Tap channels to monitor while scanning. Home channel always has priority.",
+                style = styles.status,
+                color = p.textMuted,
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+            LazyColumn(
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                itemsIndexed(state.channelCatalog) { index, label ->
+                    val isHome = index == homeIdx
+                    val selected = index in state.scanIncludedChannelIndices
+                    Surface(
+                        onClick = {
+                            if (!isHome) onEvent(RadioUiEvent.ToggleScanIncludeChannel(index))
+                        },
+                        color = when {
+                            isHome -> p.lcdAlt
+                            selected -> p.softKeyActiveFill
+                            else -> p.softKeyInactiveFill
+                        },
+                        shape = RoundedCornerShape(4.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 14.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Checkbox(
+                                checked = selected,
+                                enabled = !isHome,
+                                onCheckedChange = {
+                                    if (!isHome) onEvent(RadioUiEvent.ToggleScanIncludeChannel(index))
+                                },
+                            )
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    text = label.uppercase(Locale.US),
+                                    style = styles.body.copy(fontWeight = FontWeight.Bold),
+                                    color = if (isHome) p.textMuted else p.textPrimary,
+                                )
+                                if (isHome) {
+                                    Text(
+                                        text = "HOME — PRIORITY RX",
+                                        style = styles.status,
+                                        color = p.statusBlue,
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            TextButton(
+                onClick = { onEvent(RadioUiEvent.CloseScanPicker) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.textButtonColors(contentColor = p.statusBlue),
+            ) {
+                Text("DONE", style = styles.softKey.copy(fontWeight = FontWeight.Bold))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageHistoryScreen(
+    state: RadioUiState,
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+) {
+    if (!state.messageHistoryVisible) return
+    val p = RadioLcdTheme.palette
+    BackHandler { onEvent(RadioUiEvent.CloseMessageHistory) }
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(p.lcdMain),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+        ) {
+            Text(
+                text = "MESSAGE HISTORY",
+                style = styles.body.copy(fontWeight = FontWeight.Bold, fontSize = 20.sp),
+                color = p.textPrimary,
+            )
+            Text(
+                text = "Hold replay again or press back to close.",
+                style = styles.status,
+                color = p.textMuted,
+                modifier = Modifier.padding(bottom = 8.dp),
+            )
+            if (state.rxMessageHistory.isEmpty()) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = "No messages yet.",
+                        style = styles.body,
+                        color = p.textMuted,
+                    )
+                }
+            } else {
+                LazyColumn(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(
+                        items = state.rxMessageHistory,
+                        key = { it.id },
+                    ) { item ->
+                        MessageHistoryRow(
+                            item = item,
+                            playing = state.historyPlayingId == item.id,
+                            onPlay = { onEvent(RadioUiEvent.PlayHistoryMessage(item.id)) },
+                            styles = styles,
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageHistoryRow(
+    item: RxMessageHistoryItem,
+    playing: Boolean,
+    onPlay: () -> Unit,
+    styles: LcdTextStyles,
+) {
+    val p = RadioLcdTheme.palette
+    Surface(
+        color = if (playing) p.softKeyActiveFill else p.lcdAlt,
+        shape = RoundedCornerShape(4.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    text = item.timeLabel,
+                    style = styles.status.copy(fontWeight = FontWeight.Bold),
+                    color = p.textSecondary,
+                )
+                Text(
+                    text = item.channelName.uppercase(Locale.US),
+                    style = styles.status,
+                    color = p.statusBlue,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            if (item.caption.isNotBlank()) {
+                Text(
+                    text = item.caption,
+                    style = styles.body.copy(fontWeight = FontWeight.Bold),
+                    color = p.textPrimary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            val transcript = item.transcript.ifBlank { "No transcription." }
+            Text(
+                text = transcript,
+                style = styles.body,
+                color = p.textSecondary,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+            )
+            TextButton(
+                onClick = onPlay,
+                colors = ButtonDefaults.textButtonColors(contentColor = p.statusAmber),
+            ) {
+                Text(
+                    text = if (playing) "PLAYING…" else "PLAY",
+                    style = styles.softKey.copy(fontWeight = FontWeight.Bold),
+                )
+            }
+        }
     }
 }
 

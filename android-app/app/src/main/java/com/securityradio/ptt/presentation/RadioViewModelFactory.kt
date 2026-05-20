@@ -26,6 +26,7 @@ class RadioViewModelFactory(
                 locationReporter = graph.locationReporter,
                 customSoundDownloader = graph.customSoundDownloader,
                 lastRxAudioRecorder = graph.lastRxAudioRecorder,
+                rxMessageHistory = graph.rxMessageHistory,
                 connectivityMonitor = graph.connectivityMonitor,
             ) as T
         }

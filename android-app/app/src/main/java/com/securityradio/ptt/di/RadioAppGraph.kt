@@ -17,6 +17,7 @@ import com.securityradio.ptt.device.CustomSoundStore
 import com.securityradio.ptt.device.HardwareMappingRepository
 import com.securityradio.ptt.device.InboundVoicePlayer
 import com.securityradio.ptt.device.LastRxAudioRecorder
+import com.securityradio.ptt.device.RxMessageHistory
 import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.device.LocationReporter
 import com.securityradio.ptt.device.P25ImbeNative
@@ -50,7 +51,9 @@ class RadioAppGraph(val application: Application) {
     /** Device internet up/down feed for the lost-link alert. */
     val connectivityMonitor: ConnectivityMonitor = ConnectivityMonitor(application).also { it.start() }
 
-    val lastRxAudioRecorder = LastRxAudioRecorder()
+    val rxMessageHistory = RxMessageHistory()
+
+    val lastRxAudioRecorder = LastRxAudioRecorder(messageHistory = rxMessageHistory)
 
     private val inboundVoicePlayer = InboundVoicePlayer(
         lastRxRecorder = lastRxAudioRecorder,

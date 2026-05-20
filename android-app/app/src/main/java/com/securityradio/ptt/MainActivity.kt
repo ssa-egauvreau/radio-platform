@@ -364,6 +364,10 @@ class MainActivity : ComponentActivity() {
                 HardwareButtonRelay.sendEvent(HardwareButtonEvent.ToggleDayNightReleased)
                 return true
             }
+            repository.getMapping(HardwareAction.PLAY_LAST_TRANSMISSION).contains(keyCode) -> {
+                HardwareButtonRelay.sendEvent(HardwareButtonEvent.PlayLastTransmissionReleased)
+                return true
+            }
         }
         return super.onKeyUp(keyCode, event)
     }

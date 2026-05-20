@@ -24,6 +24,7 @@ import com.securityradio.ptt.device.BatteryStatusProbe
 import com.securityradio.ptt.device.BluetoothStatusProbe
 import com.securityradio.ptt.device.ConnectivityMonitor
 import com.securityradio.ptt.device.LastRxAudioRecorder
+import com.securityradio.ptt.device.RxMessageHistory
 import android.app.Application
 import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.device.LocationReporter
@@ -70,6 +71,7 @@ class RadioViewModel(
     private val locationReporter: LocationReporter,
     private val customSoundDownloader: CustomSoundDownloader,
     private val lastRxAudioRecorder: LastRxAudioRecorder,
+    private val rxMessageHistory: RxMessageHistory,
     private val connectivityMonitor: ConnectivityMonitor,
 ) : ViewModel() {
 
@@ -115,6 +117,13 @@ class RadioViewModel(
     private var dayNightHoldJob: Job? = null
     @Volatile
     private var dayNightFlippedThisHold: Boolean = false
+    @Volatile
+    private var dayNightScanToggledThisHold: Boolean = false
+
+    private var replayHoldJob: Job? = null
+    @Volatile
+    private var replayHistoryToggledThisHold: Boolean = false
+    private var historyPlayJob: Job? = null
 
     @Volatile
     private var pttMicLiveThisHold: Boolean = false
@@ -219,7 +228,8 @@ class RadioViewModel(
                     HardwareButtonEvent.ScanTogglePressed -> {
                         _uiState.update { s -> onScanSoftKeyToggle(s) }
                     }
-                    HardwareButtonEvent.PlayLastTransmissionPressed -> playLastTransmission()
+                    HardwareButtonEvent.PlayLastTransmissionPressed -> onPlayLastKeyDown()
+                    HardwareButtonEvent.PlayLastTransmissionReleased -> onPlayLastKeyUp()
                     HardwareButtonEvent.VolumeCheckPressed -> soundPlayer.startVolumeCheckLoop()
                     HardwareButtonEvent.VolumeCheckReleased -> soundPlayer.stopVolumeCheckLoop()
                     HardwareButtonEvent.VolumeCheckTapped -> soundPlayer.playVolumeCheck()
@@ -348,28 +358,79 @@ class RadioViewModel(
         _uiState.update { it.copy(themeMode = nextMode) }
     }
 
-    /** Day/night hardware key pressed: arm the IRC590 hold-to-flip timer. */
+    /** Day/night hardware key pressed: IRC590 hold flips display; TM7 hold toggles scan. */
     private fun onDayNightKeyDown() {
         dayNightFlippedThisHold = false
+        dayNightScanToggledThisHold = false
         dayNightHoldJob?.cancel()
+        val profile = _uiState.value.resolvedDeviceProfile
         dayNightHoldJob = viewModelScope.launch {
-            delay(DAY_NIGHT_HOLD_FLIP_MS)
-            if (_uiState.value.resolvedDeviceProfile == ResolvedDeviceProfile.IRC590) {
-                dayNightFlippedThisHold = true
-                flipDisplay180()
+            delay(
+                when (profile) {
+                    ResolvedDeviceProfile.IRC590 -> DAY_NIGHT_HOLD_FLIP_MS
+                    ResolvedDeviceProfile.TM7_PLUS -> TM7_HOLD_ACTION_MS
+                    else -> TM7_HOLD_ACTION_MS
+                },
+            )
+            when (profile) {
+                ResolvedDeviceProfile.IRC590 -> {
+                    dayNightFlippedThisHold = true
+                    flipDisplay180()
+                }
+                ResolvedDeviceProfile.TM7_PLUS -> {
+                    dayNightScanToggledThisHold = true
+                    onTm7ScanLongPressToggle()
+                }
+                else -> Unit
             }
         }
     }
 
-    /** Day/night hardware key released: a quick tap toggles day/night; a 2 s hold already flipped. */
+    /** Day/night hardware key released: quick tap toggles theme unless a long-press action fired. */
     private fun onDayNightKeyUp() {
         dayNightHoldJob?.cancel()
         dayNightHoldJob = null
-        if (dayNightFlippedThisHold) {
+        if (dayNightFlippedThisHold || dayNightScanToggledThisHold) {
             dayNightFlippedThisHold = false
+            dayNightScanToggledThisHold = false
             return
         }
         applyDayNightToggle()
+    }
+
+    private fun onPlayLastKeyDown() {
+        replayHistoryToggledThisHold = false
+        replayHoldJob?.cancel()
+        if (_uiState.value.resolvedDeviceProfile != ResolvedDeviceProfile.TM7_PLUS) {
+            return
+        }
+        replayHoldJob = viewModelScope.launch {
+            delay(TM7_HOLD_ACTION_MS)
+            replayHistoryToggledThisHold = true
+            toggleMessageHistory()
+        }
+    }
+
+    private fun onPlayLastKeyUp() {
+        replayHoldJob?.cancel()
+        replayHoldJob = null
+        if (replayHistoryToggledThisHold) {
+            replayHistoryToggledThisHold = false
+            return
+        }
+        playLastTransmission()
+    }
+
+    private fun onTm7ScanLongPressToggle() {
+        soundPlayer.playChannelSwitch()
+        val next = onScanSoftKeyToggle(_uiState.value)
+        val showPicker = next.scanActive && next.channelCatalog.size > 1
+        _uiState.update {
+            next.copy(
+                scanPickerVisible = showPicker,
+                statusMessage = if (next.scanActive) "SCAN ON" else "SCAN OFF",
+            )
+        }
     }
 
     /** Rotates the whole LCD 180° (IRC590 day/night key long-press) and persists it. */
@@ -414,6 +475,7 @@ class RadioViewModel(
             RadioUiEvent.EmergencyToggle -> toggleEmergency()
             RadioUiEvent.ChannelUp -> bumpChannel(+1)
             RadioUiEvent.ChannelDown -> bumpChannel(-1)
+            RadioUiEvent.ToggleScanLongPress -> onTm7ScanLongPressToggle()
             RadioUiEvent.OpenScanPicker -> {
                 soundPlayer.playChannelSwitch()
                 if (_uiState.value.channelCatalog.size > 1) {
@@ -497,6 +559,9 @@ class RadioViewModel(
                 _uiState.update { it.copy(announceChannelNameOnTune = next) }
             }
             RadioUiEvent.PlayLastTransmission -> playLastTransmission()
+            RadioUiEvent.ToggleMessageHistory -> toggleMessageHistory()
+            RadioUiEvent.CloseMessageHistory -> closeMessageHistory()
+            is RadioUiEvent.PlayHistoryMessage -> playHistoryMessage(event.entryId)
             RadioUiEvent.ToggleListenVolume -> {
                 val muted = !radioPreferences.isListenVolumeMuted()
                 radioPreferences.setListenVolumeMuted(muted)
@@ -540,7 +605,83 @@ class RadioViewModel(
         _uiState.update { it.copy(needsOverlayPermission = !granted) }
     }
 
+    private fun toggleMessageHistory() {
+        soundPlayer.playChannelSwitch()
+        if (_uiState.value.messageHistoryVisible) {
+            closeMessageHistory()
+        } else {
+            openMessageHistory()
+        }
+    }
+
+    private fun openMessageHistory() {
+        rxMessageHistory.stopReplay()
+        _uiState.update {
+            it.copy(
+                messageHistoryVisible = true,
+                rxMessageHistory = buildHistoryItems(),
+                historyPlayingId = null,
+                statusMessage = "MESSAGE HISTORY",
+            )
+        }
+    }
+
+    private fun closeMessageHistory() {
+        rxMessageHistory.stopReplay()
+        historyPlayJob?.cancel()
+        _uiState.update {
+            it.copy(
+                messageHistoryVisible = false,
+                historyPlayingId = null,
+                statusMessage = "",
+            )
+        }
+    }
+
+    private fun buildHistoryItems(): List<RxMessageHistoryItem> {
+        val fmt = SimpleDateFormat("HH:mm", Locale.US)
+        return rxMessageHistory.snapshot().map { entry ->
+            RxMessageHistoryItem(
+                id = entry.id,
+                timeLabel = fmt.format(Date(entry.capturedAtMs)),
+                channelName = entry.channelName.ifBlank { "—" },
+                caption = entry.caption,
+                transcript = entry.transcript.ifBlank { entry.caption },
+                durationMs = entry.durationMs,
+            )
+        }
+    }
+
+    private fun playHistoryMessage(entryId: Long) {
+        rxMessageHistory.stopReplay()
+        historyPlayJob?.cancel()
+        val durationMs = rxMessageHistory.play(entryId) {
+            _uiState.update { it.copy(historyPlayingId = null, replayBanner = "") }
+        }
+        if (durationMs <= 0L) {
+            soundPlayer.playChannelSwitch()
+            _uiState.update { it.copy(statusMessage = "NO AUDIO FOR MESSAGE") }
+            return
+        }
+        val label = _uiState.value.rxMessageHistory.firstOrNull { it.id == entryId }?.caption.orEmpty()
+        _uiState.update {
+            it.copy(
+                historyPlayingId = entryId,
+                replayBanner = if (label.isNotBlank()) "REPLAY  $label" else "REPLAYING MESSAGE",
+                statusMessage = "REPLAY AUDIO",
+            )
+        }
+        historyPlayJob = viewModelScope.launch {
+            delay(durationMs)
+            _uiState.update { it.copy(historyPlayingId = null, replayBanner = "") }
+        }
+    }
+
     private fun playLastTransmission() {
+        if (_uiState.value.messageHistoryVisible) {
+            closeMessageHistory()
+            return
+        }
         val durationMs = lastRxAudioRecorder.playLast()
         if (durationMs > 0L) {
             replayJob?.cancel()
@@ -616,6 +757,8 @@ class RadioViewModel(
         return state.copy(
             scanActive = nextScanOn,
             scanIncludedChannelIndices = newIncludes,
+            scanBackgroundActive = if (nextScanOn) state.scanBackgroundActive else false,
+            scanBackgroundChannel = if (nextScanOn) state.scanBackgroundChannel else "",
             statusMessage = if (nextScanOn) "SCAN ON" else "SCAN OFF",
         )
     }
@@ -1291,12 +1434,19 @@ class RadioViewModel(
                     enqueueBackgroundWakeIfNeeded("rx_talk_activity")
                 }
                 val replayCaption = nextReplayCaption(snap, merged)
+                lastRxAudioRecorder.noteRxContext(
+                    channelName = snap.channelLabel,
+                    caption = replayCaption.ifBlank { merged },
+                )
+                val scanBg = scanBackgroundFromActivity(dto, snap)
                 _uiState.update {
                     it.copy(
                         rxAttributedLine = merged,
                         lastRxReplayCaption = replayCaption,
                         activeTalkUnitId = talkUnit,
                         activeTalkDisplayName = talkName,
+                        scanBackgroundActive = scanBg.first,
+                        scanBackgroundChannel = scanBg.second,
                     )
                 }
             }
@@ -1385,6 +1535,21 @@ class RadioViewModel(
      * Otherwise, if scan is on and server's scan segment matches one of the scanned channels,
      * show scan attribution (only when main is not active on tuned channel).
      */
+    /** True when scan hears traffic on a side channel while the home channel is tuned. */
+    private fun scanBackgroundFromActivity(dto: TalkActivityDto?, s: RadioUiState): Pair<Boolean, String> {
+        if (!s.scanActive || dto == null) return false to ""
+        val tuned = s.channelLabel.trim()
+        val scanSeg = dto.scan ?: return false to ""
+        if (!scanSeg.active) return false to ""
+        val scanCh = scanSeg.channel.trim()
+        if (scanCh.isEmpty() || channelNamesMatch(scanCh, tuned)) return false to ""
+        val includedNamesLower = s.scanIncludedChannelIndices
+            .mapNotNull { ix -> s.channelCatalog.getOrNull(ix)?.trim()?.lowercase(Locale.US) }
+            .toSet()
+        val activeOnSide = scanCh.lowercase(Locale.US) in includedNamesLower
+        return (activeOnSide to scanCh.uppercase(Locale.US))
+    }
+
     private fun mergedRxAttributedLine(dto: TalkActivityDto, s: RadioUiState): String {
         val tuned = s.channelLabel.trim()
         if (tuned.isEmpty() || tuned == "----") return ""
@@ -1457,5 +1622,6 @@ class RadioViewModel(
         const val OFFLINE_TONE_INTERVAL_MS = 10_000L
         const val RECONNECTED_BANNER_MS = 2_000L
         const val DAY_NIGHT_HOLD_FLIP_MS = 2_000L
+        const val TM7_HOLD_ACTION_MS = 800L
     }
 }
