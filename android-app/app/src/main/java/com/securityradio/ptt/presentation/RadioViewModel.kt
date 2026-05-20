@@ -8,6 +8,7 @@ import com.securityradio.ptt.data.remote.EmergencyDto
 import com.securityradio.ptt.data.remote.InboxAlertDto
 import com.securityradio.ptt.data.remote.PresenceHeartbeatDto
 import com.securityradio.ptt.data.remote.RadioApi
+import com.securityradio.ptt.data.remote.RadioTransmissionDto
 import com.securityradio.ptt.data.remote.SessionUserDto
 import com.securityradio.ptt.data.remote.TalkActivityDto
 import com.securityradio.ptt.data.remote.TalkerSnapshotDto
@@ -26,6 +27,7 @@ import com.securityradio.ptt.device.ConnectivityMonitor
 import com.securityradio.ptt.device.ExternalMicMonitor
 import com.securityradio.ptt.device.LastRxAudioRecorder
 import com.securityradio.ptt.device.RxMessageHistory
+import com.securityradio.ptt.device.RxMessageHistory.Entry as RxHistoryEntry
 import android.app.Application
 import com.securityradio.ptt.device.LocalUnitIdentifier
 import com.securityradio.ptt.device.LocationReporter
@@ -41,6 +43,7 @@ import com.securityradio.ptt.device.VoiceRelayTransport
 import com.securityradio.ptt.domain.ChannelCatalogOrigin
 import com.securityradio.ptt.domain.ChannelPermission
 import com.securityradio.ptt.domain.ChannelRepository
+import android.os.Build
 import android.os.SystemClock
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -705,10 +708,16 @@ class RadioViewModel(
         _uiState.update {
             it.copy(
                 messageHistoryVisible = true,
-                rxMessageHistory = buildHistoryItems(),
+                rxMessageHistory = emptyList(),
                 historyPlayingId = null,
+                historyPlaybackPaused = false,
                 statusMessage = "MESSAGE HISTORY",
             )
+        }
+        viewModelScope.launch {
+            val items = buildHistoryItems()
+            if (!_uiState.value.messageHistoryVisible) return@launch
+            _uiState.update { it.copy(rxMessageHistory = items) }
         }
     }
 
@@ -719,36 +728,141 @@ class RadioViewModel(
         _uiState.update {
             it.copy(
                 messageHistoryVisible = false,
+                historyPlayingId = null,
+                historyPlaybackPaused = false,
                 statusMessage = "",
             )
         }
     }
 
-    private fun buildHistoryItems(): List<RxMessageHistoryItem> {
+    private suspend fun buildHistoryItems(): List<RxMessageHistoryItem> {
         val fmt = SimpleDateFormat("HH:mm", Locale.US)
+        val serverTx = try {
+            radioApi.recentTransmissions(limit = 50).transmissions
+        } catch (_: Exception) {
+            emptyList()
+        }
         return rxMessageHistory.snapshot().map { entry ->
             val who = entry.caption.trim()
-            val transcript = who.ifBlank {
-                "Voice message on ${entry.channelName.ifBlank { "channel" }} — no text caption."
-            }
             RxMessageHistoryItem(
                 id = entry.id,
                 timeLabel = fmt.format(Date(entry.capturedAtMs)),
                 channelName = entry.channelName.ifBlank { "—" },
                 caption = who,
-                transcript = transcript,
+                transcript = resolveHistoryTranscript(entry, serverTx),
                 durationMs = entry.durationMs,
             )
         }
     }
 
+    private fun resolveHistoryTranscript(
+        entry: RxHistoryEntry,
+        serverTx: List<RadioTransmissionDto>,
+    ): String {
+        val matched = findMatchingTransmission(entry, serverTx)
+        if (matched != null) {
+            val status = matched.transcriptStatus.trim().lowercase(Locale.US)
+            val text = matched.transcript?.trim().orEmpty()
+            when (status) {
+                "done" -> if (text.isNotEmpty()) return text
+                "pending" -> return if (text.isNotEmpty()) text else "Transcribing…"
+            }
+        }
+        return readableCaptionTranscript(entry.caption, entry.channelName)
+    }
+
+    private fun findMatchingTransmission(
+        entry: RxHistoryEntry,
+        serverTx: List<RadioTransmissionDto>,
+    ): RadioTransmissionDto? {
+        val ch = entry.channelName.trim().lowercase(Locale.US)
+        if (ch.isEmpty()) return null
+        var best: RadioTransmissionDto? = null
+        var bestDelta = Long.MAX_VALUE
+        for (tx in serverTx) {
+            if (!tx.channelName.trim().equals(entry.channelName.trim(), ignoreCase = true)) continue
+            val started = parseTransmissionStartedAt(tx.startedAt) ?: continue
+            val delta = kotlin.math.abs(started - entry.capturedAtMs)
+            if (delta < bestDelta) {
+                bestDelta = delta
+                best = tx
+            }
+        }
+        return if (bestDelta <= 120_000L) best else null
+    }
+
+    private fun parseTransmissionStartedAt(raw: String): Long? {
+        val t = raw.trim()
+        if (t.isEmpty()) return null
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                java.time.Instant.parse(t).toEpochMilli()
+            } else {
+                @Suppress("DEPRECATION")
+                SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+                    timeZone = java.util.TimeZone.getTimeZone("UTC")
+                }.parse(t)?.time
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    private fun readableCaptionTranscript(caption: String, channelName: String): String {
+        val trimmed = caption.trim()
+        if (trimmed.isEmpty()) {
+            return "Voice on ${channelName.ifBlank { "channel" }} — transcript pending."
+        }
+        val afterRx = trimmed.removePrefix("RX:").removePrefix("RX").trim()
+        val parts = afterRx.split('•', limit = 2).map { it.trim() }.filter { it.isNotEmpty() }
+        return when (parts.size) {
+            2 -> "${parts[0]}\n${parts[1]}"
+            1 -> parts[0]
+            else -> afterRx
+        }
+    }
+
     private fun playHistoryMessage(entryId: Long) {
+        when {
+            rxMessageHistory.isPlaying(entryId) -> {
+                rxMessageHistory.pauseReplay()
+                historyPlayJob?.cancel()
+                _uiState.update {
+                    it.copy(historyPlaybackPaused = true, statusMessage = "PAUSED")
+                }
+                return
+            }
+            rxMessageHistory.isPaused(entryId) -> {
+                rxMessageHistory.resumeReplay()
+                _uiState.update {
+                    it.copy(historyPlaybackPaused = false, statusMessage = "REPLAY AUDIO")
+                }
+                return
+            }
+        }
         rxMessageHistory.stopReplay()
         historyPlayJob?.cancel()
-        val durationMs = rxMessageHistory.play(entryId)
+        val durationMs = rxMessageHistory.play(entryId) {
+            viewModelScope.launch {
+                replayJob?.cancel()
+                _uiState.update {
+                    it.copy(
+                        replayBanner = "",
+                        historyPlayingId = null,
+                        historyPlaybackPaused = false,
+                    )
+                }
+            }
+        }
         if (durationMs <= 0L) {
             soundPlayer.playChannelSwitch()
-            _uiState.update { it.copy(statusMessage = "NO AUDIO FOR MESSAGE") }
+            _uiState.update {
+                it.copy(
+                    statusMessage = "NO AUDIO FOR MESSAGE",
+                    historyPlayingId = null,
+                    historyPlaybackPaused = false,
+                )
+            }
             return
         }
         val label = _uiState.value.rxMessageHistory.firstOrNull { it.id == entryId }?.caption.orEmpty()
@@ -757,6 +871,7 @@ class RadioViewModel(
         _uiState.update {
             it.copy(
                 historyPlayingId = entryId,
+                historyPlaybackPaused = false,
                 statusMessage = "REPLAY AUDIO",
             )
         }
@@ -801,6 +916,7 @@ class RadioViewModel(
             state.copy(
                 replayBanner = "",
                 historyPlayingId = if (clearHistoryPlayingId) null else state.historyPlayingId,
+                historyPlaybackPaused = if (clearHistoryPlayingId) false else state.historyPlaybackPaused,
             )
         }
     }
@@ -809,7 +925,9 @@ class RadioViewModel(
         ++replayBannerGeneration
         replayJob?.cancel()
         replayJob = null
-        _uiState.update { it.copy(replayBanner = "", historyPlayingId = null) }
+        _uiState.update {
+            it.copy(replayBanner = "", historyPlayingId = null, historyPlaybackPaused = false)
+        }
     }
 
     /** "Who was talking" caption for the replay banner, from the last RX attribution. */

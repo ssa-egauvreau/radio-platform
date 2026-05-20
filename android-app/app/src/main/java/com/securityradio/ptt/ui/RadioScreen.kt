@@ -85,6 +85,7 @@ import com.securityradio.ptt.ui.lcd.LcdEmergencyGlyphIcon
 import com.securityradio.ptt.ui.lcd.LcdGlobeIcon
 import com.securityradio.ptt.ui.lcd.LcdGpsIcon
 import com.securityradio.ptt.ui.lcd.LcdRadioIcon
+import com.securityradio.ptt.ui.lcd.LcdPauseIcon
 import com.securityradio.ptt.ui.lcd.LcdPlayIcon
 import com.securityradio.ptt.ui.lcd.LcdReplayIcon
 import com.securityradio.ptt.ui.lcd.LcdSettingsIcon
@@ -2223,19 +2224,8 @@ private fun MessageHistoryScreen(
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(12.dp),
+                .padding(horizontal = 10.dp, vertical = 8.dp),
         ) {
-            Text(
-                text = "MESSAGE HISTORY",
-                style = styles.body.copy(fontWeight = FontWeight.Bold, fontSize = 20.sp),
-                color = p.textPrimary,
-            )
-            Text(
-                text = "Hold replay again or press back to close.",
-                style = styles.status,
-                color = p.textMuted,
-                modifier = Modifier.padding(bottom = 8.dp),
-            )
             if (state.rxMessageHistory.isEmpty()) {
                 Box(
                     modifier = Modifier
@@ -2262,7 +2252,8 @@ private fun MessageHistoryScreen(
                     ) { item ->
                         MessageHistoryRow(
                             item = item,
-                            playing = state.historyPlayingId == item.id,
+                            playing = state.historyPlayingId == item.id && !state.historyPlaybackPaused,
+                            paused = state.historyPlayingId == item.id && state.historyPlaybackPaused,
                             onPlay = { onEvent(RadioUiEvent.PlayHistoryMessage(item.id)) },
                             styles = styles,
                         )
@@ -2277,38 +2268,47 @@ private fun MessageHistoryScreen(
 private fun MessageHistoryRow(
     item: RxMessageHistoryItem,
     playing: Boolean,
+    paused: Boolean,
     onPlay: () -> Unit,
     styles: LcdTextStyles,
 ) {
     val p = RadioLcdTheme.palette
+    val active = playing || paused
     Surface(
-        color = if (playing) p.softKeyActiveFill else p.lcdAlt,
+        color = if (active) p.softKeyActiveFill else p.lcdAlt,
         shape = RoundedCornerShape(4.dp),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(12.dp),
+                .padding(10.dp),
             verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             Surface(
                 onClick = onPlay,
                 shape = RoundedCornerShape(4.dp),
-                color = if (playing) p.statusAmber else p.softKeyInactiveFill,
-                modifier = Modifier.size(52.dp),
+                color = if (active) p.statusAmber else p.softKeyInactiveFill,
+                modifier = Modifier.size(56.dp),
             ) {
                 Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
-                    LcdPlayIcon(
-                        color = if (playing) Color.White else p.textOnButton,
-                        modifier = Modifier.size(30.dp),
-                    )
+                    if (playing || paused) {
+                        LcdPauseIcon(
+                            color = Color.White,
+                            modifier = Modifier.size(32.dp),
+                        )
+                    } else {
+                        LcdPlayIcon(
+                            color = p.textOnButton,
+                            modifier = Modifier.size(32.dp),
+                        )
+                    }
                 }
             }
             Column(
                 modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -2317,12 +2317,12 @@ private fun MessageHistoryRow(
                 ) {
                     Text(
                         text = item.timeLabel,
-                        style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
+                        style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp),
                         color = p.textSecondary,
                     )
                     Text(
                         text = item.channelName.uppercase(Locale.US),
-                        style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 16.sp),
+                        style = styles.status.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp),
                         color = p.statusBlue,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -2332,10 +2332,12 @@ private fun MessageHistoryRow(
                     text = item.transcript,
                     style = styles.body.copy(
                         fontWeight = FontWeight.Medium,
-                        fontSize = 22.sp,
-                        lineHeight = 28.sp,
+                        fontSize = 24.sp,
+                        lineHeight = 30.sp,
                     ),
                     color = p.textPrimary,
+                    maxLines = 8,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
         }

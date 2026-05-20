@@ -1761,6 +1761,31 @@ export function createApiRouter(): Router {
     }
   });
 
+  router.get("/radio/transmissions", async (req, res) => {
+    try {
+      const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 80);
+      const transmissions = await listTransmissions({
+        agencyId: radioAgencyId(req),
+        sort: "newest",
+        limit,
+      });
+      res.json({
+        transmissions: transmissions.map((t) => ({
+          id: t.id,
+          channel_name: t.channel_name,
+          started_at: t.started_at,
+          duration_ms: t.duration_ms,
+          transcript: t.transcript,
+          transcript_status: t.transcript_status,
+          unit_id: t.unit_id,
+          display_name: t.display_name,
+        })),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
   router.get("/radio/inbox", async (req, res) => {
     try {
       const unit = String(req.query.unit ?? "").trim().toUpperCase();

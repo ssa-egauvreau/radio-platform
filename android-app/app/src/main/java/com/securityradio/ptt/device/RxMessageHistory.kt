@@ -29,6 +29,7 @@ class RxMessageHistory {
     private var nextId = 1L
     private var replayTrack: AudioTrack? = null
     private var playingEntryId: Long? = null
+    private var playbackPaused = false
 
     fun append(
         pcm: ByteArray,
@@ -59,14 +60,25 @@ class RxMessageHistory {
 
     fun snapshot(): List<Entry> = synchronized(lock) { entries.map { it.copy(pcm = it.pcm) } }
 
+    fun isPlaying(entryId: Long): Boolean =
+        synchronized(lock) {
+            playingEntryId == entryId && !playbackPaused && replayTrack != null
+        }
+
+    fun isPaused(entryId: Long): Boolean =
+        synchronized(lock) {
+            playingEntryId == entryId && playbackPaused
+        }
+
     fun play(entryId: Long, onFinished: () -> Unit = {}): Long {
         val pcm = synchronized(lock) {
             entries.firstOrNull { it.id == entryId }?.pcm?.copyOf()
         } ?: return 0L
         val durationMs = pcm.size / 2 * 1000L / VoiceAudioSpecs.SAMPLE_RATE_HZ
         main.post {
-            stopReplayLocked()
+            stopReplayLocked(clearPlayingId = true)
             playingEntryId = entryId
+            playbackPaused = false
             val track = createReplayTrack() ?: run {
                 playingEntryId = null
                 onFinished()
@@ -83,7 +95,7 @@ class RxMessageHistory {
                 track.setPlaybackPositionUpdateListener(
                     object : AudioTrack.OnPlaybackPositionUpdateListener {
                         override fun onMarkerReached(track: AudioTrack?) {
-                            stopReplayLocked()
+                            stopReplayLocked(clearPlayingId = true)
                             onFinished()
                         }
 
@@ -95,30 +107,55 @@ class RxMessageHistory {
                     track.notificationMarkerPosition = frames
                 }
             } catch (_: Exception) {
-                stopReplayLocked()
+                stopReplayLocked(clearPlayingId = true)
                 onFinished()
             }
         }
         return durationMs
     }
 
+    fun pauseReplay() {
+        main.post {
+            synchronized(lock) {
+                replayTrack?.runCatching {
+                    if (playState == AudioTrack.PLAYSTATE_PLAYING) {
+                        pause()
+                    }
+                }
+                playbackPaused = true
+            }
+        }
+    }
+
+    fun resumeReplay() {
+        main.post {
+            synchronized(lock) {
+                replayTrack?.runCatching { play() }
+                playbackPaused = false
+            }
+        }
+    }
+
     fun stopReplay() {
         main.post {
-            stopReplayLocked()
+            stopReplayLocked(clearPlayingId = true)
         }
     }
 
     fun release() {
         main.post {
-            stopReplayLocked()
+            stopReplayLocked(clearPlayingId = true)
             synchronized(lock) {
                 entries.clear()
             }
         }
     }
 
-    private fun stopReplayLocked() {
-        playingEntryId = null
+    private fun stopReplayLocked(clearPlayingId: Boolean) {
+        if (clearPlayingId) {
+            playingEntryId = null
+        }
+        playbackPaused = false
         replayTrack?.runCatching {
             setPlaybackPositionUpdateListener(null)
             if (playState == AudioTrack.PLAYSTATE_PLAYING) {

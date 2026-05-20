@@ -562,3 +562,29 @@ fun LcdPlayIcon(
         drawPath(path, color = color)
     }
 }
+
+/** Pause bars for message history playback. */
+@Composable
+fun LcdPauseIcon(
+    color: Color,
+    modifier: Modifier = Modifier,
+) {
+    Canvas(modifier) {
+        val w = size.width
+        val h = size.height
+        val pad = size.minDimension * 0.22f
+        val barW = w * 0.16f
+        val top = pad
+        val bottom = h - pad
+        drawRect(
+            color = color,
+            topLeft = Offset(w * 0.28f, top),
+            size = androidx.compose.ui.geometry.Size(barW, bottom - top),
+        )
+        drawRect(
+            color = color,
+            topLeft = Offset(w * 0.56f, top),
+            size = androidx.compose.ui.geometry.Size(barW, bottom - top),
+        )
+    }
+}

@@ -121,6 +121,8 @@ data class RadioUiState(
     val rxMessageHistory: List<RxMessageHistoryItem> = emptyList(),
     /** Id of the history row currently playing audio, if any. */
     val historyPlayingId: Long? = null,
+    /** True when [historyPlayingId] is set but playback is paused. */
+    val historyPlaybackPaused: Boolean = false,
 
     /** Scan traffic on a monitored channel while tuned elsewhere (scan icon pulse). */
     val scanBackgroundActive: Boolean = false,

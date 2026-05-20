@@ -34,6 +34,7 @@ const LEGACY_RADIO_PATHS = new Set([
   "/v1/presence/count",
   "/v1/talk-activity",
   "/v1/radio/location",
+  "/v1/radio/transmissions",
   "/v1/radio/inbox",
   "/v1/radio/emergency",
 ]);
