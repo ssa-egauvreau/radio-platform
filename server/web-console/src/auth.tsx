@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { api, setToken, type SessionUser } from "./api";
+import { api, SESSION_EXPIRED_EVENT, setToken, type SessionUser } from "./api";
 
 const TOKEN_KEY = "securityradio.token";
 
@@ -31,6 +31,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setToken(null);
       })
       .finally(() => setReady(true));
+  }, []);
+
+  // The api client clears the token and fires this whenever the server returns
+  // 401 mid-session (account disabled, signed-in elsewhere, etc.). Reacting
+  // here drops the React user state in the same tick so the app falls back to
+  // the login screen without waiting for the next user interaction.
+  useEffect(() => {
+    function onSessionExpired() {
+      setUser(null);
+    }
+    window.addEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
+    return () => window.removeEventListener(SESSION_EXPIRED_EVENT, onSessionExpired);
   }, []);
 
   const value = useMemo<AuthState>(

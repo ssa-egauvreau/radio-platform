@@ -269,6 +269,27 @@ export function getToken(): string | null {
   return authToken;
 }
 
+/** Dispatched whenever the server tells us our token is no longer accepted. */
+export const SESSION_EXPIRED_EVENT = "safet:session-expired";
+
+/**
+ * Called by every API path that can come back 401, so an evicted session
+ * (account disabled, signed in elsewhere, etc.) drops out of the console
+ * within the same tick instead of waiting for the next user click.
+ */
+function handle401IfNeeded(status: number): void {
+  if (status !== 401) return;
+  authToken = null;
+  try {
+    localStorage.removeItem("securityradio.token");
+  } catch {
+    /* ignore storage quota / private mode */
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+  }
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   const headers: Record<string, string> = {};
   if (body !== undefined) {
@@ -292,6 +313,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     }
   }
   if (!res.ok) {
+    handle401IfNeeded(res.status);
     const code = (data as { error?: string })?.error ?? `http_${res.status}`;
     throw new ApiError(code, res.status);
   }
@@ -494,6 +516,7 @@ export async function uploadAgencyLogo(file: File): Promise<void> {
   }
   const res = await fetch("/v1/admin/agency/logo", { method: "PUT", headers, body: file });
   if (!res.ok) {
+    handle401IfNeeded(res.status);
     let code = `http_${res.status}`;
     try {
       code = (JSON.parse(await res.text()) as { error?: string }).error ?? code;
@@ -516,6 +539,7 @@ export async function uploadSound(kind: string, file: File): Promise<void> {
     body: file,
   });
   if (!res.ok) {
+    handle401IfNeeded(res.status);
     let code = `http_${res.status}`;
     try {
       code = (JSON.parse(await res.text()) as { error?: string }).error ?? code;
@@ -534,6 +558,7 @@ export async function fetchTransmissionAudio(id: number): Promise<Blob> {
   }
   const res = await fetch(`/v1/transmissions/${id}/audio`, { headers });
   if (!res.ok) {
+    handle401IfNeeded(res.status);
     throw new ApiError(`http_${res.status}`, res.status);
   }
   return res.blob();
@@ -547,6 +572,7 @@ async function uploadRaw(path: string, file: File, fallbackType: string): Promis
   }
   const res = await fetch(path, { method: "PUT", headers, body: file });
   if (!res.ok) {
+    handle401IfNeeded(res.status);
     let code = `http_${res.status}`;
     try {
       code = (JSON.parse(await res.text()) as { error?: string }).error ?? code;
@@ -575,6 +601,7 @@ export async function fetchToneOutAudio(id: number): Promise<Blob> {
   }
   const res = await fetch(`/v1/tone-outs/${id}/audio`, { headers });
   if (!res.ok) {
+    handle401IfNeeded(res.status);
     throw new ApiError(`http_${res.status}`, res.status);
   }
   return res.blob();
@@ -588,6 +615,7 @@ export async function fetchToneOutIcon(id: number): Promise<Blob> {
   }
   const res = await fetch(`/v1/tone-outs/${id}/icon`, { headers });
   if (!res.ok) {
+    handle401IfNeeded(res.status);
     throw new ApiError(`http_${res.status}`, res.status);
   }
   return res.blob();
@@ -612,6 +640,7 @@ export function describeError(error: unknown): string {
       database_unavailable: "The database is not configured on the server.",
       bad_role: "Unknown role.",
       agency_disabled: "Your agency has been disabled. Contact your platform owner.",
+      session_superseded: "Signed in on another device — sign in again here if you want to continue.",
     };
     return map[error.message] ?? `Request failed (${error.message}).`;
   }

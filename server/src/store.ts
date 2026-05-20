@@ -253,6 +253,7 @@ export interface UserRow {
   disabled: boolean;
   agency_id: number | null;
   created_at: string;
+  token_generation: number;
 }
 
 export interface UserWithHash extends UserRow {
@@ -294,7 +295,7 @@ export interface AuditRow {
   ip: string | null;
 }
 
-const USER_COLS = "id, username, display_name, role, unit_id, device_type, disabled, agency_id, created_at";
+const USER_COLS = "id, username, display_name, role, unit_id, device_type, disabled, agency_id, created_at, token_generation";
 
 /** Accounts within one agency. */
 export async function listUsers(agencyId: number): Promise<UserRow[]> {
@@ -321,7 +322,7 @@ export async function getUserById(id: number, agencyId?: number): Promise<UserRo
 export async function getUserByUsername(username: string): Promise<UserWithHash | null> {
   const res = await requirePool().query<UserWithHash>(
     `SELECT u.id, u.username, u.display_name, u.role, u.unit_id, u.device_type, u.disabled, u.agency_id,
-            u.created_at, u.password_hash,
+            u.created_at, u.token_generation, u.password_hash,
             a.name AS agency_name, a.disabled AS agency_disabled
        FROM users u
        LEFT JOIN agencies a ON a.id = u.agency_id
@@ -329,6 +330,20 @@ export async function getUserByUsername(username: string): Promise<UserWithHash 
     [username],
   );
   return res.rows[0] ?? null;
+}
+
+/**
+ * Increments and returns the user's session generation. Each successful login
+ * calls this so prior tokens (carrying the old `gen` claim) fail the freshness
+ * check on their next authenticated request.
+ */
+export async function bumpTokenGeneration(userId: number): Promise<number> {
+  const res = await requirePool().query<{ token_generation: number }>(
+    `UPDATE users SET token_generation = token_generation + 1
+       WHERE id = $1 RETURNING token_generation;`,
+    [userId],
+  );
+  return res.rows[0]?.token_generation ?? 0;
 }
 
 export async function createUser(input: {

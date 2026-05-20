@@ -16,6 +16,13 @@ export interface AuthUser {
   /** Tenant the account belongs to; null for platform `owner` accounts. */
   agencyId: number | null;
   agencyName: string | null;
+  /**
+   * Session generation written on the originating login. Compared against the
+   * user row's current `token_generation` so a later login on another device
+   * invalidates this token (newest sign-in wins). Tokens issued before this
+   * field existed parse as 0 — they keep working until the user re-logs in.
+   */
+  gen: number;
 }
 
 /** Agency resolved for a request (from a JWT, or a handset's radio key). */
@@ -65,6 +72,7 @@ export function signToken(user: AuthUser): string {
     unit: user.unitId,
     aid: user.agencyId,
     an: user.agencyName,
+    gen: user.gen,
   };
   // Radio handsets stay signed in until a manual sign-out, so their tokens
   // carry no expiry. Console/admin/owner sessions still expire so a lost
@@ -87,6 +95,9 @@ export function verifyToken(token: string): AuthUser | null {
       unitId: p.unit == null ? null : String(p.unit),
       agencyId: p.aid == null ? null : Number(p.aid),
       agencyName: p.an == null ? null : String(p.an),
+      // Pre-existing tokens without the `gen` claim parse as 0, matching the
+      // default value on the `users.token_generation` column at deploy time.
+      gen: Number(p.gen ?? 0),
     };
   } catch {
     return null;

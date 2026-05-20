@@ -9,10 +9,11 @@ import {
   type AuthUser,
   type Role,
 } from "./auth.js";
-import { dropAgencyVoiceConnections, listChannelRoster } from "./voiceRelay.js";
+import { dropAgencyVoiceConnections, dropUserVoiceConnections, listChannelRoster } from "./voiceRelay.js";
 import { getBridgeStatus } from "./bridgeWorker.js";
 import {
   AGENCY_ROLES,
+  bumpTokenGeneration,
   countActiveAdmins,
   clearAlert,
   clearEmergenciesFromUnit,
@@ -97,6 +98,7 @@ import {
   type Permission,
   type TransmissionSort,
 } from "./store.js";
+import { getPool } from "./db.js";
 
 /** Legacy global radio key — lets a handset fetch its agency's custom tones. */
 const radioApiKey = process.env.RADIO_API_KEY?.trim();
@@ -235,6 +237,12 @@ export function createApiRouter(): Router {
         res.status(401).json({ error: "account_disabled" });
         return;
       }
+      // Newest sign-in wins. A token whose `gen` lags the user row was issued
+      // for an earlier session that a later login has since superseded.
+      if (auth.gen !== user.token_generation) {
+        res.status(401).json({ error: "session_superseded" });
+        return;
+      }
       if (auth.agencyId != null) {
         const agency = await getAgencyById(auth.agencyId);
         if (!agency || agency.disabled) {
@@ -290,6 +298,10 @@ export function createApiRouter(): Router {
           return;
         }
       }
+      // Mint a fresh session generation so any token still floating around for
+      // this account immediately fails the freshness check on its next call.
+      const newGen = getPool() ? await bumpTokenGeneration(user!.id) : 0;
+      const evictedSockets = dropUserVoiceConnections(user!.id);
       const authUser: AuthUser = {
         id: user!.id,
         username: user!.username,
@@ -298,6 +310,7 @@ export function createApiRouter(): Router {
         unitId: user!.unit_id,
         agencyId: user!.agency_id,
         agencyName: user!.agency_name,
+        gen: newGen,
       };
       await writeAudit({
         agencyId: user!.agency_id,
@@ -306,6 +319,16 @@ export function createApiRouter(): Router {
         action: "login",
         ip: clientIp(req),
       });
+      if (evictedSockets > 0) {
+        await writeAudit({
+          agencyId: user!.agency_id,
+          actorUserId: user!.id,
+          actorName: user!.username,
+          action: "session_evicted",
+          detail: { dropped_voice_sockets: evictedSockets, new_ip: clientIp(req) },
+          ip: clientIp(req),
+        });
+      }
       res.json({ token: signToken(authUser), user: authUser });
     } catch (error) {
       fail(res, error);
