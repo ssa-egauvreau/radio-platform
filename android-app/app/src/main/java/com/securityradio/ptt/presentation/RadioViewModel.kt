@@ -288,6 +288,7 @@ class RadioViewModel(
                 if (bt != snap.bluetoothOn || battery != snap.batteryPercent) {
                     _uiState.update { it.copy(bluetoothOn = bt, batteryPercent = battery) }
                 }
+                refreshLocationSetupState()
             }
         }
         viewModelScope.launch {
@@ -678,7 +679,9 @@ class RadioViewModel(
                 _uiState.update { 
                     it.copy(
                         needsAudioPermission = event.needsAudio,
-                        needsAccessibilityService = event.needsAccessibility
+                        needsAccessibilityService = event.needsAccessibility,
+                        needsLocationPermission = event.needsLocation,
+                        needsGpsEnabled = event.needsGpsEnabled,
                     )
                 }
             }
@@ -732,6 +735,9 @@ class RadioViewModel(
                 }
             }
             RadioUiEvent.RequestOverlayPermission -> Unit
+            RadioUiEvent.RequestLocationPermission -> Unit
+            RadioUiEvent.OpenLocationSettings -> Unit
+            RadioUiEvent.OpenGpsSettings -> Unit
             RadioUiEvent.SignOut -> Unit // Handled in MainActivity (clears session and shows login)
         }
     }
@@ -1336,8 +1342,33 @@ class RadioViewModel(
     /** Called from the activity once the OS location-permission result is known. */
     fun onLocationPermissionResult(granted: Boolean) {
         locationPermissionGranted = granted
-        // GPS position reporting is always on — start it as soon as permission allows.
-        if (granted) locationReporter.start()
+        if (granted) {
+            locationReporter.start()
+        } else {
+            locationReporter.stop()
+        }
+        refreshLocationSetupState()
+    }
+
+    private fun refreshLocationSetupState() {
+        val needsLocation = !locationReporter.hasPermission()
+        val needsGps =
+            locationReporter.hasPermission() && !locationReporter.isLocationEnabled()
+        val snap = _uiState.value
+        if (
+            snap.needsLocationPermission != needsLocation ||
+            snap.needsGpsEnabled != needsGps
+        ) {
+            _uiState.update {
+                it.copy(
+                    needsLocationPermission = needsLocation,
+                    needsGpsEnabled = needsGps,
+                )
+            }
+        }
+        if (locationReporter.hasPermission() && locationReporter.isLocationEnabled()) {
+            locationReporter.start()
+        }
     }
 
     private fun bumpChannel(delta: Int) {

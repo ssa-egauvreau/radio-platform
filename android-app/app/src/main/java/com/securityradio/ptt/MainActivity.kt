@@ -130,6 +130,16 @@ class MainActivity : ComponentActivity() {
                                 RadioUiEvent.RequestAudioPermission -> {
                                     micPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                 }
+                                RadioUiEvent.RequestLocationPermission -> {
+                                    locationPermissionLauncher.launch(
+                                        arrayOf(
+                                            Manifest.permission.ACCESS_FINE_LOCATION,
+                                            Manifest.permission.ACCESS_COARSE_LOCATION,
+                                        ),
+                                    )
+                                }
+                                RadioUiEvent.OpenGpsSettings -> openGpsSettings()
+                                RadioUiEvent.OpenLocationSettings -> openAppSettings()
                                 RadioUiEvent.RequestIgnoreBatteryOptimizations -> requestIgnoreBatteryOptimizations()
                                 RadioUiEvent.OpenAccessibilitySettings -> {
                                     val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
@@ -209,10 +219,23 @@ class MainActivity : ComponentActivity() {
         val accessibilityEnabled = isAccessibilityServiceEnabled(this, InricoHardwareService::class.java)
 
         radioViewModel?.onMicPermissionResult(audioGranted)
+        val locationGranted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.ACCESS_FINE_LOCATION,
+        ) == PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(
+                this,
+                Manifest.permission.ACCESS_COARSE_LOCATION,
+            ) == PackageManager.PERMISSION_GRANTED
+        radioViewModel?.onLocationPermissionResult(locationGranted)
+        val needsGps =
+            locationGranted && !appGraph.locationReporter.isLocationEnabled()
         radioViewModel?.onEvent(
             RadioUiEvent.UpdatePermissionState(
                 needsAudio = !audioGranted,
                 needsAccessibility = !accessibilityEnabled,
+                needsLocation = !locationGranted,
+                needsGpsEnabled = needsGps,
             ),
         )
 
@@ -231,27 +254,13 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        val locationGranted = ContextCompat.checkSelfPermission(
-            this,
-            Manifest.permission.ACCESS_FINE_LOCATION,
-        ) == PackageManager.PERMISSION_GRANTED ||
-            ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-            ) == PackageManager.PERMISSION_GRANTED
-        radioViewModel?.onLocationPermissionResult(locationGranted)
         if (!locationGranted) {
-            val prefs = getSharedPreferences("radio_startup_prefs", MODE_PRIVATE)
-            val key = "requested_location_v1"
-            if (!prefs.getBoolean(key, false)) {
-                prefs.edit().putBoolean(key, true).apply()
-                locationPermissionLauncher.launch(
-                    arrayOf(
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.ACCESS_COARSE_LOCATION,
-                    ),
-                )
-            }
+            locationPermissionLauncher.launch(
+                arrayOf(
+                    Manifest.permission.ACCESS_FINE_LOCATION,
+                    Manifest.permission.ACCESS_COARSE_LOCATION,
+                ),
+            )
         }
 
         val overlayGranted = canDrawOverlays()
@@ -282,9 +291,26 @@ class MainActivity : ComponentActivity() {
             )
             startActivity(intent)
         } catch (_: ActivityNotFoundException) {
-            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                data = Uri.fromParts("package", packageName, null)
-            })
+            openAppSettings()
+        }
+    }
+
+    private fun openAppSettings() {
+        try {
+            startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.fromParts("package", packageName, null)
+                },
+            )
+        } catch (_: ActivityNotFoundException) {
+        }
+    }
+
+    private fun openGpsSettings() {
+        try {
+            startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS))
+        } catch (_: ActivityNotFoundException) {
+            openAppSettings()
         }
     }
 

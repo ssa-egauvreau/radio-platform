@@ -64,6 +64,14 @@ class LocationReporter(
         return fine == PackageManager.PERMISSION_GRANTED || coarse == PackageManager.PERMISSION_GRANTED
     }
 
+    /** True when at least one location provider is enabled in Android settings. */
+    fun isLocationEnabled(): Boolean {
+        val lm = locationManager ?: return false
+        return PROVIDERS.any { provider ->
+            runCatching { lm.isProviderEnabled(provider) }.getOrDefault(false)
+        }
+    }
+
     @SuppressLint("MissingPermission") // hasPermission() is checked before any location call
     fun start() {
         if (running) return
@@ -71,9 +79,8 @@ class LocationReporter(
         if (!hasPermission()) return
         running = true
 
-        // Seed from the provider's cached fix so the radio appears on the map at
-        // once. Waiting for a fresh GPS lock can take minutes — or never resolve
-        // indoors — which is why handsets were absent from dispatch entirely.
+        // Use a recent cached fix only — ancient last-known positions made the dispatch
+        // map show radios 12–46 hours out of date.
         lastLocation = bestLastKnown(lm)
 
         val request = LocationRequestCompat.Builder(POST_INTERVAL_MS)
@@ -116,7 +123,7 @@ class LocationReporter(
                 lastLocation = cached
             }
         }
-        val location = lastLocation ?: return
+        val location = lastLocation?.takeIf { isFreshEnough(it) } ?: return
         val unit = unitId.takeIf { it.isNotBlank() } ?: return
         radioApi.reportLocation(
             LocationReportDto(
@@ -131,7 +138,7 @@ class LocationReporter(
         )
     }
 
-    /** Most recent cached fix across providers, or null if none is available. */
+    /** Most recent cached fix across providers, or null if none is recent enough. */
     @SuppressLint("MissingPermission") // callers check hasPermission()
     private fun bestLastKnown(lm: LocationManager): Location? {
         var best: Location? = null
@@ -139,16 +146,23 @@ class LocationReporter(
             val loc = runCatching {
                 if (lm.isProviderEnabled(provider)) lm.getLastKnownLocation(provider) else null
             }.getOrNull()
-            if (loc != null && (best == null || loc.time > best.time)) {
+            if (loc != null && isFreshEnough(loc) && (best == null || loc.time > best.time)) {
                 best = loc
             }
         }
         return best
     }
 
+    private fun isFreshEnough(location: Location): Boolean {
+        val ageMs = (System.currentTimeMillis() - location.time).coerceAtLeast(0L)
+        return ageMs <= MAX_LOCATION_AGE_MS
+    }
+
     private companion object {
         val PROVIDERS = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER)
         /** Cadence for both location-update requests and server posts. */
         const val POST_INTERVAL_MS = 15_000L
+        /** Do not report fixes older than this — matches dispatch map "stale" window (5 min). */
+        const val MAX_LOCATION_AGE_MS = 5 * 60_000L
     }
 }

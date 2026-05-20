@@ -43,10 +43,15 @@ sealed interface RadioUiEvent {
 
     data class UpdatePermissionState(
         val needsAudio: Boolean,
-        val needsAccessibility: Boolean
+        val needsAccessibility: Boolean,
+        val needsLocation: Boolean = false,
+        val needsGpsEnabled: Boolean = false,
     ) : RadioUiEvent
     data object RequestAudioPermission : RadioUiEvent
+    data object RequestLocationPermission : RadioUiEvent
     data object OpenAccessibilitySettings : RadioUiEvent
+    data object OpenLocationSettings : RadioUiEvent
+    data object OpenGpsSettings : RadioUiEvent
     data object RequestIgnoreBatteryOptimizations : RadioUiEvent
 
 

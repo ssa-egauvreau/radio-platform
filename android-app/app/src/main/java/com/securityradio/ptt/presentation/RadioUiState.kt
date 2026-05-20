@@ -78,6 +78,10 @@ data class RadioUiState(
     /** Setup / Permission state. */
     val needsAudioPermission: Boolean,
     val needsAccessibilityService: Boolean,
+    /** Android has not granted location access — dispatch map will not update. */
+    val needsLocationPermission: Boolean = false,
+    /** Permission granted but system Location/GPS is turned off. */
+    val needsGpsEnabled: Boolean = false,
 
     /** Debug / mapping: last intercepted Android keyCode for the HUD. */
     val lastDetectedKey: Int?,
@@ -205,6 +209,8 @@ data class RadioUiState(
             currentlyMappingAction = null,
             needsAudioPermission = false,
             needsAccessibilityService = false,
+            needsLocationPermission = false,
+            needsGpsEnabled = false,
             lastDetectedKey = null,
             radiosOnlineOnChannel = null,
             announceChannelNameOnTune = true,

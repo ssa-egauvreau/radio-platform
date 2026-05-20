@@ -3738,6 +3738,47 @@ private fun DeviceSettingsTab(
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         item {
+            SettingsSectionHeader("DISPATCH MAP (GPS)", styles, p)
+            Text(
+                text = when {
+                    state.needsLocationPermission ->
+                        "Location is not allowed — the console map cannot show a current position for this radio."
+                    state.needsGpsEnabled ->
+                        "Location permission is on, but Android GPS/Location is turned off."
+                    else ->
+                        "GPS reporting is active. Your position updates on the dispatch map about every 15 seconds."
+                },
+                style = styles.status,
+                color = p.textMuted,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            if (state.needsLocationPermission) {
+                TextButton(
+                    onClick = { onEvent(RadioUiEvent.RequestLocationPermission) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        containerColor = p.softKeyInactiveFill,
+                        contentColor = p.textOnButton,
+                    ),
+                ) {
+                    Text("ALLOW LOCATION ACCESS".uppercase(Locale.US))
+                }
+            }
+            if (state.needsGpsEnabled) {
+                TextButton(
+                    onClick = { onEvent(RadioUiEvent.OpenGpsSettings) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.textButtonColors(
+                        containerColor = p.softKeyInactiveFill,
+                        contentColor = p.textOnButton,
+                    ),
+                ) {
+                    Text("TURN ON GPS IN ANDROID SETTINGS".uppercase(Locale.US))
+                }
+            }
+        }
+        item { HorizontalDivider(color = p.divider) }
+        item {
             SettingsSectionHeader("HANDSET LAYOUT", styles, p)
             Text(
                 text = "ACTIVE: ${state.resolvedDeviceProfile.label.uppercase(Locale.US)} · " +
@@ -4047,7 +4088,14 @@ fun SetupRequiredDialog(
     state: RadioUiState,
     onEvent: (RadioUiEvent) -> Unit,
 ) {
-    if (!state.needsAudioPermission && !state.needsAccessibilityService) return
+    if (
+        !state.needsAudioPermission &&
+            !state.needsAccessibilityService &&
+            !state.needsLocationPermission &&
+            !state.needsGpsEnabled
+    ) {
+        return
+    }
     val p = RadioLcdTheme.palette
 
     AlertDialog(
@@ -4064,6 +4112,44 @@ fun SetupRequiredDialog(
                     text = "The radio requires permissions to function correctly.",
                     color = p.textSecondary
                 )
+
+                if (state.needsLocationPermission) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("• LOCATION (GPS)", fontWeight = FontWeight.Bold, color = p.textPrimary)
+                        Text(
+                            text = "Required so your radio shows on the dispatch map with a current position.",
+                            fontSize = 12.sp,
+                            color = p.textMuted,
+                        )
+                        TextButton(
+                            onClick = { onEvent(RadioUiEvent.RequestLocationPermission) },
+                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                containerColor = p.softKeyInactiveFill,
+                            ),
+                        ) {
+                            Text("ALLOW LOCATION", color = p.textOnButton)
+                        }
+                    }
+                }
+
+                if (state.needsGpsEnabled) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        Text("• TURN ON GPS", fontWeight = FontWeight.Bold, color = p.textPrimary)
+                        Text(
+                            text = "Location permission is granted, but phone GPS is off. Turn on Location in Android settings.",
+                            fontSize = 12.sp,
+                            color = p.textMuted,
+                        )
+                        TextButton(
+                            onClick = { onEvent(RadioUiEvent.OpenGpsSettings) },
+                            colors = androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                containerColor = p.softKeyInactiveFill,
+                            ),
+                        ) {
+                            Text("OPEN LOCATION SETTINGS", color = p.textOnButton)
+                        }
+                    }
+                }
                 
                 if (state.needsAudioPermission) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
