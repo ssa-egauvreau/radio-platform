@@ -1724,7 +1724,7 @@ private fun LcdHandsetStat(
     }
 }
 
-/** Status toolbar — TM7: one row; IRC590: icons row, then clock + channel + radios row. */
+/** Status toolbar — TM7: icons + clock row; IRC590: even icon row + channel/clock row. */
 @Composable
 private fun LcdHandsetToolbar(
     state: RadioUiState,
@@ -1857,7 +1857,7 @@ private fun LcdHandsetToolbarStatusIcons(
     }
 }
 
-/** Channel index, centered clock, and radios-online — shared by IRC590 and TM7 toolbars. */
+/** Channel index, centered clock, and optionally radios-online (TM7 second row). */
 @Composable
 private fun LcdHandsetToolbarClockMetaRow(
     state: RadioUiState,
@@ -1867,6 +1867,7 @@ private fun LcdHandsetToolbarClockMetaRow(
     clockFontSize: TextUnit,
     accentOnEmergency: Color,
     styles: LcdTextStyles,
+    showRadiosOnline: Boolean = true,
     modifier: Modifier = Modifier,
 ) {
     val p = RadioLcdTheme.palette
@@ -1900,7 +1901,7 @@ private fun LcdHandsetToolbarClockMetaRow(
                 }
             }
             Box(
-                modifier = Modifier.weight(1.15f),
+                modifier = Modifier.weight(if (showRadiosOnline) 1.15f else 1f),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
@@ -1916,20 +1917,139 @@ private fun LcdHandsetToolbarClockMetaRow(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            Box(
-                modifier = Modifier.weight(1f),
-                contentAlignment = Alignment.CenterEnd,
-            ) {
-                LcdHandsetStat(
-                    value = radiosValue,
-                    valueColor = if (radiosKnown) p.statusGreen else p.textMuted,
-                    styles = styles,
-                    compact = true,
-                    valueFontSize = statFontSize,
+            if (showRadiosOnline) {
+                Box(
+                    modifier = Modifier.weight(1f),
+                    contentAlignment = Alignment.CenterEnd,
                 ) {
-                    LcdGlobeIcon(
-                        color = if (radiosKnown) p.statusGreen else p.textMuted,
-                        modifier = Modifier.size(statIconSize),
+                    LcdHandsetStat(
+                        value = radiosValue,
+                        valueColor = if (radiosKnown) p.statusGreen else p.textMuted,
+                        styles = styles,
+                        compact = true,
+                        valueFontSize = statFontSize,
+                    ) {
+                        LcdGlobeIcon(
+                            color = if (radiosKnown) p.statusGreen else p.textMuted,
+                            modifier = Modifier.size(statIconSize),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** IRC590 top row: status icons + radios online, evenly spaced; battery larger than the rest. */
+@Composable
+private fun LcdHandsetToolbarIrc590TopRow(
+    state: RadioUiState,
+    online: Boolean,
+    scanReceiving: Boolean,
+    radiosValue: String,
+    radiosKnown: Boolean,
+    showBatteryStatus: Boolean,
+    onEvent: (RadioUiEvent) -> Unit,
+    styles: LcdTextStyles,
+    modifier: Modifier = Modifier,
+) {
+    val p = RadioLcdTheme.palette
+    val scanIconColor = rememberScanIconActiveColor(
+        scanActive = state.scanActive,
+        scanReceiving = scanReceiving,
+    )
+    val accentOnEmergency = if (state.isEmergencyActive) Color.White else p.textSecondary
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp),
+    ) {
+        val slotCount = if (showBatteryStatus) 7f else 6f
+        val iconSize = minOf(maxWidth / slotCount, maxHeight * 0.88f).coerceIn(36.dp, 54.dp)
+        val signalWidth = iconSize * 1.22f
+        val signalHeight = iconSize * 0.78f
+        val radiosFontSp = (iconSize.value * 0.52f).coerceIn(17f, 24f).sp
+        val batteryIconW = iconSize * 1.45f
+        val batteryIconH = batteryIconW * 0.5f
+        val batteryTextSp = (iconSize.value * 0.72f).coerceIn(24f, 34f).sp
+        val radiosLabel = radiosValue.ifBlank { "—" }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            LcdSignalBarsIcon(
+                bars = if (online) 4 else 1,
+                maxBars = 4,
+                colorActive = if (online) p.statusGreen else p.statusAmber,
+                colorInactive = p.textMuted,
+                modifier = Modifier.size(signalWidth, signalHeight),
+            )
+            LcdBluetoothIcon(
+                on = state.bluetoothOn,
+                active = p.statusBlue,
+                muted = p.textMuted,
+                modifier = Modifier.size(iconSize),
+            )
+            LcdGpsIcon(
+                active = p.statusGreen,
+                muted = p.textMuted,
+                locked = true,
+                modifier = Modifier.size(iconSize),
+            )
+            LcdReplayIcon(
+                ready = p.statusAmber,
+                muted = p.textMuted,
+                playing = state.replayBanner.isNotEmpty(),
+                modifier = Modifier
+                    .size(iconSize)
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onTap = { onEvent(RadioUiEvent.PlayLastTransmission) },
+                            onLongPress = { onEvent(RadioUiEvent.ToggleMessageHistory) },
+                        )
+                    },
+            )
+            LcdVolumeIcon(
+                muted = p.textMuted,
+                active = p.statusGreen,
+                isMuted = !state.externalMicConnected,
+                modifier = Modifier.size(iconSize),
+            )
+            LcdHandsetStat(
+                value = radiosLabel,
+                valueColor = if (radiosKnown) p.statusGreen else p.textMuted,
+                styles = styles,
+                compact = true,
+                valueFontSize = radiosFontSp,
+            ) {
+                LcdGlobeIcon(
+                    color = if (radiosKnown) p.statusGreen else p.textMuted,
+                    modifier = Modifier.size(iconSize),
+                )
+            }
+            if (showBatteryStatus) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    LcdBatteryIcon(
+                        percent = state.batteryPercent,
+                        outline = if (state.isEmergencyActive) Color.White else accentOnEmergency,
+                        fillHigh = p.statusGreen,
+                        fillLow = p.statusAmber,
+                        fillCritical = p.statusRed,
+                        modifier = Modifier.size(width = batteryIconW, height = batteryIconH),
+                    )
+                    Text(
+                        text = "${state.batteryPercent}%",
+                        style = styles.status.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = batteryTextSp,
+                            lineHeight = (batteryTextSp.value * 1.1f).sp,
+                        ),
+                        color = if (state.isEmergencyActive) Color.White else accentOnEmergency,
+                        maxLines = 1,
                     )
                 }
             }
@@ -1954,69 +2074,21 @@ private fun LcdHandsetToolbarIrc590(
     val scanReceiving = state.scanBackgroundActive
     val accentOnEmergency = if (state.isEmergencyActive) Color.White else p.textPrimary
     val rowPad = 3.dp
-    val statusIconCount = 5
 
     Column(
         modifier = modifier.fillMaxWidth(),
         verticalArrangement = Arrangement.spacedBy(rowPad),
     ) {
-        BoxWithConstraints(
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(min = 48.dp),
-        ) {
-            val batteryReserve = if (showBatteryStatus) 92.dp else 0.dp
-            val statusWidth = (maxWidth - batteryReserve).coerceAtLeast(0.dp)
-            val squareSize = minOf(statusWidth / statusIconCount, maxHeight * 0.9f)
-                .coerceIn(38.dp, 58.dp)
-            val signalWidth = squareSize * 1.22f
-            val signalHeight = squareSize * 0.78f
-            val batteryW = (maxHeight * 0.55f).coerceIn(36.dp, 48.dp)
-            val batteryH = batteryW * 0.5f
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                LcdHandsetToolbarStatusIcons(
-                    state = state,
-                    online = online,
-                    scanReceiving = scanReceiving,
-                    iconSize = squareSize,
-                    signalWidth = signalWidth,
-                    signalHeight = signalHeight,
-                    onEvent = onEvent,
-                    modifier = Modifier.weight(1f),
-                    edgeToEdge = true,
-                    showScanIcon = false,
-                )
-                if (showBatteryStatus) {
-                    val batteryTextSp = (squareSize.value * 0.54f).coerceIn(20f, 26f).sp
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        LcdBatteryIcon(
-                            percent = state.batteryPercent,
-                            outline = if (state.isEmergencyActive) Color.White else p.textSecondary,
-                            fillHigh = p.statusGreen,
-                            fillLow = p.statusAmber,
-                            fillCritical = p.statusRed,
-                            modifier = Modifier.size(width = batteryW, height = batteryH),
-                        )
-                        Text(
-                            text = "${state.batteryPercent}%",
-                            style = styles.status.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = batteryTextSp,
-                                lineHeight = (batteryTextSp.value * 1.1f).sp,
-                            ),
-                            color = if (state.isEmergencyActive) Color.White else p.textSecondary,
-                            maxLines = 1,
-                        )
-                    }
-                }
-            }
-        }
+        LcdHandsetToolbarIrc590TopRow(
+            state = state,
+            online = online,
+            scanReceiving = scanReceiving,
+            radiosValue = radiosValue,
+            radiosKnown = radiosKnown,
+            showBatteryStatus = showBatteryStatus,
+            onEvent = onEvent,
+            styles = styles,
+        )
         LcdHandsetToolbarClockMetaRow(
             state = state,
             channelValue = channelValue,
@@ -2025,6 +2097,7 @@ private fun LcdHandsetToolbarIrc590(
             clockFontSize = HANDSET_CLOCK_FONT_IRC590,
             accentOnEmergency = accentOnEmergency,
             styles = styles,
+            showRadiosOnline = false,
         )
         LcdHandsetToolbarScanBanner(state = state, styles = styles)
     }
