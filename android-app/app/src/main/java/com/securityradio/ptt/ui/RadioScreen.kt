@@ -969,7 +969,9 @@ private fun LcdHandsetFillChannelBlock(
                     styles = styles,
                 )
             }
-            LcdPermissionBadge(permission = state.currentChannelPermission, styles = styles)
+            if (!showEmergencyBanner) {
+                LcdPermissionBadge(permission = state.currentChannelPermission, styles = styles)
+            }
             val scanRxLive =
                 state.scanBackgroundActive && state.scanBackgroundChannel.isNotBlank()
             val remoteEmergencyLive = showEmergencyBanner
@@ -1099,14 +1101,16 @@ private fun LcdHandsetFillChannelBlock(
                             .size(48.dp),
                     )
                 }
-                LcdSettingsIcon(
-                    color = p.statusBlue,
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(bottom = 4.dp)
-                        .size(28.dp)
-                        .clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
-                )
+                if (!remoteEmergencyLive) {
+                    LcdSettingsIcon(
+                        color = p.statusBlue,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(bottom = 4.dp)
+                            .size(28.dp)
+                            .clickable { onEvent(RadioUiEvent.OpenMappingSettings) },
+                    )
+                }
             }
             if (showHandsetTalker) {
                 LcdHandsetTalkerBlock(
@@ -1700,50 +1704,30 @@ private fun LcdHandsetRemoteEmergencyBlock(
     val idleChannelRange = handsetIdleChannelSpRange(deviceProfile)
     val channel = channelName.trim().uppercase(Locale.US)
     val unit = unitId.trim().uppercase(Locale.US)
-    BoxWithConstraints(
-        modifier = modifier,
-        contentAlignment = Alignment.Center,
+    val density = LocalDensity.current
+    Column(
+        modifier = modifier
+            .fillMaxSize()
+            .padding(horizontal = 4.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        val density = LocalDensity.current
-        val channelSp =
-            handsetScaledLineSp(
-                density = density,
-                maxHeight = maxHeight,
-                maxWidth = maxWidth,
-                text = channel,
-                heightFraction = 0.36f,
-                minSp = idleChannelRange.start,
-                maxSp = idleChannelRange.endInclusive,
-                widthCharsPerSp = 0.42f,
-            )
-        val emergencySp =
-            handsetScaledLineSp(
-                density = density,
-                maxHeight = maxHeight,
-                maxWidth = maxWidth,
-                text = "EMERGENCY",
-                heightFraction = 0.24f,
-                minSp = 24f,
-                maxSp = 48f,
-            )
-        val unitSp =
-            handsetScaledLineSp(
-                density = density,
-                maxHeight = maxHeight,
-                maxWidth = maxWidth,
-                text = unit.ifEmpty { "—" },
-                heightFraction = 0.36f,
-                minSp = idleChannelRange.start,
-                maxSp = idleChannelRange.endInclusive,
-                widthCharsPerSp = 0.5f,
-            )
-        Column(
+        BoxWithConstraints(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 6.dp, vertical = 4.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+                .weight(0.30f)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.Center,
         ) {
+            val channelSp =
+                handsetScaledLineSp(
+                    density = density,
+                    maxHeight = maxHeight,
+                    maxWidth = maxWidth,
+                    text = channel,
+                    heightFraction = 0.88f,
+                    minSp = 20f,
+                    maxSp = idleChannelRange.endInclusive * 0.55f,
+                    widthCharsPerSp = 0.42f,
+                )
             Text(
                 text = channel,
                 style = styles.channel.copy(
@@ -1757,7 +1741,23 @@ private fun LcdHandsetRemoteEmergencyBlock(
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
-            Spacer(modifier = Modifier.height(6.dp))
+        }
+        BoxWithConstraints(
+            modifier = Modifier
+                .weight(0.20f)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            val emergencySp =
+                handsetScaledLineSp(
+                    density = density,
+                    maxHeight = maxHeight,
+                    maxWidth = maxWidth,
+                    text = "EMERGENCY",
+                    heightFraction = 0.88f,
+                    minSp = 18f,
+                    maxSp = 40f,
+                )
             Text(
                 text = "EMERGENCY",
                 style = styles.channel.copy(
@@ -1767,25 +1767,41 @@ private fun LcdHandsetRemoteEmergencyBlock(
                 ),
                 color = emergencyColor,
                 maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
                 textAlign = TextAlign.Center,
                 modifier = Modifier.fillMaxWidth(),
             )
-            if (unit.isNotEmpty()) {
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = unit,
-                    style = styles.channel.copy(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = unitSp,
-                        lineHeight = (unitSp.value * 1.05f).sp,
-                    ),
-                    color = emergencyColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth(),
+        }
+        BoxWithConstraints(
+            modifier = Modifier
+                .weight(0.42f)
+                .fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            val unitSp =
+                handsetScaledLineSp(
+                    density = density,
+                    maxHeight = maxHeight,
+                    maxWidth = maxWidth,
+                    text = unit.ifEmpty { "—" },
+                    heightFraction = 0.92f,
+                    minSp = idleChannelRange.start,
+                    maxSp = idleChannelRange.endInclusive,
+                    widthCharsPerSp = 0.5f,
                 )
-            }
+            Text(
+                text = unit.ifEmpty { "—" },
+                style = styles.channel.copy(
+                    fontWeight = FontWeight.Bold,
+                    fontSize = unitSp,
+                    lineHeight = (unitSp.value * 1.05f).sp,
+                ),
+                color = emergencyColor,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.fillMaxWidth(),
+            )
         }
     }
 }
