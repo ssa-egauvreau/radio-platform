@@ -22,6 +22,8 @@ import {
 import { startBridgeWorker } from "./bridgeWorker.js";
 
 const app = express();
+// Tiny info-leak (and a few free bytes per response) — Express ships this header by default.
+app.disable("x-powered-by");
 // gzip every response above ~1 KB (default threshold). Most of what's served is JSON state polls
 // and the Vite bundle — both compress ~70-80 %, which is real money on Railway egress + faster
 // page loads. Excludes the voice WebSocket path (handled outside Express).
@@ -197,7 +199,19 @@ app.get("/v1/talk-activity", (req, res) => {
 // so Railway includes it in the deployed image.
 const webDist = resolve(dirname(fileURLToPath(import.meta.url)), "web-public");
 if (existsSync(webDist)) {
-  app.use(express.static(webDist));
+  app.use(
+    express.static(webDist, {
+      // Vite emits content-hashed filenames into /assets — safe to cache forever, so the browser
+      // stops re-downloading the bundle on every navigation. index.html itself stays at the
+      // express.static default (no Cache-Control) so the SPA shell is always fresh and can
+      // point at the latest /assets hashes.
+      setHeaders: (res, filePath) => {
+        if (filePath.includes(`${"/"}assets${"/"}`)) {
+          res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+        }
+      },
+    }),
+  );
   app.use((req, res, next) => {
     if (req.method !== "GET" || req.path.startsWith("/v1/") || req.path === "/health") {
       next();
