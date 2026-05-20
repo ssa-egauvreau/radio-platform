@@ -181,7 +181,14 @@ export function ChannelPanel({
           clearReconnectTimer();
           reconnectTimerRef.current = window.setTimeout(() => {
             reconnectTimerRef.current = null;
-            if (wantConnectedRef.current) connect();
+            if (!wantConnectedRef.current) return;
+            // Close the prior VoiceChannelClient before constructing a new one — its rxWatchdog
+            // interval, AudioContext, MediaStream tracks, and IMBE decoder all need to go through
+            // close() to be released. Repeated server-driven drops (Railway redeploys, network
+            // blips) would otherwise pile up orphaned clients with each retry.
+            clientRef.current?.close();
+            clientRef.current = null;
+            connect();
           }, VOICE_RECONNECT_DELAY_MS);
         } else if (state === "error") {
           wantConnectedRef.current = false;
