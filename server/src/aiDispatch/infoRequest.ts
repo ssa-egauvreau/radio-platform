@@ -29,6 +29,112 @@ function incidentPayloadHasUnit(inc: { payload: unknown }, targetUnit: string): 
   });
 }
 
+type ActiveIncident = Awaited<ReturnType<typeof listTen8ActiveIncidents>>[number];
+
+/**
+ * Speak just the radio code, not the full call type: "415 - Disturbing the Peace" → "415",
+ * "961 - Car Stop" → "961". Types with no leading code (e.g. "Issue Notice") are read as-is.
+ */
+function callCodeForRadio(incidentType: string | null): string {
+  const t = (incidentType ?? "").trim();
+  if (!t) {
+    return "call";
+  }
+  const sep = t.match(/^(.+?)\s+[-–—]\s+/); // code before " - description"
+  if (sep) {
+    return sep[1]!.trim();
+  }
+  const lead = t.match(/^(\d{2,4}[A-Za-z]?)\b/); // bare leading code, e.g. "415" / "415e"
+  if (lead) {
+    return lead[1]!;
+  }
+  return t;
+}
+
+/** Find one active incident matching the spoken subject (call number, type, or location words). */
+function findIncidentBySubject(incidents: ActiveIncident[], subject: string | null): ActiveIncident | null {
+  if (!subject?.trim()) {
+    return incidents.length === 1 ? incidents[0]! : null;
+  }
+  const q = subject.trim().toLowerCase();
+  const qDigits = q.replace(/[^0-9]/g, "");
+  for (const inc of incidents) {
+    const cid = (inc.call_id ?? "").toLowerCase();
+    if (cid && (cid === q || (qDigits.length >= 3 && cid.replace(/[^0-9]/g, "") === qDigits))) {
+      return inc;
+    }
+  }
+  const words = q.split(/\s+/).filter((w) => w.length > 2);
+  for (const inc of incidents) {
+    const hay = `${inc.call_id ?? ""} ${inc.incident_type ?? ""} ${inc.location ?? ""}`.toLowerCase();
+    if (hay.includes(q) || (words.length > 0 && words.every((w) => hay.includes(w)))) {
+      return inc;
+    }
+  }
+  return null;
+}
+
+function commentValueToText(v: unknown): string | null {
+  if (!v) {
+    return null;
+  }
+  if (typeof v === "string") {
+    return v.trim() || null;
+  }
+  if (Array.isArray(v)) {
+    const texts = v
+      .map((item) => {
+        if (typeof item === "string") {
+          return item.trim();
+        }
+        if (item && typeof item === "object") {
+          const o = item as Record<string, unknown>;
+          const t = o.comment ?? o.text ?? o.note ?? o.body ?? o.message ?? o.value;
+          return typeof t === "string" ? t.trim() : "";
+        }
+        return "";
+      })
+      .filter(Boolean);
+    return texts.length ? texts.slice(-3).join("; ") : null;
+  }
+  if (typeof v === "object") {
+    const o = v as Record<string, unknown>;
+    const t = o.comment ?? o.text ?? o.note ?? o.body ?? o.message;
+    return typeof t === "string" && t.trim() ? t.trim() : null;
+  }
+  return null;
+}
+
+/** Pull comment/narrative text out of the stored 10-8 webhook payload, trying common field names. */
+function extractCommentsFromPayload(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+  const root = payload as Record<string, unknown>;
+  const inc =
+    root.incident && typeof root.incident === "object"
+      ? (root.incident as Record<string, unknown>)
+      : root;
+  const keys = [
+    "comments",
+    "comment",
+    "narrative",
+    "notes",
+    "remarks",
+    "details",
+    "description",
+    "callNotes",
+    "call_notes",
+  ];
+  for (const k of keys) {
+    const text = commentValueToText(inc[k] ?? root[k]);
+    if (text) {
+      return text.slice(0, 600);
+    }
+  }
+  return null;
+}
+
 /** Trim a full street address to street + city for brevity on the air (drop state/zip/country). */
 function shortenLocationForRadio(loc: string | null): string {
   if (!loc?.trim()) {
@@ -97,7 +203,7 @@ export async function buildInfoRequestResponse(
       }
       const MAX_READ = 6;
       const items = pending.slice(0, MAX_READ).map((inc) => {
-        const codeOrType = (inc.incident_type || "call").trim();
+        const codeOrType = callCodeForRadio(inc.incident_type);
         const loc = shortenLocationForRadio(inc.location);
         return loc ? `${codeOrType} at ${loc}` : codeOrType;
       });
@@ -119,9 +225,29 @@ export async function buildInfoRequestResponse(
       if (!inc) {
         return `${csPart}no active calls assigned at this time.`;
       }
-      const codeOrType = inc.incident_type || "call";
-      const loc = inc.location || "unknown location";
+      const codeOrType = callCodeForRadio(inc.incident_type);
+      const loc = shortenLocationForRadio(inc.location) || "unknown location";
       return `${csPart}you're on ${codeOrType} at ${loc}.`;
+    }
+
+    case "call_details": {
+      const active = await listTen8ActiveIncidents(agencyId);
+      if (active.length === 0) {
+        return `${csPart}no active calls at this time.`;
+      }
+      const match = findIncidentBySubject(active, infoRequest.subject);
+      if (!match) {
+        return `${csPart}negative, I can't find that call. Say the call number or type.`;
+      }
+      const typeName = callCodeForRadio(match.incident_type);
+      const loc = shortenLocationForRadio(match.location);
+      const parts = [loc ? `${typeName} at ${loc}` : typeName];
+      if (match.status?.trim()) {
+        parts.push(`status ${match.status.trim()}`);
+      }
+      const comments = extractCommentsFromPayload(match.payload);
+      parts.push(comments ? `comments: ${comments}` : "no comments on the call yet");
+      return `${csPart}${parts.join(", ")}.`;
     }
 
     case "phone":
