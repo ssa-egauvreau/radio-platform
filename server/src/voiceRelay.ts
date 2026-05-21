@@ -124,6 +124,9 @@ type VoiceSlot = {
 /** Who is currently keyed, keyed by `agency:channel` so tenants stay isolated. */
 const voiceAirByChannel = new Map<string, VoiceSlot>();
 
+/** Auto-derived activity status for a roster member. */
+export type PresenceStatus = "idle" | "transmitting" | "driving" | "emergency";
+
 export interface RosterMember {
   unit_id: string;
   display_name: string | null;
@@ -131,6 +134,8 @@ export interface RosterMember {
   /** Client platform reported on join: android, ios, web, desktop, bridge, or unknown. */
   client: string;
   connected_ms: number;
+  /** Derived from live signals (talker / GPS speed / active emergency); set by the roster route. */
+  status?: PresenceStatus;
 }
 
 interface RosterRecord {

@@ -5,6 +5,7 @@ import {
   fetchTransmissionAudio,
   type ChannelMember,
   type Permission,
+  type PresenceStatus,
   type Transmission,
   type UserChannel,
 } from "../api";
@@ -16,6 +17,14 @@ import { ScanListenClient } from "../voice/scanListenClient";
 import { useUnitAliasResolver } from "../unitAliases";
 import { formatDuration, formatTime, transcriptOf } from "./TransmissionLog";
 import { bindLostLinkBusyAlerts, sounds } from "../sounds";
+
+/** Label + colour class for each derived presence status. */
+const ROSTER_STATUS: Record<PresenceStatus, { label: string; cls: string }> = {
+  emergency: { label: "Emergency", cls: "emergency" },
+  transmitting: { label: "On air", cls: "transmitting" },
+  driving: { label: "Driving", cls: "driving" },
+  idle: { label: "Idle", cls: "idle" },
+};
 
 const ROSTER_POLL_MS = 5_000;
 const TRANSMISSIONS_POLL_MS = 12_000;
@@ -675,7 +684,9 @@ export function RadioPortal() {
                 <li key={`${m.unit_id}-${m.kind}`}>
                   <strong>{m.unit_id}</strong>
                   {m.display_name && <span className="rp-name"> · {m.display_name}</span>}
-                  <span className="muted"> · {m.kind}</span>
+                  <span className={`roster-status ${ROSTER_STATUS[m.status ?? "idle"].cls}`}>
+                    {ROSTER_STATUS[m.status ?? "idle"].label}
+                  </span>
                 </li>
               ))}
             </ul>

@@ -205,6 +205,9 @@ export interface Alert {
   cleared_at: string | null;
 }
 
+/** Auto-derived activity status for a roster member. */
+export type PresenceStatus = "idle" | "transmitting" | "driving" | "emergency";
+
 export interface ChannelMember {
   unit_id: string;
   display_name: string | null;
@@ -212,6 +215,8 @@ export interface ChannelMember {
   /** Client platform: android, ios, web, desktop, bridge, or unknown. */
   client: string;
   connected_ms: number;
+  /** Derived from live signals (talker / GPS speed / active emergency). */
+  status?: PresenceStatus;
 }
 
 export interface UnitAlias {

@@ -1738,6 +1738,33 @@ code.mono {
   font-variant-numeric: tabular-nums;
   flex: none;
 }
+.roster-status {
+  font-size: 9px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  border-radius: 999px;
+  padding: 1px 7px;
+  flex: none;
+  border: 1px solid transparent;
+}
+.roster-status.idle {
+  color: var(--text-muted);
+  border-color: var(--border);
+}
+.roster-status.driving {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.roster-status.transmitting {
+  color: var(--green);
+  border-color: var(--green);
+}
+.roster-status.emergency {
+  color: #fff;
+  background: var(--red);
+  border-color: var(--red);
+}
 
 /* --- tone-out (police alert tones) --- */
 .toneout {

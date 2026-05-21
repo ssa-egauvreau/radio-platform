@@ -9,7 +9,14 @@ import {
   type AuthUser,
   type Role,
 } from "./auth.js";
-import { dropAgencyVoiceConnections, dropUserVoiceConnections, listChannelRoster } from "./voiceRelay.js";
+import {
+  dropAgencyVoiceConnections,
+  dropUserVoiceConnections,
+  listChannelRoster,
+  peekVoiceTransmittingUnit,
+  type PresenceStatus,
+  type RosterMember,
+} from "./voiceRelay.js";
 import { getBridgeStatus } from "./bridgeWorker.js";
 import {
   AGENCY_ROLES,
@@ -231,6 +238,61 @@ function requireAgencyOperator(req: Request, res: Response, next: NextFunction):
     return;
   }
   next();
+}
+
+/** GPS speed (m/s) above which a moving unit is treated as "driving" (~11 km/h). */
+const DRIVING_SPEED_MPS = 3;
+/** Ignore GPS fixes older than this when deriving "driving" — stale speed lies. */
+const POSITION_FRESH_MS = 3 * 60_000;
+
+/**
+ * Attaches an auto-derived activity status to each roster member from live
+ * signals only: an active emergency from the unit, the current channel talker,
+ * or recent GPS speed. Everything else is "idle" (connected but quiet). No
+ * manual input and no extra device telemetry is involved.
+ */
+async function annotateRosterStatus(
+  agencyId: number,
+  channel: string,
+  members: RosterMember[],
+): Promise<RosterMember[]> {
+  if (members.length === 0) {
+    return members;
+  }
+  const talker = peekVoiceTransmittingUnit(agencyId, channel);
+  const [positions, alerts] = await Promise.all([
+    listPositions(agencyId),
+    listAlerts(agencyId, 200),
+  ]);
+  const now = Date.now();
+  // listPositions is ordered newest-first, so the first row per unit is its latest fix.
+  const latestSpeed = new Map<string, { speed: number; ageMs: number }>();
+  for (const p of positions) {
+    const unit = p.unit_id.toUpperCase();
+    if (!latestSpeed.has(unit)) {
+      latestSpeed.set(unit, { speed: p.speed_mps ?? 0, ageMs: now - Date.parse(p.updated_at) });
+    }
+  }
+  const emergencyUnits = new Set<string>();
+  for (const a of alerts) {
+    if (a.kind === "emergency" && a.active && a.from_unit) {
+      emergencyUnits.add(a.from_unit.toUpperCase());
+    }
+  }
+  const talkerUnit = talker ? talker.toUpperCase() : null;
+  return members.map((m) => {
+    const unit = m.unit_id.toUpperCase();
+    const fix = latestSpeed.get(unit);
+    let status: PresenceStatus = "idle";
+    if (emergencyUnits.has(unit)) {
+      status = "emergency";
+    } else if (talkerUnit && unit === talkerUnit) {
+      status = "transmitting";
+    } else if (fix && fix.ageMs <= POSITION_FRESH_MS && fix.speed >= DRIVING_SPEED_MPS) {
+      status = "driving";
+    }
+    return { ...m, status };
+  });
 }
 
 /** Router for account/auth, admin, owner, and radio endpoints, mounted at `/v1`. */
@@ -2219,9 +2281,15 @@ export function createApiRouter(): Router {
     }
   });
 
-  router.get("/channels/roster", requireAgencyMember, (req, res) => {
-    const channel = typeof req.query.channel === "string" ? req.query.channel : "";
-    res.json({ members: listChannelRoster(req.authUser!.agencyId!, channel) });
+  router.get("/channels/roster", requireAgencyMember, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const channel = typeof req.query.channel === "string" ? req.query.channel : "";
+      const members = listChannelRoster(agencyId, channel);
+      res.json({ members: await annotateRosterStatus(agencyId, channel, members) });
+    } catch (error) {
+      fail(res, error);
+    }
   });
 
   router.get("/alerts", requireAgencyMember, async (req, res) => {
