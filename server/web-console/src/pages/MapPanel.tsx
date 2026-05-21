@@ -13,6 +13,8 @@ const ESRI_ATTRIBUTION = "Imagery &copy; Esri";
 const POLL_MS = 5000;
 /** A radio that has not reported within this window is shown faded. */
 const STALE_MS = 5 * 60_000;
+/** No fix/movement for this long marks a radio "inactive" (hideable via the toolbar). */
+const INACTIVE_MS = 4 * 60 * 60_000;
 /** Zoom level the map flies to when a radio goes into emergency. */
 const EMERGENCY_ZOOM = 16;
 /** Default radius (metres) for a freshly dropped circle geofence. */
@@ -68,6 +70,12 @@ function ageText(iso: string): string {
 function isStale(iso: string): boolean {
   const ms = Date.now() - new Date(iso).getTime();
   return Number.isFinite(ms) && ms > STALE_MS;
+}
+
+/** True when the latest fix is old enough to treat the radio as inactive. */
+function isInactive(iso: string): boolean {
+  const ms = Date.now() - new Date(iso).getTime();
+  return Number.isFinite(ms) && ms > INACTIVE_MS;
 }
 
 /** A unit that reports as an in-car radio gets the cruiser glyph; everything else, a handheld. */
@@ -156,6 +164,7 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [baseLayer, setBaseLayer] = useState<BaseLayer>("street");
+  const [hideInactive, setHideInactive] = useState(false);
   const [unitOptions, setUnitOptions] = useState<UnitOption[]>([]);
   // Radio accounts for the GPS-log picker (includes offline radios, unlike live positions).
   const [accountUnits, setAccountUnits] = useState<UnitOption[]>([]);
@@ -426,8 +435,14 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
         let emergencyCount = 0;
         let flewToEmergency = false;
         for (const p of locs.positions) {
-          seen.add(p.unit_id);
           const inEmergency = emergencyUnits.has(p.unit_id.toUpperCase());
+          // Hide radios idle for the inactivity window when the filter is on —
+          // but never hide one that's in emergency. Skipping leaves the unit out
+          // of `seen`, so any existing marker is pruned by the cleanup pass below.
+          if (hideInactive && !inEmergency && isInactive(p.updated_at)) {
+            continue;
+          }
+          seen.add(p.unit_id);
           const state: MarkerState = inEmergency
             ? "emergency"
             : isStale(p.updated_at)
@@ -497,7 +512,7 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
             emergencyZoomedRef.current.delete(unit);
           }
         }
-        setStats({ total: locs.positions.length, emergency: emergencyCount });
+        setStats({ total: seen.size, emergency: emergencyCount });
         setUnitOptions(
           locs.positions
             .map((p) => ({ unitId: p.unit_id, label: p.display_name || aliasRef.current(p.unit_id) }))
@@ -523,7 +538,7 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [track]);
+  }, [track, hideInactive]);
 
   // --- geofence actions --------------------------------------------------
   function startDrawing(shape: DrawShape) {
@@ -706,6 +721,13 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
             onClick={() => setGpsPanelOpen((v) => !v)}
           >
             GPS log
+          </button>
+          <button
+            className={hideInactive ? "btn sm active" : "btn sm"}
+            onClick={() => setHideInactive((v) => !v)}
+            title="Hide radios with no fix or movement for 4 hours"
+          >
+            {hideInactive ? "Show inactive" : "Hide inactive"}
           </button>
           {variant === "embedded" && onPopOut && (
             <button className="btn sm" onClick={onPopOut}>
