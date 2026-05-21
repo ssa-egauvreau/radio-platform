@@ -40,6 +40,19 @@ Look at the JSON:
 | **Transcription disabled** | Set `TRANSCRIPTION=on` on Railway (or remove `TRANSCRIPTION=off`) |
 | Transcript text OK, no AI voice | AI dispatch — see below |
 
+## AI Log shows only 1–2 lines but dispatch shows many transmissions
+
+Those are **two different logs**:
+
+| Page | What it lists |
+|------|----------------|
+| **Dispatch transmission log** | Every recorded key-up (always) |
+| **AI dispatch activity** | Only traffic where the AI engine ran or **skipped** (with a reason) |
+
+After the latest server update, skipped rows appear as **“Skipped — AI OFF on channel”**, **“Skipped — no speech”**, or **“Skipped — duplicate/simulcast”**. Turn **AI DISPATCH ON** on the channel you are testing if most rows say channel OFF.
+
+---
+
 ## AI dispatch checklist (Railway Variables)
 
 | Variable | Required value |

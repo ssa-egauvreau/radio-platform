@@ -107,9 +107,8 @@ async function transcribeOne(id: number): Promise<void> {
     const result = await run(samples, { chunk_length_s: 30, stride_length_s: 5 });
     const text = (result?.text ?? "").trim();
     await setTranscript(id, "done", text);
-    if (text) {
-      enqueueAiDispatchForTransmission(id);
-    }
+    // Queue AI even when STT is empty so the activity log can record "no speech" skips.
+    enqueueAiDispatchForTransmission(id);
   } catch (error) {
     console.warn(`Transcription failed for transmission ${id}`, error);
     await setTranscript(id, "failed", null).catch(() => undefined);

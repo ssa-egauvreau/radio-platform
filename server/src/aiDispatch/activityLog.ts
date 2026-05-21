@@ -2,6 +2,14 @@ import { requirePool } from "../db.js";
 import type { AiDispatchParseResult } from "./parse.js";
 import type { PlateLookupResult } from "./plateLookup.js";
 
+export type AiDispatchOutcome =
+  | "processed"
+  | "skipped_channel_off"
+  | "skipped_no_speech"
+  | "skipped_duplicate"
+  | "skipped_dispatch_unit"
+  | "followup_info";
+
 export interface AiDispatchLogRow {
   id: number;
   agency_id: number;
@@ -16,6 +24,7 @@ export interface AiDispatchLogRow {
   plate_lookup: PlateLookupResult | null;
   ten8_actions: unknown;
   error: string | null;
+  outcome: string | null;
   duration_ms: number | null;
   created_at: string;
 }
@@ -30,14 +39,15 @@ export async function insertAiDispatchLog(entry: {
   plateLookup: PlateLookupResult | null;
   ten8Actions: unknown;
   error: string | null;
+  outcome?: AiDispatchOutcome | null;
   durationMs: number | null;
 }): Promise<number> {
   const res = await requirePool().query<{ id: number }>(
     `INSERT INTO ai_dispatch_log (
        agency_id, transmission_id, channel_name, unit_id, transcript,
        intent, summary, dispatcher_response, trigger_emergency_tone,
-       plate_lookup, ten8_actions, error, duration_ms
-     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       plate_lookup, ten8_actions, error, outcome, duration_ms
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
      RETURNING id;`,
     [
       entry.agencyId,
@@ -52,6 +62,7 @@ export async function insertAiDispatchLog(entry: {
       entry.plateLookup ? JSON.stringify(entry.plateLookup) : null,
       entry.ten8Actions ? JSON.stringify(entry.ten8Actions) : null,
       entry.error,
+      entry.outcome ?? "processed",
       entry.durationMs,
     ],
   );
@@ -63,7 +74,7 @@ export async function listAiDispatchLog(agencyId: number, limit: number): Promis
   const res = await requirePool().query<AiDispatchLogRow>(
     `SELECT id, agency_id, transmission_id, channel_name, unit_id, transcript,
             intent, summary, dispatcher_response, trigger_emergency_tone,
-            plate_lookup, ten8_actions, error, duration_ms, created_at
+            plate_lookup, ten8_actions, error, outcome, duration_ms, created_at
        FROM ai_dispatch_log
       WHERE agency_id = $1
       ORDER BY created_at DESC

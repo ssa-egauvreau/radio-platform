@@ -116,6 +116,7 @@ export interface AiDispatchActivityEntry {
     reason?: string;
   } | null;
   error: string | null;
+  outcome: string | null;
   duration_ms: number | null;
   created_at: string;
 }

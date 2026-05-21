@@ -6,7 +6,7 @@ import {
   getChannelAiDispatchRow,
   getTransmissionDispatchContext,
 } from "../store.js";
-import { insertAiDispatchLog } from "./activityLog.js";
+import { insertAiDispatchLog, type AiDispatchOutcome } from "./activityLog.js";
 import { adaptDispatcherResponseForChannel, detectEmergencyCodeFromTranscript } from "./emergencyCodes.js";
 import { handlePlateFromParse } from "./plateHandler.js";
 import { parseDispatcherTransmission } from "./parse.js";
@@ -93,6 +93,34 @@ function defaultTen33Callout(channelName: string): string {
   return `All units 10-33 on ${channelName}, all units 10-33 on ${channelName}.`;
 }
 
+async function persistAiDispatchLog(opts: {
+  agencyId: number;
+  transmissionId: number;
+  channelName: string;
+  unitId: string;
+  transcript: string;
+  parsed: AiDispatchParseResult | null;
+  plateLookup: PlateLookupResult | null;
+  ten8Actions: Record<string, unknown> | null;
+  error: string | null;
+  outcome: AiDispatchOutcome;
+  durationMs: number;
+}): Promise<void> {
+  await insertAiDispatchLog({
+    agencyId: opts.agencyId,
+    transmissionId: opts.transmissionId,
+    channelName: opts.channelName,
+    unitId: opts.unitId,
+    transcript: opts.transcript,
+    parsed: opts.parsed,
+    plateLookup: opts.plateLookup,
+    ten8Actions: opts.ten8Actions,
+    error: opts.error,
+    outcome: opts.outcome,
+    durationMs: opts.durationMs,
+  }).catch((e) => console.warn("[ai-dispatch] log insert failed", e));
+}
+
 async function processTransmission(transmissionId: number): Promise<void> {
   const t0 = Date.now();
   let parsed: AiDispatchParseResult | null = null;
@@ -100,6 +128,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
   let ten8Actions: Record<string, unknown> | null = null;
   let error: string | null = null;
   let transcript = "";
+  let outcome: AiDispatchOutcome = "processed";
   let tx: NonNullable<Awaited<ReturnType<typeof getTransmissionDispatchContext>>> | null = null;
   let unitId = "UNIT";
   let yieldsToUnits = true;
@@ -110,23 +139,37 @@ async function processTransmission(transmissionId: number): Promise<void> {
     if (!tx) {
       return;
     }
+    unitId = (tx.unit_id ?? "UNIT").trim().toUpperCase() || "UNIT";
+
     if (isAiDispatchUnit(tx.unit_id)) {
+      outcome = "skipped_dispatch_unit";
+      error = "Transmission from AI dispatch unit (not re-processed).";
+      transcript = await loadTranscriptText(transmissionId) ?? "(AI dispatch unit)";
       return;
     }
 
     const channelRow = await getChannelAiDispatchRow(tx.agency_id, tx.channel_name);
     if (!channelRow?.enabled) {
+      outcome = "skipped_channel_off";
+      error = "AI dispatch is OFF for this channel.";
+      transcript =
+        (await loadTranscriptText(transmissionId)) ?? (await loadTranscriptRaw(transmissionId));
       return;
     }
     yieldsToUnits = channelRow.yields_to_units;
 
     const text = await loadTranscriptText(transmissionId);
     if (!text) {
+      outcome = "skipped_no_speech";
+      error = "No speech detected in recording (or transcript not ready).";
+      transcript = await loadTranscriptRaw(transmissionId);
       return;
     }
     transcript = text;
 
     if (shouldSkipDuplicateAiDispatch(tx.agency_id, transcript)) {
+      outcome = "skipped_duplicate";
+      error = "Duplicate/simulcast copy of a recent transmission (skipped).";
       console.log(
         `[ai-dispatch] skip duplicate transcript agency=${tx.agency_id} channel=${tx.channel_name}`,
       );
@@ -134,7 +177,6 @@ async function processTransmission(transmissionId: number): Promise<void> {
     }
 
     const platform = getAiDispatchPlatformConfig();
-    unitId = (tx.unit_id ?? "UNIT").trim().toUpperCase() || "UNIT";
 
     const emergencyRegex = detectEmergencyCodeFromTranscript(transcript);
     const systemPrompt = await resolveAiDispatchSystemPrompt(tx.agency_id);
@@ -280,7 +322,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
     }
   } finally {
     if (tx && transcript) {
-      await insertAiDispatchLog({
+      await persistAiDispatchLog({
         agencyId: tx.agency_id,
         transmissionId,
         channelName: tx.channel_name,
@@ -290,8 +332,9 @@ async function processTransmission(transmissionId: number): Promise<void> {
         plateLookup,
         ten8Actions,
         error,
+        outcome,
         durationMs: Date.now() - t0,
-      }).catch((e) => console.warn("[ai-dispatch] log insert failed", e));
+      });
     }
   }
 }
@@ -318,6 +361,33 @@ async function runAsyncInfoLookup(
       tx.channel_name,
     );
     await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+    await persistAiDispatchLog({
+      agencyId: tx.agency_id,
+      transmissionId,
+      channelName: tx.channel_name,
+      unitId: parsed.unit ?? unitId,
+      transcript: `[Follow-up] ${parsed.info_request.type}: ${parsed.info_request.subject ?? ""}`.trim(),
+      parsed: {
+        actionable: true,
+        intent: "request_info",
+        unit: parsed.unit ?? unitId,
+        summary: `Async answer: ${reply.slice(0, 200)}`,
+        confidence: 1,
+        dispatcher_response: reply,
+        trigger_emergency_tone: false,
+        recommended_action: null,
+        plate_request: null,
+        code: null,
+        location_code: null,
+        location_name: null,
+        info_request: parsed.info_request,
+      },
+      plateLookup: null,
+      ten8Actions: null,
+      error: null,
+      outcome: "followup_info",
+      durationMs: 0,
+    });
     console.log(`[ai-dispatch] info_request async answer agency=${tx.agency_id} type=${parsed.info_request.type}`);
   } catch (err) {
     console.warn("[ai-dispatch] async info_request failed", err);
@@ -372,6 +442,33 @@ async function speakDispatcherReply(
   console.log(
     `[ai-dispatch] agency=${tx.agency_id} channel=${tx.channel_name} unit=${unitId} reply="${reply.slice(0, 80)}"`,
   );
+}
+
+async function loadTranscriptRaw(transmissionId: number): Promise<string> {
+  const { getPool } = await import("../db.js");
+  const pool = getPool();
+  if (!pool) {
+    return "(database unavailable)";
+  }
+  const res = await pool.query<{ transcript: string | null; transcript_status: string }>(
+    `SELECT transcript, transcript_status FROM transmissions WHERE id = $1;`,
+    [transmissionId],
+  );
+  const row = res.rows[0];
+  if (!row) {
+    return "(transmission not found)";
+  }
+  if (row.transcript_status === "pending") {
+    return "(transcribing…)";
+  }
+  if (row.transcript_status === "failed") {
+    return "(transcript unavailable)";
+  }
+  if (row.transcript_status === "disabled") {
+    return "(transcription disabled)";
+  }
+  const text = row.transcript?.trim() ?? "";
+  return text.length > 0 ? text : "(no speech detected)";
 }
 
 async function loadTranscriptText(transmissionId: number): Promise<string | null> {

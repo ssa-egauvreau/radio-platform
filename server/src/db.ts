@@ -416,6 +416,7 @@ export async function ensureSchema(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_ai_dispatch_log_agency_ts
       ON ai_dispatch_log (agency_id, created_at DESC);
   `);
+  await p.query(`ALTER TABLE ai_dispatch_log ADD COLUMN IF NOT EXISTS outcome TEXT;`);
 
   await p.query(`
     CREATE TABLE IF NOT EXISTS ten8_incidents (
