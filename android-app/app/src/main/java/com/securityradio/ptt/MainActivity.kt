@@ -26,6 +26,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.securityradio.ptt.device.HandsetVolumeKnob
 import com.securityradio.ptt.device.HardwareAction
 import com.securityradio.ptt.device.HardwareButtonEvent
 import com.securityradio.ptt.device.HardwareButtonRelay
@@ -46,17 +47,6 @@ class MainActivity : ComponentActivity() {
     private var radioViewModel: RadioViewModel? = null
     private lateinit var repository: HardwareMappingRepository
     private lateinit var appGraph: com.securityradio.ptt.di.RadioAppGraph
-    /**
-     * eventTime (ms) of the last volume-knob ACTION_DOWN / ACTION_UP we forwarded
-     * to super. The TM7+'s rotary volume knob fires several KEYCODE_VOLUME_UP / _DOWN
-     * events per single detent click; without debouncing the OS sees the burst as a
-     * "key held" gesture and fast-scrolls to the rail on one click. Separate
-     * timestamps for DOWN and UP so the matching release for a real press isn't
-     * accidentally dropped inside the DOWN window.
-     */
-    private var lastVolumeKnobDownAtMs: Long = 0L
-    private var lastVolumeKnobUpAtMs: Long = 0L
-
     private val micPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
@@ -407,19 +397,13 @@ class MainActivity : ComponentActivity() {
         val isVolumeCheck = repository.getMapping(HardwareAction.VOLUME_CHECK).contains(keyCode)
         val isToggleDayNight = repository.getMapping(HardwareAction.TOGGLE_DAY_NIGHT).contains(keyCode)
 
-        // TM7+ rotary volume-knob handling: the firmware fires multiple key events per single
-        // detent click, which the OS volume controller interprets as a held key and fast-scrolls
-        // to max/min on one click. Let the OS handle the volume adjustment (it knows the right
-        // stream, slider UI, and per-OEM quirks) but drop the burst tail so it only sees a single
-        // press per detent. The earlier attempt that called AudioManager.adjustSuggestedStreamVolume
-        // ourselves interacted badly with the Inrico firmware — which evidently watches that API
-        // for Zello-style apps and synthesizes channel-change broadcasts when it fires.
+        // TM7+ knob: firmware sends a burst per detent; OS treats that as a held key and jumps
+        // to min/max. Debounce here, then let super adjust volume once (do not use AudioManager
+        // on Inrico — it can trigger channel-change side effects).
         if (event != null && isSystemVolumeKey(keyCode)) {
-            val now = event.eventTime
-            if (now - lastVolumeKnobDownAtMs < VOLUME_KNOB_DEBOUNCE_MS) {
+            if (!HandsetVolumeKnob.acceptDown(event)) {
                 return true
             }
-            lastVolumeKnobDownAtMs = now
             if (isVolumeCheck) {
                 HardwareButtonRelay.sendEvent(HardwareButtonEvent.VolumeCheckTapped)
             }
@@ -447,17 +431,11 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent?): Boolean {
-        // Symmetric debounce for ACTION_UP on the volume knob: drop the burst tail so the OS
-        // sees one clean press/release pair per detent. Releasing the event to super lets the
-        // OS clear its "key is held" state — without that, a subsequent press could re-enter
-        // fast-scroll. (Tracked with a separate timestamp from the DOWN debounce so the matching
-        // UP for a real press is never dropped just because it's within the same window.)
+        // Symmetric UP debounce so the OS sees one clean down/up pair per detent.
         if (event != null && isSystemVolumeKey(keyCode)) {
-            val now = event.eventTime
-            if (now - lastVolumeKnobUpAtMs < VOLUME_KNOB_DEBOUNCE_MS) {
+            if (!HandsetVolumeKnob.acceptUp(event)) {
                 return true
             }
-            lastVolumeKnobUpAtMs = now
             return super.onKeyUp(keyCode, event)
         }
         when {
@@ -486,9 +464,4 @@ class MainActivity : ComponentActivity() {
     private fun isSystemVolumeKey(keyCode: Int): Boolean =
         keyCode == KeyEvent.KEYCODE_VOLUME_UP || keyCode == KeyEvent.KEYCODE_VOLUME_DOWN
 
-    private companion object {
-        // Wide enough to collapse the TM7+'s multi-event-per-detent burst into one
-        // adjustment, narrow enough that a fast user spin still registers each detent.
-        const val VOLUME_KNOB_DEBOUNCE_MS = 120L
-    }
 }
