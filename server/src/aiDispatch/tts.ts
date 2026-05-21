@@ -1,4 +1,5 @@
 import { getAgencyIntegrationValue } from "../store.js";
+import { recordElevenLabsCall } from "../integrations/health.js";
 import { prepareTextForTts } from "./speech/prepareTextForTts.js";
 import { getTtsPrecacheHit, scheduleAgencyTtsPrecache } from "./ttsPrecache.js";
 
@@ -86,8 +87,10 @@ export async function synthesizeElevenLabsMp3(
   if (!res.ok) {
     const err = await res.text().catch(() => "");
     console.warn(`[ai-dispatch] ElevenLabs ${res.status}: ${err.slice(0, 200)}`);
+    recordElevenLabsCall(agencyId, false, res.status, err);
     return null;
   }
+  recordElevenLabsCall(agencyId, true);
   const buf = Buffer.from(await res.arrayBuffer());
   return buf.length > 0 ? buf : null;
 }

@@ -1,4 +1,5 @@
 import { getAiDispatchPlatformConfig } from "./platformConfig.js";
+import { recordLlmCall } from "../integrations/health.js";
 
 export interface LlmCompletionResult {
   text: string;
@@ -44,8 +45,10 @@ async function completeAnthropic(opts: {
   if (!res.ok) {
     const err = await res.text().catch(() => "");
     console.warn(`[ai-dispatch] Anthropic ${res.status}: ${err.slice(0, 300)}`);
+    recordLlmCall("anthropic", false, res.status, err);
     return null;
   }
+  recordLlmCall("anthropic", true);
 
   const data = (await res.json()) as {
     content?: { type: string; text?: string }[];
@@ -99,8 +102,10 @@ async function completeOpenAi(opts: {
   if (!res.ok) {
     const body = await res.text().catch(() => "");
     console.warn(`[ai-dispatch] OpenAI ${res.status}: ${body.slice(0, 200)}`);
+    recordLlmCall("openai", false, res.status, body);
     return null;
   }
+  recordLlmCall("openai", true);
   const data = (await res.json()) as {
     choices?: { message?: { content?: string } }[];
   };

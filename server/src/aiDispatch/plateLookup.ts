@@ -1,4 +1,5 @@
 import { getAgencyIntegrationValue } from "../store.js";
+import { recordLookupResult } from "../integrations/health.js";
 import {
   callSignForReadback,
   plateToSpokenPhonetic,
@@ -128,6 +129,7 @@ export async function lookupVin(agencyId: number, vin: string): Promise<PlateLoo
     });
     const parsed = (await r.json().catch(() => null)) as Record<string, unknown> | null;
     if (r.ok && parsed) {
+      recordLookupResult(agencyId, "vin_lookup", { ok: true });
       return {
         ok: true,
         vin: clean,
@@ -138,14 +140,24 @@ export async function lookupVin(agencyId: number, vin: string): Promise<PlateLoo
         ms: Date.now() - started,
       };
     }
-    return {
+    const reason =
+      r.status === 404
+        ? "no_record"
+        : r.status === 401 || r.status === 403
+          ? "auth_error"
+          : r.status === 402
+            ? "insufficient_credit"
+            : "api_error";
+    const result: PlateLookupResult = {
       ok: false,
       vin: clean,
-      reason: r.status === 404 ? "no_record" : "api_error",
+      reason,
       message: String(parsed?.error ?? parsed?.message ?? `HTTP ${r.status}`),
       provider: "autodev",
       ms: Date.now() - started,
     };
+    recordLookupResult(agencyId, "vin_lookup", result);
+    return result;
   } catch (e) {
     return { ok: false, vin: clean, reason: "network_error", message: e instanceof Error ? e.message : String(e), provider: "autodev", ms: Date.now() - started };
   }
@@ -165,7 +177,9 @@ export async function runPlateLookup(
     return { ok: false, reason: "not_configured", message: "Set license plate lookup API key in Admin → Integrations" };
   }
   const st = (state || defaultState).toUpperCase();
-  return lookupPlateToVin(p, st, apiKey);
+  const result = await lookupPlateToVin(p, st, apiKey);
+  recordLookupResult(agencyId, "plate_lookup", result);
+  return result;
 }
 
 export function buildPlateReadback(unitId: string, lookup: PlateLookupResult): string {

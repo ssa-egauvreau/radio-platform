@@ -256,6 +256,20 @@ export interface IntegrationsPayload {
   groups: { id: string; label: string; items: IntegrationItem[] }[];
 }
 
+export interface ProviderHealth {
+  provider: string;
+  label: string;
+  status: "ok" | "low" | "out" | "error" | "unknown";
+  detail: string;
+  remaining?: number | null;
+  limit?: number | null;
+}
+
+export interface IntegrationHealthPayload {
+  providers: ProviderHealth[];
+  checkedAt: string;
+}
+
 export interface Bridge {
   id: number;
   name: string;
@@ -615,6 +629,8 @@ export const api = {
 
   // --- agency integrations (API keys, webhooks) ----------------------------
   getIntegrations: () => request<IntegrationsPayload>("GET", "/v1/admin/integrations"),
+  getIntegrationHealth: () =>
+    request<IntegrationHealthPayload>("GET", "/v1/admin/integrations/health"),
   setIntegration: (key: string, value: string) =>
     request<IntegrationsPayload>("PATCH", `/v1/admin/integrations/${encodeURIComponent(key)}`, {
       value,

@@ -113,7 +113,11 @@ import {
 } from "./store.js";
 import { getPool } from "./db.js";
 import { getCachedAuth, invalidateCachedAuth, setCachedAuth } from "./sessionCache.js";
-import { handleListIntegrations, handleSetIntegration } from "./integrations/adminApi.js";
+import {
+  handleIntegrationHealth,
+  handleListIntegrations,
+  handleSetIntegration,
+} from "./integrations/adminApi.js";
 import { getAiDispatchLoopbackPort } from "./aiDispatch/engine.js";
 import {
   agencyPromptSource,
@@ -1367,6 +1371,14 @@ export function createApiRouter(): Router {
   router.get("/admin/integrations", requireAdmin, async (req, res) => {
     try {
       await handleListIntegrations(req, res);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get("/admin/integrations/health", requireAdmin, async (req, res) => {
+    try {
+      await handleIntegrationHealth(req, res);
     } catch (error) {
       fail(res, error);
     }

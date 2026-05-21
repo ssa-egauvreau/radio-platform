@@ -551,6 +551,35 @@ code.mono {
   border: 1px solid var(--info-border);
   color: var(--info-text);
 }
+.banner.warn {
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--amber) 50%, transparent);
+  color: var(--amber);
+}
+.health-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.health-row {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+.health-dot {
+  flex: 0 0 auto;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-top: 4px;
+}
+.health-dot.ok { background: var(--green); }
+.health-dot.low { background: var(--amber); }
+.health-dot.out,
+.health-dot.error { background: var(--danger-text); }
+.health-dot.unknown { background: var(--text-muted); }
+.health-label { font-weight: 600; }
+.health-detail { color: var(--text-muted); font-size: 12px; }
 .empty {
   color: var(--text-muted);
   padding: 26px;

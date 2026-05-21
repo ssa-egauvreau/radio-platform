@@ -5,6 +5,7 @@ import {
   api,
   type Alert,
   type AiDispatchActivityEntry,
+  type ProviderHealth,
   type RadioPosition,
   type Transmission,
 } from "../api";
@@ -52,6 +53,7 @@ export function DashboardPage() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
   const [transmissions, setTransmissions] = useState<Transmission[]>([]);
   const [aiEntries, setAiEntries] = useState<AiDispatchActivityEntry[]>([]);
+  const [providerHealth, setProviderHealth] = useState<ProviderHealth[]>([]);
   const [channelCount, setChannelCount] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -65,11 +67,12 @@ export function DashboardPage() {
   useEffect(() => {
     let cancelled = false;
     async function poll() {
-      const [loc, alr, tx, ai] = await Promise.allSettled([
+      const [loc, alr, tx, ai, health] = await Promise.allSettled([
         api.locations(),
         api.alerts(),
         api.transmissions({ limit: 40, sort: "newest" }),
         api.getAiDispatchActivity(30),
+        api.getIntegrationHealth(),
       ]);
       if (cancelled) {
         return;
@@ -78,6 +81,8 @@ export function DashboardPage() {
       if (alr.status === "fulfilled") setAlerts(alr.value.alerts);
       if (tx.status === "fulfilled") setTransmissions(tx.value.transmissions);
       if (ai.status === "fulfilled") setAiEntries(ai.value.entries);
+      // Health is admin-only; non-admins get a 403, so just leave the panel empty.
+      if (health.status === "fulfilled") setProviderHealth(health.value.providers);
       setError(loc.status === "rejected" ? "Could not load live data." : null);
     }
     void poll();
@@ -95,6 +100,10 @@ export function DashboardPage() {
   const txLastHour = transmissions.filter(
     (t) => now - new Date(t.started_at).getTime() < 3_600_000,
   );
+  const creditIssues = providerHealth.filter(
+    (p) => p.status === "out" || p.status === "error" || p.status === "low",
+  );
+  const hasCriticalCredit = creditIssues.some((p) => p.status === "out" || p.status === "error");
 
   const feed = useMemo<FeedItem[]>(() => {
     const items: FeedItem[] = [];
@@ -147,6 +156,13 @@ export function DashboardPage() {
         </div>
 
         {error && <div className="banner error">{error}</div>}
+
+        {creditIssues.length > 0 && (
+          <div className={`banner ${hasCriticalCredit ? "error" : "warn"}`}>
+            <strong>{hasCriticalCredit ? "Service credits need attention" : "Low service credits"}:</strong>{" "}
+            {creditIssues.map((p) => `${p.label} — ${p.detail}`).join(" · ")}
+          </div>
+        )}
 
         <div className="dash-cards">
           <div className={`dash-card incidents${incidents.length > 0 ? " alarm" : ""}`}>
@@ -211,6 +227,26 @@ export function DashboardPage() {
               </div>
             )}
           </section>
+
+          {providerHealth.length > 0 && (
+            <section className="dash-panel">
+              <div className="dash-panel-head">
+                <h2>Service credits</h2>
+                {creditIssues.length > 0 && <span className="count">{creditIssues.length}</span>}
+              </div>
+              <div className="health-list">
+                {providerHealth.map((p) => (
+                  <div className="health-row" key={p.provider}>
+                    <span className={`health-dot ${p.status}`} />
+                    <div>
+                      <div className="health-label">{p.label}</div>
+                      <div className="health-detail">{p.detail}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           <section className="dash-panel">
             <div className="dash-panel-head">

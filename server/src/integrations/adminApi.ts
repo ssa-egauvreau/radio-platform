@@ -14,6 +14,7 @@ import {
   type IntegrationDefinition,
 } from "./catalog.js";
 import { maskSecret } from "./mask.js";
+import { getIntegrationHealth } from "./health.js";
 
 const GROUP_LABELS: Record<IntegrationDefinition["group"], string> = {
   ai_dispatch: "AI dispatcher (agency)",
@@ -156,6 +157,11 @@ export async function handleSetIntegration(req: Request, res: Response): Promise
 
   const rows = await listAgencyIntegrationRows(agencyId);
   res.json(await buildIntegrationPayload(agencyId, rows));
+}
+
+export async function handleIntegrationHealth(req: Request, res: Response): Promise<void> {
+  const agencyId = req.authUser!.agencyId!;
+  res.json(await getIntegrationHealth(agencyId));
 }
 
 /** Internal: read a configured agency secret (server-side only). */
