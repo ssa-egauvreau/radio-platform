@@ -90,8 +90,13 @@ export function AlertsPanel({ variant = "embedded", onPopOut }: SectionProps) {
     try {
       await api.sendAlert({ kind, channelName: channelName || null, message: message.trim() || null });
       setMessage("");
+      // Emergencies get their own loud tone via refresh(); a page just needs the cue.
+      if (kind === "page") {
+        sounds.success();
+      }
       await refresh();
     } catch (err) {
+      sounds.error();
       setError(describeError(err));
     } finally {
       setSending(false);

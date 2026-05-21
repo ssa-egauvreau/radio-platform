@@ -3,6 +3,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { api, describeError, deviceTypeLabel, type Geofence, type PositionSample } from "../api";
 import { useAuth } from "../auth";
+import { sounds } from "../sounds";
 import { useUnitAliasResolver } from "../unitAliases";
 
 const OSM_TILE_URL = "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png";
@@ -603,8 +604,10 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
       }
       setDraft(null);
       setDraftName("");
+      sounds.success();
       refreshGeofences();
     } catch (err) {
+      sounds.error();
       setGeoError(describeError(err));
     } finally {
       setGeoBusy(false);

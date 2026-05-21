@@ -81,6 +81,71 @@ function play(key: SoundKey): void {
   void clip.play().catch(() => undefined);
 }
 
+// --- synthesized UI cues -------------------------------------------------
+// Short success/error blips for action feedback (send page, save, etc.). These
+// are app polish, not the agency-customizable radio tones, so they're generated
+// with the Web Audio API rather than shipped as assets.
+let cueCtx: AudioContext | null = null;
+
+function cueContext(): AudioContext | null {
+  try {
+    if (!cueCtx) {
+      cueCtx = new AudioContext();
+    }
+    if (cueCtx.state === "suspended") {
+      void cueCtx.resume();
+    }
+    return cueCtx;
+  } catch {
+    return null;
+  }
+}
+
+/** Schedules one enveloped tone on the shared cue context. */
+function cueTone(
+  ctx: AudioContext,
+  freq: number,
+  startAt: number,
+  durSec: number,
+  peak: number,
+  type: OscillatorType = "sine",
+): void {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = type;
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(0.0001, startAt);
+  gain.gain.linearRampToValueAtTime(peak, startAt + 0.008);
+  gain.gain.exponentialRampToValueAtTime(0.0001, startAt + durSec);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(startAt);
+  osc.stop(startAt + durSec + 0.02);
+}
+
+/** Rising two-note chime — confirms a completed action. */
+function successCue(): void {
+  const ctx = cueContext();
+  if (!ctx) {
+    return;
+  }
+  const t = ctx.currentTime;
+  cueTone(ctx, 660, t, 0.12, 0.16);
+  cueTone(ctx, 988, t + 0.085, 0.16, 0.16);
+}
+
+/** Low descending blip — signals a failed action. */
+function errorCue(): void {
+  const ctx = cueContext();
+  if (!ctx) {
+    return;
+  }
+  const t = ctx.currentTime;
+  cueTone(ctx, 320, t, 0.16, 0.14, "square");
+  cueTone(ctx, 232, t + 0.11, 0.2, 0.12, "square");
+}
+
+
 function authHeaders(): Record<string, string> {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -178,6 +243,10 @@ export const sounds = {
   channelSwitch: () => play("channelSwitch"),
   /** Emergency alert tone. */
   emergency: () => play("emergency"),
+  /** Rising chime confirming a completed action (send page, save, etc.). */
+  success: () => successCue(),
+  /** Low blip signalling a failed action. */
+  error: () => errorCue(),
   /** Plays ~1.5s of the busy clip for no-connection / lost-link (not looped). */
   busyAlert: () => {
     if (busyAlertStopTimer !== null) {

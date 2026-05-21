@@ -116,9 +116,16 @@ a {
   border: 1px solid var(--border);
   border-radius: 4px;
   padding: 7px 12px;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    transform 0.08s ease;
 }
 .btn:hover {
   border-color: var(--accent-2);
+}
+.btn:active {
+  transform: translateY(1px);
 }
 .btn.primary {
   background: var(--accent);
@@ -3357,5 +3364,69 @@ code.mono {
 @media (max-width: 900px) {
   .dash-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+/* --- micro-interaction polish (sounds + animations bundle) --- */
+.channel-card {
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.ch-power,
+.ch-quick-ptt,
+.ch-setprimary,
+.marker-button,
+.txmode-btn,
+.toneout-btn,
+.roster-status,
+.state-chip,
+.dash-card {
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease,
+    transform 0.1s ease;
+}
+.ch-power:active,
+.ch-quick-ptt:not(:disabled):active,
+.marker-button:not(:disabled):active,
+.toneout-btn:not(:disabled):active,
+.ch-setprimary:active {
+  transform: translateY(1px);
+}
+.ch-card-body {
+  animation: card-reveal 0.18s ease;
+}
+@keyframes card-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.dash-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-2);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ch-card-body,
+  .feed-item,
+  .incident-card,
+  .dash-card.incidents.alarm {
+    animation: none;
+  }
+  .btn:active,
+  .dash-card:hover,
+  .ch-power:active,
+  .ch-quick-ptt:active,
+  .marker-button:active,
+  .toneout-btn:active,
+  .ch-setprimary:active {
+    transform: none;
   }
 }
