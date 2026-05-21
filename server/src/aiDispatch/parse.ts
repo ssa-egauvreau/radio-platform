@@ -195,6 +195,9 @@ export async function parseDispatcherTransmission(opts: {
     maxTokens: 2500,
   });
   if (!result?.text) {
+    console.warn(
+      `[ai-dispatch] LLM returned no text (provider=${result?.provider ?? "none"}). Check AI_DISPATCH_LLM_API_KEY / model.`,
+    );
     return null;
   }
   if (result.cache_read_tokens != null && result.cache_read_tokens > 0) {
@@ -202,5 +205,15 @@ export async function parseDispatcherTransmission(opts: {
       `[ai-dispatch] Anthropic cache read=${result.cache_read_tokens} write=${result.cache_write_tokens ?? 0}`,
     );
   }
-  return normalizeAiDispatchParse(tryParseJson(result.text));
+  const parsed = normalizeAiDispatchParse(tryParseJson(result.text));
+  if (!parsed) {
+    console.warn(
+      `[ai-dispatch] parse FAILED: model output did not match the expected JSON schema. raw="${result.text.slice(0, 400).replace(/\s+/g, " ")}"`,
+    );
+  } else {
+    console.log(
+      `[ai-dispatch] parsed intent=${parsed.intent} unit=${parsed.unit ?? "?"} has_response=${parsed.dispatcher_response ? "yes" : "no"} info_request=${parsed.info_request?.type ?? "none"}`,
+    );
+  }
+  return parsed;
 }
