@@ -9,7 +9,7 @@ function normalizeUnitId(u: string): string {
   return u.trim().toLowerCase().replace(/^27-/, "");
 }
 
-function incidentPayloadHasUnit(inc: { payload: unknown }, targetUnit: string): boolean {
+export function incidentPayloadHasUnit(inc: { payload: unknown }, targetUnit: string): boolean {
   if (!targetUnit || !inc.payload || typeof inc.payload !== "object") {
     return false;
   }
