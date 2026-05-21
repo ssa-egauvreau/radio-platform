@@ -211,6 +211,9 @@ export async function buildInfoRequestResponse(
     }
 
     default:
-      return `${csPart}negative, I don't have that information.`;
+      // "unknown" / unrecognized type: we have no specific lookup to run. Return null so the
+      // caller keeps the model's own dispatcher_response instead of speaking a canned "negative"
+      // line — otherwise normal traffic the model mis-tags as request_info gets no real reply.
+      return null;
   }
 }
