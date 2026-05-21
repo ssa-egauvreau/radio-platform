@@ -20,6 +20,7 @@ import { buildDeterministicDispatchAck } from "./dispatchAck.js";
 import {
   buildInfoRequestAck,
   buildInfoRequestResponse,
+  incidentPayloadHasUnit,
   infoRequestNeedsAsync,
 } from "./infoRequest.js";
 import { synthesizeElevenLabsMp3 } from "./tts.js";
@@ -140,6 +141,40 @@ function fallbackReplyForSilentParse(
   }
   const csShort = /^27-0[0-3]0$/.test(u) ? u : u.replace(/^27-/, "");
   return `${csShort}, I copy.`;
+}
+
+/**
+ * Match a unit's transmission to the specific open 10-8 call it refers to: first by the unit
+ * being assigned to the call, then by location. Returns null when there's no clear match — we
+ * never attach an AI comment to an arbitrary unrelated call.
+ */
+function findMatchingOpenIncident(
+  active: Awaited<ReturnType<typeof listTen8ActiveIncidents>>,
+  parsed: AiDispatchParseResult,
+  fallbackUnit: string,
+): Awaited<ReturnType<typeof listTen8ActiveIncidents>>[number] | null {
+  const unit = (parsed.unit ?? fallbackUnit ?? "").trim();
+  if (unit) {
+    const byUnit = active.find((i) => incidentPayloadHasUnit(i, unit));
+    if (byUnit) {
+      return byUnit;
+    }
+  }
+  const locName = parsed.location_name?.trim().toLowerCase();
+  if (locName) {
+    const byName = active.find((i) => (i.location ?? "").toLowerCase().includes(locName));
+    if (byName) {
+      return byName;
+    }
+  }
+  const locCode = parsed.location_code?.trim();
+  if (locCode) {
+    const byCode = active.find((i) => (i.location ?? "").includes(locCode));
+    if (byCode) {
+      return byCode;
+    }
+  }
+  return null;
 }
 
 async function persistAiDispatchLog(opts: {
@@ -287,13 +322,24 @@ async function processTransmission(transmissionId: number): Promise<void> {
 
       if (await ten8Configured(tx.agency_id)) {
         const cadNote = `[AI] ${parsed.summary}`.slice(0, 500);
-        const active = await listTen8ActiveIncidents(tx.agency_id);
-        if (active.length > 0 && parsed.actionable) {
-          const target = active[0]!.call_id;
-          const res = await ten8AddComment(tx.agency_id, target, cadNote);
-          ten8Actions.ten8_comment = { call_id: target, ...res };
-        } else {
-          ten8Actions.ten8_comment = { skipped: "no_active_incident" };
+        if (parsed.intent === "dispatch") {
+          // Self-dispatch is a NEW call — it should create an incident, not comment on an
+          // existing one. Creation is pending the New Incident API request format; never attach
+          // this to an unrelated open call.
+          ten8Actions.ten8_comment = { skipped: "self_dispatch_new_call" };
+        } else if (parsed.actionable) {
+          const active = await listTen8ActiveIncidents(tx.agency_id);
+          if (active.length === 0) {
+            ten8Actions.ten8_comment = { skipped: "no_open_calls" };
+          } else {
+            const match = findMatchingOpenIncident(active, parsed, unitId);
+            if (match) {
+              const res = await ten8AddComment(tx.agency_id, match.call_id, cadNote);
+              ten8Actions.ten8_comment = { call_id: match.call_id, ...res };
+            } else {
+              ten8Actions.ten8_comment = { skipped: "no_matching_open_call" };
+            }
+          }
         }
       }
 
