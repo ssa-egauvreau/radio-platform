@@ -624,15 +624,20 @@ code.mono {
 
 /* --- console: channel accordion --- */
 .channel-accordion {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 8px;
+  align-items: start;
+}
+.channel-accordion > .zone-header {
+  grid-column: 1 / -1;
 }
 .channel-card {
   border: 1px solid var(--border);
   border-left: 3px solid transparent;
   border-radius: 6px;
   background: var(--bg-raised);
+  min-width: 0;
 }
 .channel-card.expanded {
   background: var(--bg-raised);
@@ -754,7 +759,62 @@ code.mono {
   color: var(--text);
 }
 .ch-card-body {
-  padding: 0 12px 14px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  padding: 0 10px 10px;
+}
+/* Full-width rows inside the compact expanded panel */
+.ch-card-body > .live-meta,
+.ch-card-body > .cp-ptt-assign,
+.ch-card-body > .volume-row,
+.ch-card-body > .banner,
+.ch-card-body > .live-tx,
+.ch-card-body > .txmode-btn,
+.ch-card-body > .marker-button,
+.ch-card-body > .marker-note,
+.ch-card-body > .toneout,
+.ch-card-body > .live-actions,
+.ch-card-body > .roster {
+  grid-column: 1 / -1;
+}
+.ch-card-body > .tx-button {
+  grid-column: 1;
+  margin-bottom: 0;
+}
+.ch-card-body > .waveform-strip {
+  grid-column: 2;
+  margin-top: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+}
+.channel-card.expanded .tx-button {
+  padding: 10px 8px;
+}
+.channel-card.expanded .tx-main {
+  font-size: 16px;
+  gap: 6px;
+}
+.channel-card.expanded .tx-sub {
+  font-size: 10px;
+}
+.channel-card.expanded .marker-button {
+  padding: 8px 10px;
+  font-size: 11px;
+}
+.channel-card.expanded .marker-note {
+  margin-top: 0;
+  font-size: 11px;
+}
+.channel-card.expanded .roster {
+  max-height: 140px;
+  overflow-y: auto;
+}
+.channel-card.expanded .live-tx-transcript {
+  font-size: 13px;
+  max-height: 4.5em;
+  overflow-y: auto;
 }
 .ch-mini-wave {
   flex: 0 0 auto;
@@ -2180,6 +2240,9 @@ code.mono {
   }
   .console-col {
     overflow: visible;
+  }
+  .channel-accordion {
+    grid-template-columns: 1fr;
   }
   .admin-body {
     flex-direction: column;
