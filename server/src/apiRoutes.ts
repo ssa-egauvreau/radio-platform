@@ -2134,6 +2134,22 @@ export function createApiRouter(): Router {
     }
   });
 
+  // Selectable radio accounts (those with a unit id) for the GPS-log search picker.
+  router.get("/agency/units", requireAgencyOperator, async (req, res) => {
+    try {
+      const users = await listUsers(req.authUser!.agencyId!);
+      const units = users
+        .filter((u) => u.unit_id && !u.disabled)
+        .map((u) => ({ unit_id: u.unit_id as string, display_name: u.display_name }))
+        .sort((a, b) =>
+          (a.display_name || a.unit_id).localeCompare(b.display_name || b.unit_id),
+        );
+      res.json({ units });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
   // Recorded GPS track for one radio — drives the map's "search GPS logs" tool.
   router.get("/locations/history", requireAgencyMember, async (req, res) => {
     try {

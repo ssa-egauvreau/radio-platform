@@ -157,6 +157,8 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
   const [expanded, setExpanded] = useState(false);
   const [baseLayer, setBaseLayer] = useState<BaseLayer>("street");
   const [unitOptions, setUnitOptions] = useState<UnitOption[]>([]);
+  // Radio accounts for the GPS-log picker (includes offline radios, unlike live positions).
+  const [accountUnits, setAccountUnits] = useState<UnitOption[]>([]);
 
   // Geofences
   const [geofences, setGeofences] = useState<Geofence[]>([]);
@@ -194,6 +196,22 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
     api
       .geofences()
       .then((res) => setGeofences(res.geofences))
+      .catch(() => undefined);
+  }, []);
+
+  // Radio accounts for the GPS-log picker — fetched once so offline radios are
+  // selectable too (live positions only cover units that recently checked in).
+  useEffect(() => {
+    api
+      .agencyUnits()
+      .then((res) =>
+        setAccountUnits(
+          res.units.map((u) => ({
+            unitId: u.unit_id,
+            label: u.display_name || aliasRef.current(u.unit_id),
+          })),
+        ),
+      )
       .catch(() => undefined);
   }, []);
 
@@ -639,6 +657,21 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
         ? "map-panel expanded"
         : "map-panel";
 
+  // GPS-log picker options: radio accounts first, plus any live unit (e.g. a
+  // legacy handset with no account) not already covered, deduped by unit id.
+  const radioChoices = (() => {
+    const byUnit = new Map<string, UnitOption>();
+    for (const u of accountUnits) {
+      byUnit.set(u.unitId.toUpperCase(), u);
+    }
+    for (const u of unitOptions) {
+      if (!byUnit.has(u.unitId.toUpperCase())) {
+        byUnit.set(u.unitId.toUpperCase(), u);
+      }
+    }
+    return [...byUnit.values()].sort((a, b) => a.label.localeCompare(b.label));
+  })();
+
   return (
     <div className={rootClass}>
       <div className="map-head">
@@ -837,20 +870,14 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
           </div>
           <label className="gps-field">
             Radio
-            <input
-              type="text"
-              list="map-unit-options"
-              value={trackUnit}
-              placeholder="Unit id"
-              onChange={(e) => setTrackUnit(e.target.value)}
-            />
-            <datalist id="map-unit-options">
-              {unitOptions.map((u) => (
+            <select value={trackUnit} onChange={(e) => setTrackUnit(e.target.value)}>
+              <option value="">Select a radio…</option>
+              {radioChoices.map((u) => (
                 <option key={u.unitId} value={u.unitId}>
                   {u.label}
                 </option>
               ))}
-            </datalist>
+            </select>
           </label>
           <div className="gps-range">
             <label className="gps-field">

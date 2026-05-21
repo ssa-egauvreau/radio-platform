@@ -1366,7 +1366,8 @@ code.mono {
 .gps-field {
   margin-bottom: 8px;
 }
-.gps-field input {
+.gps-field input,
+.gps-field select {
   width: 100%;
 }
 .gps-range {

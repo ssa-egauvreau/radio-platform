@@ -452,6 +452,11 @@ export const api = {
   },
 
   locations: () => request<{ positions: RadioPosition[] }>("GET", "/v1/locations"),
+  agencyUnits: () =>
+    request<{ units: { unit_id: string; display_name: string | null }[] }>(
+      "GET",
+      "/v1/agency/units",
+    ),
   locationHistory: (unit: string, from?: string, to?: string) => {
     const params = new URLSearchParams({ unit });
     if (from) {
