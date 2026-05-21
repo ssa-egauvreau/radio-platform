@@ -20,7 +20,11 @@ export function getTtsPrecacheHit(agencyId: number, text: string): Buffer | null
 async function precachePhrase(agencyId: number, phrase: string): Promise<void> {
   const key = normalizeForTtsPrecache(phrase);
   const t0 = Date.now();
-  const buf = await synthesizeElevenLabsMp3(agencyId, phrase, { skipPrecache: true });
+  const buf = await synthesizeElevenLabsMp3(agencyId, phrase, {
+    skipPrecache: true,
+    profile: "fast",
+    speechKind: "radio_ack",
+  });
   if (!buf || buf.length === 0) {
     return;
   }

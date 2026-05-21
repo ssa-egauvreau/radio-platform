@@ -23,7 +23,7 @@ import {
   incidentPayloadHasUnit,
   infoRequestNeedsAsync,
 } from "./infoRequest.js";
-import { synthesizeElevenLabsMp3 } from "./tts.js";
+import { synthesizeElevenLabsMp3, type TtsSpeechKind } from "./tts.js";
 import { postOutboundWebhook } from "./webhook.js";
 import {
   applyChannelTen33Marker,
@@ -344,14 +344,24 @@ async function processTransmission(transmissionId: number): Promise<void> {
       }
 
       let speakText = plate.speakText || parsed.dispatcher_response?.trim() || "";
+      let ttsKind: TtsSpeechKind = plate.speakText ? "plate_readback" : "auto";
 
       if (parsed.intent === "request_info" && parsed.info_request) {
         if (infoRequestNeedsAsync(parsed.info_request)) {
           speakText = buildInfoRequestAck(parsed.unit ?? unitId);
+          ttsKind = "radio_ack";
           const reply = adaptDispatcherResponseForChannel(speakText, tx.channel_name);
           parsed = { ...parsed, dispatcher_response: reply };
           if (allowOnAir) {
-            spokeOnAir = await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+            spokeOnAir = await speakDispatcherReply(
+              tx,
+              transmissionId,
+              unitId,
+              transcript,
+              reply,
+              yieldsToUnits,
+              ttsKind,
+            );
             void runAsyncInfoLookup(tx, transmissionId, unitId, transcript, parsed, yieldsToUnits);
           }
         } else {
@@ -362,6 +372,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
           );
           if (answer) {
             speakText = answer;
+            ttsKind = "info_lookup";
           }
         }
       } else {
@@ -378,16 +389,33 @@ async function processTransmission(transmissionId: number): Promise<void> {
 
       if (!speakText && ten33Activated) {
         speakText = defaultTen33Callout(tx.channel_name);
+        ttsKind = "emergency";
       }
 
       if (allowOnAir && speakText && parsed.intent !== "request_info") {
         const reply = adaptDispatcherResponseForChannel(speakText, tx.channel_name);
         parsed = { ...parsed, dispatcher_response: reply };
-        spokeOnAir = await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+        spokeOnAir = await speakDispatcherReply(
+          tx,
+          transmissionId,
+          unitId,
+          transcript,
+          reply,
+          yieldsToUnits,
+          ttsKind,
+        );
       } else if (allowOnAir && speakText && parsed.intent === "request_info" && !infoRequestNeedsAsync(parsed.info_request!)) {
         const reply = adaptDispatcherResponseForChannel(speakText, tx.channel_name);
         parsed = { ...parsed, dispatcher_response: reply };
-        spokeOnAir = await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+        spokeOnAir = await speakDispatcherReply(
+          tx,
+          transmissionId,
+          unitId,
+          transcript,
+          reply,
+          yieldsToUnits,
+          ttsKind,
+        );
       }
 
       if (outcome === "processed") {
@@ -437,7 +465,15 @@ async function processTransmission(transmissionId: number): Promise<void> {
         });
         ten33Activated = true;
         const reply = adaptDispatcherResponseForChannel(defaultTen33Callout(tx.channel_name), tx.channel_name);
-        spokeOnAir = await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+        spokeOnAir = await speakDispatcherReply(
+          tx,
+          transmissionId,
+          unitId,
+          transcript,
+          reply,
+          yieldsToUnits,
+          "emergency",
+        );
         startTen33MarkerLoop(
           {
             loopbackPort,
@@ -495,7 +531,7 @@ async function runAsyncInfoLookup(
       answer || `${parsed.unit ?? unitId}, negative, lookup failed.`,
       tx.channel_name,
     );
-    await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+    await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits, "info_lookup");
     // follow-up log entry (separate from parent transmission)
     await persistAiDispatchLog({
       agencyId: tx.agency_id,
@@ -531,7 +567,7 @@ async function runAsyncInfoLookup(
       `${parsed.unit ?? unitId}, negative, lookup failed.`,
       tx.channel_name,
     );
-    await speakDispatcherReply(tx, transmissionId, unitId, transcript, fallback, yieldsToUnits).catch(
+    await speakDispatcherReply(tx, transmissionId, unitId, transcript, fallback, yieldsToUnits, "info_lookup").catch(
       () => undefined,
     );
   }
@@ -544,8 +580,9 @@ async function speakDispatcherReply(
   transcript: string,
   reply: string,
   yieldsToUnits: boolean,
+  speechKind: TtsSpeechKind = "auto",
 ): Promise<boolean> {
-  const mp3 = await synthesizeElevenLabsMp3(tx.agency_id, reply);
+  const mp3 = await synthesizeElevenLabsMp3(tx.agency_id, reply, { speechKind });
   if (!mp3) {
     console.warn(
       `[ai-dispatch] ElevenLabs returned no audio agency=${tx.agency_id} channel=${tx.channel_name}`,

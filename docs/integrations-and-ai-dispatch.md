@@ -46,7 +46,11 @@ Restart the service after changing env vars.
 
 - **ElevenLabs API key** — TTS for that agency’s AI replies.
 - **ElevenLabs voice ID** — Voice from your ElevenLabs library.
-- **TTS model** — Server default `eleven_v3` (expressive; requires an ElevenLabs account with v3 API access — this deployment has it) with **Creative** stability (`0.0`). Optional Railway overrides: `ELEVENLABS_MODEL_ID`, `ELEVENLABS_STABILITY` (`0` Creative, `0.5` Natural, `1` Robust). If a key lacks v3 access the dispatcher goes silent — set `ELEVENLABS_MODEL_ID=eleven_turbo_v2_5` to fall back to the broadly-available real-time model.
+- **TTS models (dual)** — Short radio acks (Copy, 913, status) use **Flash** (`eleven_flash_v2_5`, low latency). Long speech (plates, web-search answers, long callouts) uses the **expressive** profile (default `eleven_turbo_v2_5` on the sync `/text-to-speech` API — `eleven_v3` often returns 4xx on that endpoint and leaves the dispatcher silent). Set `ELEVENLABS_LONG_MODEL_ID=eleven_v3` if your ElevenLabs plan supports v3 on this endpoint. Optional Railway overrides:
+  - `ELEVENLABS_FAST_MODEL_ID` — default `eleven_flash_v2_5` (set to `eleven_turbo_v2_5` if you prefer)
+  - `ELEVENLABS_LONG_MODEL_ID` or `ELEVENLABS_MODEL_ID` — default `eleven_turbo_v2_5` (override to `eleven_v3` when supported)
+  - `ELEVENLABS_FAST_MAX_CHARS` — default `140` (longer text auto-switches to expressive)
+  - `ELEVENLABS_STABILITY` — expressive Creative default `0.0`; `ELEVENLABS_FAST_STABILITY` — Flash default `0.55`
 - **TTS pronunciation** — Same pipeline as the old 10-8 dispatcher: radio codes (`913` → “nine thirteen”), SSA account codes (`32-08` → “thirty-two oh-eight”), command staff (`27-000` → “twenty seven thousand”), call types, phone digit groups, NATO plate phonetics, and SSML pacing breaks.
 - **TTS precache** — On startup, common ack phrases from the old server (Copy, `{unit}, 913`, status acks, standby lines) are pre-generated per agency that has ElevenLabs configured, so short replies play instantly.
 - **Web search (phone book)** — Phone numbers, contacts, external addresses (e.g. Garden Grove PD), legal codes, and general questions use the same Anthropic `web_search` tool as the old dispatcher. Requires Railway `AI_DISPATCH_LLM_API_KEY` (Anthropic) and `AI_DISPATCH_ENABLED=1`. The AI says “standby” first, then speaks the answer a few seconds later.
