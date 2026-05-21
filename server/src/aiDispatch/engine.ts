@@ -313,14 +313,21 @@ async function runAsyncInfoLookup(
       parsed.info_request,
       parsed.unit ?? unitId,
     );
-    if (!answer) {
-      return;
-    }
-    const reply = adaptDispatcherResponseForChannel(answer, tx.channel_name);
+    const reply = adaptDispatcherResponseForChannel(
+      answer || `${parsed.unit ?? unitId}, negative, lookup failed.`,
+      tx.channel_name,
+    );
     await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
     console.log(`[ai-dispatch] info_request async answer agency=${tx.agency_id} type=${parsed.info_request.type}`);
   } catch (err) {
     console.warn("[ai-dispatch] async info_request failed", err);
+    const fallback = adaptDispatcherResponseForChannel(
+      `${parsed.unit ?? unitId}, negative, lookup failed.`,
+      tx.channel_name,
+    );
+    await speakDispatcherReply(tx, transmissionId, unitId, transcript, fallback, yieldsToUnits).catch(
+      () => undefined,
+    );
   }
 }
 
