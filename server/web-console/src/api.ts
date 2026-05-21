@@ -525,6 +525,29 @@ export const api = {
   channelRoster: (channel: string) =>
     request<{ members: ChannelMember[] }>("GET", `/v1/channels/roster?channel=${encodeURIComponent(channel)}`),
 
+  /** Live Channel Control: every channel with its currently-connected members. */
+  channelRosters: () =>
+    request<{ channels: { channel: string; members: ChannelMember[] }[] }>(
+      "GET",
+      "/v1/channels/rosters",
+    ),
+
+  /** Live Channel Control: push a live move command to a unit. */
+  moveUnit: (input: { unitId: string; toChannel: string; fromChannel?: string | null; reason?: string | null }) =>
+    request<{ ok: boolean; reached: number }>("POST", "/v1/channels/move", {
+      unit_id: input.unitId,
+      toChannel: input.toChannel,
+      fromChannel: input.fromChannel ?? null,
+      reason: input.reason ?? null,
+    }),
+
+  /** Live Channel Control: create (or reuse) an emergency channel and pull units in. */
+  createEmergencyChannel: (input: { name?: string; unitIds: string[] }) =>
+    request<{ ok: boolean; channel: string; reached: number }>("POST", "/v1/channels/emergency", {
+      name: input.name ?? null,
+      unit_ids: input.unitIds,
+    }),
+
   /** Fires the same /radio/emergency endpoint the Android handsets use; surfaces as an alert. */
   radioEmergency: (input: {
     unitId: string;

@@ -50,6 +50,8 @@ sealed interface VoiceControlEvent {
     data class Joined(val channel: String, val permission: String) : VoiceControlEvent
     data class Error(val code: String) : VoiceControlEvent
     data class Busy(val holderUnit: String?) : VoiceControlEvent
+    /** Dispatcher live-moved this radio to another channel (Live Channel Control). */
+    data class Moved(val channel: String, val by: String?) : VoiceControlEvent
 }
 
 class VoiceRelayTransport(
@@ -150,6 +152,13 @@ class VoiceRelayTransport(
                 "busy" -> {
                     val holder = json.optString("unit_id").trim().takeIf { it.isNotEmpty() }
                     _controlEvents.tryEmit(VoiceControlEvent.Busy(holderUnit = holder))
+                }
+                "move" -> {
+                    val channel = json.optString("channel").trim()
+                    if (channel.isNotEmpty()) {
+                        val by = json.optString("by").trim().takeIf { it.isNotEmpty() }
+                        _controlEvents.tryEmit(VoiceControlEvent.Moved(channel = channel, by = by))
+                    }
                 }
             }
         } catch (e: Exception) {

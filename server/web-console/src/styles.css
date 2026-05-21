@@ -3430,3 +3430,161 @@ code.mono {
     transform: none;
   }
 }
+
+/* --- live channel control --- */
+.lcc {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 20px 24px 32px;
+}
+.lcc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 6px;
+}
+.lcc-head h1 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: 0.04em;
+}
+.lcc-reason {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-muted);
+}
+.lcc-reason select {
+  text-transform: none;
+  letter-spacing: normal;
+}
+.lcc-hint {
+  margin: 0 0 14px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  max-width: 70ch;
+}
+.lcc-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 14px;
+}
+.lcc-channel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-raised);
+  padding: 12px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.lcc-channel.drag-over {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-raised));
+}
+.lcc-channel-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+  color: var(--text-dim);
+}
+.lcc-channel-name {
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--text);
+}
+.lcc-channel-head .count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.lcc-empty {
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+  padding: 14px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.lcc-unit {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-input);
+  cursor: grab;
+  transition: border-color 0.12s ease, transform 0.08s ease;
+}
+.lcc-unit:hover {
+  border-color: var(--accent-2);
+}
+.lcc-unit:active {
+  cursor: grabbing;
+  transform: scale(0.98);
+}
+.lcc-unit-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+/* --- radio portal: "you were moved" banner --- */
+.rp-moved-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-raised));
+  margin-bottom: 12px;
+  animation: feed-in 0.25s ease;
+}
+.rp-moved-banner strong {
+  letter-spacing: 0.04em;
+}
+.rp-moved-banner span {
+  flex: 1 1 auto;
+  font-size: 13px;
+}
+.rp-moved-dismiss {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+}
+.rp-moved-dismiss:hover {
+  color: var(--text);
+}
+@media (prefers-reduced-motion: reduce) {
+  .rp-moved-banner {
+    animation: none;
+  }
+}
+
+.lcc-unit.selected {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+.lcc-selbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--text-dim);
+}

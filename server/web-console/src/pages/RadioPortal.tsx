@@ -48,6 +48,7 @@ export function RadioPortal() {
   const [receiving, setReceiving] = useState(false);
   const [transmitting, setTransmitting] = useState(false);
   const [voiceError, setVoiceError] = useState<string | null>(null);
+  const [movedNotice, setMovedNotice] = useState<{ channel: string; by: string | null } | null>(null);
 
   const [scanEnabled, setScanEnabled] = useState(false);
   const [scanList, setScanList] = useState<Set<string>>(new Set());
@@ -191,6 +192,11 @@ export function RadioPortal() {
       },
       onPermission: (p) => setPermission(p),
       onReceiving: (r) => setReceiving(r),
+      onMove: (toChannel, by) => {
+        setMovedNotice({ channel: toChannel, by });
+        sounds.channelSwitch();
+        joinChannel(toChannel);
+      },
       onBusy: () => {
         // The relay rejected our key — already handled inside the client (stopTransmit), just
         // make sure local UI reflects that we're not transmitting. Loop the busy tone for as
@@ -213,6 +219,15 @@ export function RadioPortal() {
       scanRef.current?.setHomeChannel(selectedChannel);
     }
   }, [selectedChannel]);
+
+  // Auto-dismiss the "you were moved" banner after a few seconds.
+  useEffect(() => {
+    if (!movedNotice) {
+      return;
+    }
+    const timer = window.setTimeout(() => setMovedNotice(null), 8000);
+    return () => window.clearTimeout(timer);
+  }, [movedNotice]);
 
   // Warm the audio cache and start auto-refresh of agency-custom tones so PTT permit / busy /
   // emergency / channel-switch play the agency's uploads when present, falling back to bundled
@@ -565,6 +580,19 @@ export function RadioPortal() {
       <Topbar section="radio" />
       <main className="rp-body">
         {error && <div className="banner error">{error}</div>}
+
+        {movedNotice && (
+          <div className="rp-moved-banner" role="status">
+            <strong>You were moved</strong>
+            <span>
+              {movedNotice.by ? `${movedNotice.by} moved you to ` : "Moved to "}
+              <b>{movedNotice.channel}</b>.
+            </span>
+            <button className="rp-moved-dismiss" onClick={() => setMovedNotice(null)} aria-label="Dismiss">
+              ✕
+            </button>
+          </div>
+        )}
 
         {/* Channel picker */}
         <section className="rp-section">

@@ -242,6 +242,17 @@ class RadioViewModel(
                         val peer = event.holderUnit?.trim()?.uppercase(Locale.US)
                         if (peer != null) "CHANNEL BUSY — $peer" else "CHANNEL BUSY"
                     }
+                    is VoiceControlEvent.Moved -> {
+                        // Dispatcher retuned this radio (Live Channel Control). Tune to the
+                        // target channel and announce the move.
+                        tuneToChannelByName(event.channel)
+                        soundPlayer.playChannelSwitch {
+                            speechHelper.speakChannelTuneIfEnabled(event.channel)
+                        }
+                        val by = event.by?.trim()?.uppercase(Locale.US)
+                        val dest = event.channel.uppercase(Locale.US)
+                        if (by != null) "MOVED TO $dest BY $by" else "MOVED TO $dest"
+                    }
                 }
                 _uiState.update { it.copy(statusMessage = hint) }
             }
@@ -1398,6 +1409,32 @@ class RadioViewModel(
         if (locationReporter.hasPermission() && locationReporter.isLocationEnabled()) {
             locationReporter.start()
         }
+    }
+
+    /**
+     * Tunes to a channel by name (used by dispatcher live-move). A just-created
+     * channel — e.g. an emergency channel — may not be in this radio's catalog
+     * yet, so it's appended so the knob can land on it; a later catalog sync
+     * reconciles the list.
+     */
+    private fun tuneToChannelByName(name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isEmpty()) {
+            return
+        }
+        var idx = channelNames.indexOfFirst { it.equals(trimmed, ignoreCase = true) }
+        if (idx < 0) {
+            channelNames = channelNames + trimmed
+            idx = channelNames.lastIndex
+        }
+        channelIndex = idx
+        _uiState.update {
+            it.withTuning(channelNames, channelIndex).pruneScanSets().copy(
+                currentChannelPermission = currentPermission(),
+            )
+        }
+        viewModelScope.launch { pulsePresenceHeartbeatAndCount(expectOnline = true) }
+        reconcileVoiceTransport()
     }
 
     private fun bumpChannel(delta: Int) {

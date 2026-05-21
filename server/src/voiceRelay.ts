@@ -140,6 +140,8 @@ export interface RosterMember {
 
 interface RosterRecord {
   channelKey: string;
+  /** Display name of the channel this socket joined (for the live-control admin tree). */
+  channelName: string;
   unitId: string;
   displayName: string | null;
   kind: "account" | "legacy" | "bridge";
@@ -269,6 +271,82 @@ export function listChannelRoster(agencyId: number, channelRaw: unknown): Roster
   }
   members.sort((a, b) => b.connected_ms - a.connected_ms);
   return members;
+}
+
+/** One channel and the members currently connected to it. */
+export interface AgencyChannelRoster {
+  channel: string;
+  members: RosterMember[];
+}
+
+/**
+ * Every channel in the agency that has at least one connected member, with that
+ * member list — drives the Live Channel Control admin tree.
+ */
+export function listAgencyRosters(agencyId: number): AgencyChannelRoster[] {
+  const prefix = `${agencyId} `;
+  const now = Date.now();
+  const byChannel = new Map<string, RosterMember[]>();
+  for (const record of voiceRoster.values()) {
+    if (!record.channelKey.startsWith(prefix)) {
+      continue;
+    }
+    const list = byChannel.get(record.channelName) ?? [];
+    list.push({
+      unit_id: record.unitId,
+      display_name: record.displayName,
+      kind: record.kind,
+      client: record.client,
+      connected_ms: now - record.joinedAt,
+    });
+    byChannel.set(record.channelName, list);
+  }
+  return [...byChannel.entries()]
+    .map(([channel, members]) => ({
+      channel,
+      members: members.sort((a, b) => b.connected_ms - a.connected_ms),
+    }))
+    .sort((a, b) => a.channel.localeCompare(b.channel));
+}
+
+/**
+ * Live Channel Control: pushes a "move to channel" command to every open socket
+ * belonging to agency+unit. The client re-joins the target channel on receipt.
+ * Returns the number of sockets the command reached.
+ */
+export function sendMoveCommand(
+  agencyId: number,
+  unitIdRaw: string,
+  toChannel: string,
+  byName: string | null,
+  fromChannel: string | null,
+): number {
+  const unit = unitIdRaw.trim().toUpperCase();
+  if (!unit) {
+    return 0;
+  }
+  const payload = JSON.stringify({
+    type: "move",
+    channel: toChannel,
+    by: byName,
+    from: fromChannel,
+  });
+  let reached = 0;
+  for (const [ws, meta] of clientMeta) {
+    if (meta.agencyId !== agencyId || meta.unitId !== unit) {
+      continue;
+    }
+    if (ws.readyState !== WebSocket.OPEN) {
+      continue;
+    }
+    try {
+      ws.send(payload);
+      reached += 1;
+    } catch {
+      /* stale socket — ignore */
+    }
+  }
+  return reached;
 }
 
 export function peekVoiceTransmittingUnit(agencyId: number, channelRaw: unknown): string | null {
@@ -706,6 +784,7 @@ export function attachVoiceRelay(
     const prior = voiceRoster.get(ws);
     voiceRoster.set(ws, {
       channelKey: chanKey,
+      channelName,
       unitId,
       displayName,
       kind: meta.identity.kind,
