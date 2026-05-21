@@ -4,6 +4,8 @@ import type { PlateLookupResult } from "./plateLookup.js";
 
 export type AiDispatchOutcome =
   | "processed"
+  | "no_on_air_reply"
+  | "tts_failed"
   | "skipped_channel_off"
   | "skipped_no_speech"
   | "skipped_duplicate"

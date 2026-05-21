@@ -1099,6 +1099,24 @@ export async function listPendingTranscriptionIds(): Promise<number[]> {
   return res.rows.map((r) => r.id);
 }
 
+/** Transmissions on AI-enabled channels that never got an ai_dispatch_log row (backfill). */
+export async function listTransmissionIdsMissingAiDispatchLog(limit = 100): Promise<number[]> {
+  const res = await requirePool().query<{ id: number }>(
+    `SELECT t.id
+       FROM transmissions t
+       INNER JOIN channel_ai_dispatch c
+         ON c.agency_id = t.agency_id AND c.channel_name = t.channel_name AND c.enabled = TRUE
+       LEFT JOIN ai_dispatch_log l ON l.transmission_id = t.id
+      WHERE l.id IS NULL
+        AND t.transcript_status IN ('done', 'pending', 'failed', 'disabled')
+        AND t.started_at > now() - interval '12 hours'
+      ORDER BY t.started_at ASC
+      LIMIT $1;`,
+    [Math.min(Math.max(limit, 1), 300)],
+  );
+  return res.rows.map((r) => r.id);
+}
+
 // --- radio positions (GPS) ----------------------------------------------
 
 export interface RadioPosition {

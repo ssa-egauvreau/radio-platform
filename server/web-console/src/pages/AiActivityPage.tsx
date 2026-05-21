@@ -5,7 +5,11 @@ import { Topbar } from "../Topbar";
 function outcomeLabel(outcome: string | null | undefined): { text: string; className: string } {
   switch (outcome) {
     case "processed":
-      return { text: "AI replied", className: "ai-outcome-processed" };
+      return { text: "AI replied on radio", className: "ai-outcome-processed" };
+    case "no_on_air_reply":
+      return { text: "Processed — no voice", className: "ai-outcome-skip" };
+    case "tts_failed":
+      return { text: "Reply failed (TTS/play)", className: "ai-outcome-skip" };
     case "followup_info":
       return { text: "Follow-up answer", className: "ai-outcome-followup" };
     case "skipped_channel_off":
@@ -123,7 +127,8 @@ export function AiActivityPage() {
     return () => window.clearInterval(timer);
   }, [reload]);
 
-  const processed = data?.entries.filter((e) => e.outcome === "processed" || e.outcome === "followup_info").length ?? 0;
+  const processed =
+    data?.entries.filter((e) => e.outcome === "processed" || e.outcome === "followup_info").length ?? 0;
   const skipped = (data?.entries.length ?? 0) - processed;
 
   return (

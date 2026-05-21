@@ -56,6 +56,28 @@ export function enqueueAiDispatchForTransmission(transmissionId: number): void {
   void pump();
 }
 
+/** Re-queue recent transmissions on AI-enabled channels that never produced an activity log row. */
+export async function backfillAiDispatchActivityLog(): Promise<void> {
+  const platform = getAiDispatchPlatformConfig();
+  if (!platform.enabled) {
+    return;
+  }
+  try {
+    const { listTransmissionIdsMissingAiDispatchLog } = await import("../store.js");
+    const ids = await listTransmissionIdsMissingAiDispatchLog(150);
+    if (ids.length === 0) {
+      return;
+    }
+    console.log(`[ai-dispatch] backfill: re-queuing ${ids.length} transmission(s) missing activity log`);
+    for (const id of ids) {
+      queue.push(id);
+    }
+    void pump();
+  } catch (e) {
+    console.warn("[ai-dispatch] backfill failed", e);
+  }
+}
+
 async function pump(): Promise<void> {
   if (working) {
     return;
@@ -91,6 +113,26 @@ function isEmergencyClear(
 
 function defaultTen33Callout(channelName: string): string {
   return `All units 10-33 on ${channelName}, all units 10-33 on ${channelName}.`;
+}
+
+/** When the model returns chitchat with no script but the officer asked a question. */
+function fallbackReplyForSilentParse(
+  unit: string | null | undefined,
+  transcript: string,
+  parsed: AiDispatchParseResult,
+): string | null {
+  if (parsed.dispatcher_response?.trim()) {
+    return null;
+  }
+  if (!/\?/.test(transcript)) {
+    return null;
+  }
+  const u = unit?.trim();
+  if (!u) {
+    return "Last unit, 10-9.";
+  }
+  const csShort = /^27-0[0-3]0$/.test(u) ? u : u.replace(/^27-/, "");
+  return `${csShort}, I copy.`;
 }
 
 async function persistAiDispatchLog(opts: {
@@ -129,6 +171,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
   let error: string | null = null;
   let transcript = "";
   let outcome: AiDispatchOutcome = "processed";
+  let spokeOnAir = false;
   let tx: NonNullable<Awaited<ReturnType<typeof getTransmissionDispatchContext>>> | null = null;
   let unitId = "UNIT";
   let yieldsToUnits = true;
@@ -244,7 +287,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
           speakText = buildInfoRequestAck(parsed.unit ?? unitId);
           const reply = adaptDispatcherResponseForChannel(speakText, tx.channel_name);
           parsed = { ...parsed, dispatcher_response: reply };
-          await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+          spokeOnAir = await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
           void runAsyncInfoLookup(tx, transmissionId, unitId, transcript, parsed, yieldsToUnits);
         } else {
           const answer = await buildInfoRequestResponse(
@@ -263,6 +306,11 @@ async function processTransmission(transmissionId: number): Promise<void> {
         }
       }
 
+      if (!speakText) {
+        speakText =
+          fallbackReplyForSilentParse(parsed.unit ?? unitId, transcript, parsed) ?? "";
+      }
+
       if (!speakText && ten33Activated) {
         speakText = defaultTen33Callout(tx.channel_name);
       }
@@ -270,11 +318,24 @@ async function processTransmission(transmissionId: number): Promise<void> {
       if (speakText && parsed.intent !== "request_info") {
         const reply = adaptDispatcherResponseForChannel(speakText, tx.channel_name);
         parsed = { ...parsed, dispatcher_response: reply };
-        await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+        spokeOnAir = await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
       } else if (speakText && parsed.intent === "request_info" && !infoRequestNeedsAsync(parsed.info_request!)) {
         const reply = adaptDispatcherResponseForChannel(speakText, tx.channel_name);
         parsed = { ...parsed, dispatcher_response: reply };
-        await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+        spokeOnAir = await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+      }
+
+      if (outcome === "processed") {
+        if (!speakText) {
+          outcome = "no_on_air_reply";
+          error =
+            "AI processed this but had nothing to say on the radio (often chitchat with no dispatcher_response).";
+        } else if (!spokeOnAir) {
+          outcome = "tts_failed";
+          error =
+            error ??
+            "TTS or on-channel playback failed. Check ElevenLabs API key and voice ID under Admin → Integrations.";
+        }
       }
 
       if (ten33Activated) {
@@ -302,7 +363,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
         });
         ten33Activated = true;
         const reply = adaptDispatcherResponseForChannel(defaultTen33Callout(tx.channel_name), tx.channel_name);
-        await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+        spokeOnAir = await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
         startTen33MarkerLoop(
           {
             loopbackPort,
@@ -361,6 +422,7 @@ async function runAsyncInfoLookup(
       tx.channel_name,
     );
     await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+    // follow-up log entry (separate from parent transmission)
     await persistAiDispatchLog({
       agencyId: tx.agency_id,
       transmissionId,
@@ -408,10 +470,13 @@ async function speakDispatcherReply(
   transcript: string,
   reply: string,
   yieldsToUnits: boolean,
-): Promise<void> {
+): Promise<boolean> {
   const mp3 = await synthesizeElevenLabsMp3(tx.agency_id, reply);
   if (!mp3) {
-    return;
+    console.warn(
+      `[ai-dispatch] ElevenLabs returned no audio agency=${tx.agency_id} channel=${tx.channel_name}`,
+    );
+    return false;
   }
 
   const platform = getAiDispatchPlatformConfig();
@@ -426,6 +491,9 @@ async function speakDispatcherReply(
       yieldsToUnits,
       mp3Url: tmpPath,
     });
+  } catch (playErr) {
+    console.warn(`[ai-dispatch] playback failed channel=${tx.channel_name}`, playErr);
+    return false;
   } finally {
     await unlink(tmpPath).catch(() => undefined);
   }
@@ -442,6 +510,7 @@ async function speakDispatcherReply(
   console.log(
     `[ai-dispatch] agency=${tx.agency_id} channel=${tx.channel_name} unit=${unitId} reply="${reply.slice(0, 80)}"`,
   );
+  return true;
 }
 
 async function loadTranscriptRaw(transmissionId: number): Promise<string> {

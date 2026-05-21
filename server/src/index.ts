@@ -19,7 +19,7 @@ import {
   closeAllVoiceConnections,
   peekVoiceTransmittingTalker,
 } from "./voiceRelay.js";
-import { configureAiDispatchEngine } from "./aiDispatch/engine.js";
+import { backfillAiDispatchActivityLog, configureAiDispatchEngine } from "./aiDispatch/engine.js";
 import { getAiDispatchPlatformStatus } from "./aiDispatch/platformConfig.js";
 import { scheduleAllAgencyTtsPrecache } from "./aiDispatch/ttsPrecache.js";
 import { getTranscriptionDiagnostics } from "./transcribe.js";
@@ -305,6 +305,7 @@ async function main(): Promise<void> {
     // The radio-bridge worker ingests stream-URL bridges onto their channels.
     configureAiDispatchEngine({ port });
     void scheduleAllAgencyTtsPrecache();
+    setTimeout(() => void backfillAiDispatchActivityLog(), 15_000);
     startBridgeWorker({ port });
   });
 
