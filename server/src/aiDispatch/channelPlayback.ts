@@ -12,17 +12,11 @@ export async function withChannelPlaybackLock<T>(
   fn: () => Promise<T>,
 ): Promise<T> {
   const key = lockKey(agencyId, channelName);
+  // Chain this playback after whatever is currently queued for the channel. `prev` is a
+  // sanitized tail that never rejects, so a failed playback never blocks the next one.
   const prev = tails.get(key) ?? Promise.resolve();
-  let done!: () => void;
-  const gate = new Promise<void>((resolve) => {
-    done = resolve;
-  });
-  const run = prev
-    .then(() => gate)
-    .then(fn)
-    .finally(() => {
-      done();
-    });
+  const run = prev.then(() => fn());
+  // Track completion (success OR failure) as the new tail without surfacing rejections.
   tails.set(
     key,
     run.then(
