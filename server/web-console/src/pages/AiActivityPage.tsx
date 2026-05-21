@@ -20,6 +20,8 @@ function outcomeLabel(outcome: string | null | undefined): { text: string; class
       return { text: "Skipped — duplicate/simulcast", className: "ai-outcome-skip" };
     case "skipped_dispatch_unit":
       return { text: "Skipped — AI voice TX", className: "ai-outcome-skip" };
+    case "skipped_stale":
+      return { text: "Logged only — too old to air", className: "ai-outcome-skip" };
     default:
       return { text: outcome ?? "Unknown", className: "ai-outcome-skip" };
   }

@@ -10,6 +10,7 @@ export type AiDispatchOutcome =
   | "skipped_no_speech"
   | "skipped_duplicate"
   | "skipped_dispatch_unit"
+  | "skipped_stale"
   | "followup_info";
 
 export interface AiDispatchLogRow {
