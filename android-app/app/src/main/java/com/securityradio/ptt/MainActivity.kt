@@ -28,6 +28,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.securityradio.ptt.device.AccessibilitySettingsLauncher
+import com.securityradio.ptt.device.HandsetOrientation
 import com.securityradio.ptt.device.HandsetVolumeKnob
 import com.securityradio.ptt.device.HardwareAction
 import com.securityradio.ptt.device.HardwareButtonEvent
@@ -72,6 +73,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        HandsetOrientation.apply(this)
         super.onCreate(savedInstanceState)
         runCatching { enableEdgeToEdge() }.onFailure {
             Log.w("MainActivity", "enableEdgeToEdge unsupported; continuing without edge-to-edge", it)
@@ -185,6 +187,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onResume() {
+        HandsetOrientation.apply(this)
         super.onResume()
         checkAllPermissions()
         radioViewModel?.onOverlayPermissionResult(canDrawOverlays())
