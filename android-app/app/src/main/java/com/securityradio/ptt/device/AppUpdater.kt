@@ -64,7 +64,13 @@ class AppUpdater(
             }
             val apk = downloadAndVerify(available) ?: return
             AppUpdateInstallGate.arm()
-            launchInstall(apk)
+            try {
+                launchInstall(apk)
+            } catch (e: Exception) {
+                // Don't leave the auto-confirm window open if the installer never launched.
+                AppUpdateInstallGate.disarm()
+                Log.w(TAG, "install launch failed", e)
+            }
         } catch (e: Exception) {
             Log.w(TAG, "update check failed", e)
         }
@@ -99,8 +105,11 @@ class AppUpdater(
         val request = Request.Builder().url(fullUrl).build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return null
-            val bytes = response.body?.bytes() ?: return null
-            out.writeBytes(bytes)
+            val body = response.body ?: return null
+            // Stream straight to disk — never hold the whole APK in RAM on constrained radios.
+            body.byteStream().use { input ->
+                out.outputStream().use { output -> input.copyTo(output) }
+            }
         }
         val actual = sha256Hex(out)
         if (!actual.equals(available.sha256, ignoreCase = true)) {

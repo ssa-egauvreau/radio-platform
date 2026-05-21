@@ -48,7 +48,9 @@ let shaCache: { key: string; sha256: string } | null = null;
 
 function apkSha256(apkPath: string): string {
   const st = statSync(apkPath);
-  const key = `${st.size}:${st.mtimeMs}`;
+  // Path is part of the key so a same-size/same-mtime replacement (e.g. a
+  // release artifact that preserves timestamps) can't reuse a stale hash.
+  const key = `${apkPath}:${st.size}:${st.mtimeMs}`;
   if (shaCache?.key === key) {
     return shaCache.sha256;
   }
