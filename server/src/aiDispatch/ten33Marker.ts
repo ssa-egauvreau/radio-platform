@@ -11,7 +11,7 @@ function loopKey(agencyId: number, channelName: string): LoopKey {
   return `${agencyId}:${channelName}`;
 }
 
-function stopTen33MarkerLoop(agencyId: number, channelName: string): void {
+export function stopTen33MarkerLoop(agencyId: number, channelName: string): void {
   const key = loopKey(agencyId, channelName);
   const timer = markerLoops.get(key);
   if (timer) {
@@ -20,26 +20,35 @@ function stopTen33MarkerLoop(agencyId: number, channelName: string): void {
   }
 }
 
-function startTen33MarkerLoop(opts: {
+type MarkerLoopOpts = {
   loopbackPort: number;
   agencyId: number;
   channelName: string;
   unitId: string;
-}): void {
+};
+
+function playMarkerBurst(opts: MarkerLoopOpts): void {
+  void playMarkerToneOnChannel(opts).catch((err) => {
+    console.warn(`[ai-dispatch] 10-33 marker tone failed channel=${opts.channelName}`, err);
+  });
+}
+
+/**
+ * Repeating custom 10-33 marker audio on the channel.
+ * @param immediateBurst — false when AI just spoke the 10-33 callout (avoids talking over TTS).
+ */
+export function startTen33MarkerLoop(opts: MarkerLoopOpts, immediateBurst = true): void {
   const key = loopKey(opts.agencyId, opts.channelName);
   stopTen33MarkerLoop(opts.agencyId, opts.channelName);
-  const tick = () => {
-    void playMarkerToneOnChannel(opts).catch((err) => {
-      console.warn(`[ai-dispatch] 10-33 marker tone failed channel=${opts.channelName}`, err);
-    });
-  };
-  tick();
+  const tick = () => playMarkerBurst(opts);
+  if (immediateBurst) {
+    tick();
+  }
   markerLoops.set(key, setInterval(tick, MARKER_INTERVAL_MS));
 }
 
 /**
  * Sets the safeT 10-33 channel marker (DB + repeating marker tone on the channel).
- * Matches the dispatch console "10-33 CHANNEL MARKER" button behavior for radios and listeners.
  */
 export async function applyChannelTen33Marker(opts: {
   loopbackPort: number;
@@ -48,6 +57,9 @@ export async function applyChannelTen33Marker(opts: {
   active: boolean;
   markerUnitId: string;
   source: "regex" | "ai" | "manual";
+  /** When false, only the DB flag is set until startTen33MarkerLoop runs (AI 10-33 callout first). */
+  startAudioLoop?: boolean;
+  immediateAudioBurst?: boolean;
 }): Promise<void> {
   const channel = opts.channelName.trim();
   if (!channel) {
@@ -55,12 +67,17 @@ export async function applyChannelTen33Marker(opts: {
   }
   await setChannelTen33(opts.agencyId, channel, opts.active);
   if (opts.active) {
-    startTen33MarkerLoop({
-      loopbackPort: opts.loopbackPort,
-      agencyId: opts.agencyId,
-      channelName: channel,
-      unitId: opts.markerUnitId,
-    });
+    if (opts.startAudioLoop !== false) {
+      startTen33MarkerLoop(
+        {
+          loopbackPort: opts.loopbackPort,
+          agencyId: opts.agencyId,
+          channelName: channel,
+          unitId: opts.markerUnitId,
+        },
+        opts.immediateAudioBurst !== false,
+      );
+    }
     console.log(`[ai-dispatch] 10-33 ON channel=${channel} source=${opts.source}`);
   } else {
     stopTen33MarkerLoop(opts.agencyId, channel);

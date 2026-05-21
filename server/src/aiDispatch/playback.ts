@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { WebSocket } from "ws";
+import { withChannelPlaybackLock } from "./channelPlayback.js";
 import { BRIDGE_LOOPBACK_SECRET, VOICE_WS_PATH } from "../voiceRelay.js";
 
 const FRAME_BYTES = 640;
@@ -32,7 +33,7 @@ function decodeMp3ToPcm(url: string): Promise<Buffer> {
   });
 }
 
-export async function playPcmOnChannel(opts: {
+async function playPcmOnChannelUnlocked(opts: {
   loopbackPort: number;
   agencyId: number;
   channelName: string;
@@ -123,8 +124,7 @@ export async function playPcmOnChannel(opts: {
   });
 }
 
-/** Sends one 10-33 marker tone burst (marker_tone + PCM, does not key the channel as voice). */
-export async function playMarkerBurstOnChannel(opts: {
+async function playMarkerBurstOnChannelUnlocked(opts: {
   loopbackPort: number;
   agencyId: number;
   channelName: string;
@@ -213,6 +213,30 @@ export async function playMarkerBurstOnChannel(opts: {
       }
     });
   });
+}
+
+export async function playPcmOnChannel(opts: {
+  loopbackPort: number;
+  agencyId: number;
+  channelName: string;
+  unitId: string;
+  yieldsToUnits: boolean;
+  pcm: Buffer;
+}): Promise<void> {
+  return withChannelPlaybackLock(opts.agencyId, opts.channelName, () => playPcmOnChannelUnlocked(opts));
+}
+
+/** Sends one 10-33 marker tone burst (marker_tone + PCM, does not key the channel as voice). */
+export async function playMarkerBurstOnChannel(opts: {
+  loopbackPort: number;
+  agencyId: number;
+  channelName: string;
+  unitId: string;
+  pcm: Buffer;
+}): Promise<void> {
+  return withChannelPlaybackLock(opts.agencyId, opts.channelName, () =>
+    playMarkerBurstOnChannelUnlocked(opts),
+  );
 }
 
 export async function playMp3UrlOnChannel(opts: {

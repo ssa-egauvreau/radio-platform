@@ -18,7 +18,12 @@ import {
 import { playMp3UrlOnChannel } from "./playback.js";
 import { synthesizeElevenLabsMp3 } from "./tts.js";
 import { postOutboundWebhook } from "./webhook.js";
-import { applyChannelTen33Marker } from "./ten33Marker.js";
+import {
+  applyChannelTen33Marker,
+  startTen33MarkerLoop,
+  stopTen33MarkerLoop,
+} from "./ten33Marker.js";
+import { shouldSkipDuplicateAiDispatch } from "./dedupe.js";
 import { listTen8ActiveIncidents } from "../ten8/store.js";
 import { ten8AddComment, ten8Configured } from "../ten8/client.js";
 import type { PlateLookupResult } from "./plateLookup.js";
@@ -60,6 +65,28 @@ async function pump(): Promise<void> {
   }
 }
 
+function isEmergencyActivation(
+  emergencyRegex: ReturnType<typeof detectEmergencyCodeFromTranscript>,
+  parsed: AiDispatchParseResult | null,
+): boolean {
+  return (
+    emergencyRegex === "activate" ||
+    parsed?.trigger_emergency_tone === true ||
+    parsed?.intent === "emergency"
+  );
+}
+
+function isEmergencyClear(
+  emergencyRegex: ReturnType<typeof detectEmergencyCodeFromTranscript>,
+  parsed: AiDispatchParseResult | null,
+): boolean {
+  return emergencyRegex === "clear" || parsed?.intent === "emergency_clear";
+}
+
+function defaultTen33Callout(channelName: string): string {
+  return `All units 10-33 on ${channelName}, all units 10-33 on ${channelName}.`;
+}
+
 async function processTransmission(transmissionId: number): Promise<void> {
   const t0 = Date.now();
   let parsed: AiDispatchParseResult | null = null;
@@ -70,6 +97,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
   let tx: NonNullable<Awaited<ReturnType<typeof getTransmissionDispatchContext>>> | null = null;
   let unitId = "UNIT";
   let yieldsToUnits = true;
+  let ten33Activated = false;
 
   try {
     tx = await getTransmissionDispatchContext(transmissionId);
@@ -92,30 +120,17 @@ async function processTransmission(transmissionId: number): Promise<void> {
     }
     transcript = text;
 
+    if (shouldSkipDuplicateAiDispatch(tx.agency_id, transcript)) {
+      console.log(
+        `[ai-dispatch] skip duplicate transcript agency=${tx.agency_id} channel=${tx.channel_name}`,
+      );
+      return;
+    }
+
     const platform = getAiDispatchPlatformConfig();
     unitId = (tx.unit_id ?? "UNIT").trim().toUpperCase() || "UNIT";
 
     const emergencyRegex = detectEmergencyCodeFromTranscript(transcript);
-    if (emergencyRegex === "activate") {
-      await applyChannelTen33Marker({
-        loopbackPort,
-        agencyId: tx.agency_id,
-        channelName: tx.channel_name,
-        active: true,
-        markerUnitId: platform.dispatchUnitId,
-        source: "regex",
-      });
-    } else if (emergencyRegex === "clear") {
-      await applyChannelTen33Marker({
-        loopbackPort,
-        agencyId: tx.agency_id,
-        channelName: tx.channel_name,
-        active: false,
-        markerUnitId: platform.dispatchUnitId,
-        source: "regex",
-      });
-    }
-
     const systemPrompt = await resolveAiDispatchSystemPrompt(tx.agency_id);
     parsed = await parseDispatcherTransmission({
       systemPrompt,
@@ -124,27 +139,29 @@ async function processTransmission(transmissionId: number): Promise<void> {
       transcript,
     });
 
-    if (parsed) {
-      if (parsed.trigger_emergency_tone || parsed.intent === "emergency") {
-        await applyChannelTen33Marker({
-          loopbackPort,
-          agencyId: tx.agency_id,
-          channelName: tx.channel_name,
-          active: true,
-          markerUnitId: platform.dispatchUnitId,
-          source: "ai",
-        });
-      } else if (parsed.intent === "emergency_clear") {
-        await applyChannelTen33Marker({
-          loopbackPort,
-          agencyId: tx.agency_id,
-          channelName: tx.channel_name,
-          active: false,
-          markerUnitId: platform.dispatchUnitId,
-          source: "ai",
-        });
-      }
+    if (isEmergencyClear(emergencyRegex, parsed)) {
+      await applyChannelTen33Marker({
+        loopbackPort,
+        agencyId: tx.agency_id,
+        channelName: tx.channel_name,
+        active: false,
+        markerUnitId: platform.dispatchUnitId,
+        source: emergencyRegex === "clear" ? "regex" : "ai",
+      });
+    } else if (isEmergencyActivation(emergencyRegex, parsed)) {
+      await applyChannelTen33Marker({
+        loopbackPort,
+        agencyId: tx.agency_id,
+        channelName: tx.channel_name,
+        active: true,
+        markerUnitId: platform.dispatchUnitId,
+        source: emergencyRegex === "activate" ? "regex" : "ai",
+        startAudioLoop: false,
+      });
+      ten33Activated = true;
+    }
 
+    if (parsed) {
       const plate = await handlePlateFromParse({
         agencyId: tx.agency_id,
         unitId,
@@ -173,14 +190,8 @@ async function processTransmission(transmissionId: number): Promise<void> {
       }
 
       let speakText = plate.speakText || parsed.dispatcher_response?.trim() || "";
-      if (!speakText) {
-        const needDefaultEmergency =
-          emergencyRegex === "activate" ||
-          parsed.trigger_emergency_tone ||
-          parsed.intent === "emergency";
-        if (needDefaultEmergency) {
-          speakText = `All units 10-33 on ${tx.channel_name}, all units 10-33 on ${tx.channel_name}.`;
-        }
+      if (!speakText && ten33Activated) {
+        speakText = defaultTen33Callout(tx.channel_name);
       }
 
       if (speakText) {
@@ -188,16 +199,50 @@ async function processTransmission(transmissionId: number): Promise<void> {
         parsed = { ...parsed, dispatcher_response: reply };
         await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
       }
+
+      if (ten33Activated) {
+        startTen33MarkerLoop(
+          {
+            loopbackPort,
+            agencyId: tx.agency_id,
+            channelName: tx.channel_name,
+            unitId: platform.dispatchUnitId,
+          },
+          true,
+        );
+      }
     } else {
       error = "AI parse failed";
       if (emergencyRegex === "activate") {
-        const defaultEmergency = `All units 10-33 on ${tx.channel_name}, all units 10-33 on ${tx.channel_name}.`;
-        await speakDispatcherReply(tx, transmissionId, unitId, transcript, defaultEmergency, yieldsToUnits);
+        await applyChannelTen33Marker({
+          loopbackPort,
+          agencyId: tx.agency_id,
+          channelName: tx.channel_name,
+          active: true,
+          markerUnitId: platform.dispatchUnitId,
+          source: "regex",
+          startAudioLoop: false,
+        });
+        ten33Activated = true;
+        const reply = adaptDispatcherResponseForChannel(defaultTen33Callout(tx.channel_name), tx.channel_name);
+        await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+        startTen33MarkerLoop(
+          {
+            loopbackPort,
+            agencyId: tx.agency_id,
+            channelName: tx.channel_name,
+            unitId: platform.dispatchUnitId,
+          },
+          true,
+        );
       }
     }
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
     console.warn(`[ai-dispatch] failed for transmission ${transmissionId}`, err);
+    if (tx && ten33Activated) {
+      stopTen33MarkerLoop(tx.agency_id, tx.channel_name);
+    }
   } finally {
     if (tx && transcript) {
       await insertAiDispatchLog({
