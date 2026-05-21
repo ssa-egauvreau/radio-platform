@@ -39,6 +39,13 @@ const queue: number[] = [];
 let working = false;
 let loopbackPort = 8080;
 
+/**
+ * Only broadcast a reply for reasonably fresh transmissions. Backfill and post-freeze catch-up
+ * re-queue old traffic to populate the activity log; without this gate the dispatcher would key up
+ * and replay every missed message on the air. Stale items are still logged, just not spoken.
+ */
+const MAX_ON_AIR_REPLY_AGE_MS = Number(process.env.AI_DISPATCH_MAX_REPLY_AGE_MS) || 120_000;
+
 export function configureAiDispatchEngine(options: { port: number }): void {
   loopbackPort = options.port;
 }
@@ -201,6 +208,9 @@ async function processTransmission(transmissionId: number): Promise<void> {
     }
     yieldsToUnits = channelRow.yields_to_units;
 
+    const ageMs = Date.now() - new Date(tx.started_at).getTime();
+    const allowOnAir = Number.isFinite(ageMs) ? ageMs <= MAX_ON_AIR_REPLY_AGE_MS : true;
+
     const text = await loadTranscriptText(transmissionId);
     if (!text) {
       outcome = "skipped_no_speech";
@@ -237,7 +247,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
       transcript,
     });
 
-    if (isEmergencyClear(emergencyRegex, parsed)) {
+    if (allowOnAir && isEmergencyClear(emergencyRegex, parsed)) {
       await applyChannelTen33Marker({
         loopbackPort,
         agencyId: tx.agency_id,
@@ -246,7 +256,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
         markerUnitId: platform.dispatchUnitId,
         source: emergencyRegex === "clear" ? "regex" : "ai",
       });
-    } else if (isEmergencyActivation(emergencyRegex, parsed)) {
+    } else if (allowOnAir && isEmergencyActivation(emergencyRegex, parsed)) {
       await applyChannelTen33Marker({
         loopbackPort,
         agencyId: tx.agency_id,
@@ -294,8 +304,10 @@ async function processTransmission(transmissionId: number): Promise<void> {
           speakText = buildInfoRequestAck(parsed.unit ?? unitId);
           const reply = adaptDispatcherResponseForChannel(speakText, tx.channel_name);
           parsed = { ...parsed, dispatcher_response: reply };
-          spokeOnAir = await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
-          void runAsyncInfoLookup(tx, transmissionId, unitId, transcript, parsed, yieldsToUnits);
+          if (allowOnAir) {
+            spokeOnAir = await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+            void runAsyncInfoLookup(tx, transmissionId, unitId, transcript, parsed, yieldsToUnits);
+          }
         } else {
           const answer = await buildInfoRequestResponse(
             tx.agency_id,
@@ -322,11 +334,11 @@ async function processTransmission(transmissionId: number): Promise<void> {
         speakText = defaultTen33Callout(tx.channel_name);
       }
 
-      if (speakText && parsed.intent !== "request_info") {
+      if (allowOnAir && speakText && parsed.intent !== "request_info") {
         const reply = adaptDispatcherResponseForChannel(speakText, tx.channel_name);
         parsed = { ...parsed, dispatcher_response: reply };
         spokeOnAir = await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
-      } else if (speakText && parsed.intent === "request_info" && !infoRequestNeedsAsync(parsed.info_request!)) {
+      } else if (allowOnAir && speakText && parsed.intent === "request_info" && !infoRequestNeedsAsync(parsed.info_request!)) {
         const reply = adaptDispatcherResponseForChannel(speakText, tx.channel_name);
         parsed = { ...parsed, dispatcher_response: reply };
         spokeOnAir = await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
@@ -340,6 +352,12 @@ async function processTransmission(transmissionId: number): Promise<void> {
           );
           error =
             "AI processed this but had nothing to say on the radio (often chitchat with no dispatcher_response).";
+        } else if (!allowOnAir) {
+          outcome = "skipped_stale";
+          console.log(
+            `[ai-dispatch] stale transmission (age ${Math.round(ageMs / 1000)}s) — logged only, not aired, channel=${tx.channel_name}`,
+          );
+          error = "Logged only — transmission too old to air a reply (backfill / catch-up after a restart).";
         } else if (!spokeOnAir) {
           outcome = "tts_failed";
           error =
@@ -361,7 +379,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
       }
     } else {
       error = "AI parse failed";
-      if (emergencyRegex === "activate") {
+      if (allowOnAir && emergencyRegex === "activate") {
         await applyChannelTen33Marker({
           loopbackPort,
           agencyId: tx.agency_id,

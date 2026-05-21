@@ -3,12 +3,11 @@ import { prepareTextForTts } from "./speech/prepareTextForTts.js";
 import { getTtsPrecacheHit, scheduleAgencyTtsPrecache } from "./ttsPrecache.js";
 
 /**
- * Real-time dispatcher voice. `eleven_v3` is alpha and NOT reachable through the
- * public text-to-speech API (it 4xxs for self-serve accounts), which silences the
- * dispatcher entirely — so default to the API-accessible Turbo model. Set
- * ELEVENLABS_MODEL_ID=eleven_v3 only on an account with v3 API access.
+ * Expressive dispatcher voice. `eleven_v3` needs an ElevenLabs account with v3 API access; this
+ * deployment has it. If a future key lacks v3 access the TTS call 4xxs and the dispatcher goes
+ * silent — set ELEVENLABS_MODEL_ID=eleven_turbo_v2_5 (real-time, broadly available) to fall back.
  */
-const DEFAULT_MODEL_ID = "eleven_turbo_v2_5";
+const DEFAULT_MODEL_ID = "eleven_v3";
 
 /**
  * Stability presets (UI labels → API value):
