@@ -658,6 +658,9 @@ class RadioViewModel(
                 _uiState.update { it.copy(mappingSettingsVisible = false, currentlyMappingAction = null) }
                 mappingJob?.cancel()
             }
+            RadioUiEvent.DismissSetupDialog -> {
+                _uiState.update { it.copy(setupDialogDismissed = true) }
+            }
             is RadioUiEvent.SelectSettingsTab -> {
                 val targetIndex = event.index.coerceIn(0, 3)
                 // Leaving the BUTTONS tab while a mapping session is armed would otherwise

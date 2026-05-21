@@ -16,6 +16,8 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -4171,29 +4173,52 @@ fun SetupRequiredDialog(
     onEvent: (RadioUiEvent) -> Unit,
 ) {
     if (
-        !state.needsAudioPermission &&
-            !state.needsAccessibilityService &&
-            !state.needsLocationPermission &&
-            !state.needsGpsEnabled
+        state.setupDialogDismissed ||
+            (!state.needsAudioPermission &&
+                !state.needsAccessibilityService &&
+                !state.needsLocationPermission &&
+                !state.needsGpsEnabled)
     ) {
         return
     }
     val p = RadioLcdTheme.palette
 
-    AlertDialog(
-        onDismissRequest = { /* Force setup */ },
-        title = {
-            Text(
-                text = "SETUP REQUIRED",
-                color = p.textPrimary,
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                Text(
-                    text = "The radio requires permissions to function correctly.",
-                    color = p.textSecondary
-                )
+    Dialog(
+        onDismissRequest = { onEvent(RadioUiEvent.DismissSetupDialog) },
+        properties = DialogProperties(usePlatformDefaultWidth = false),
+    ) {
+        Surface(modifier = Modifier.fillMaxSize(), color = p.lcdAlt) {
+            Column(modifier = Modifier.fillMaxSize().statusBarsPadding()) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                ) {
+                    Text(
+                        text = "SETUP REQUIRED",
+                        color = p.textPrimary,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 20.sp,
+                    )
+                    TextButton(onClick = { onEvent(RadioUiEvent.DismissSetupDialog) }) {
+                        Text("CLOSE", color = p.statusBlue)
+                    }
+                }
+                HorizontalDivider(color = p.divider)
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                ) {
+                    Text(
+                        text = "The radio requires permissions to function correctly.",
+                        color = p.textSecondary
+                    )
 
                 if (state.needsLocationPermission) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -4282,8 +4307,8 @@ fun SetupRequiredDialog(
                         }
                     }
                 }
+                }
             }
-        },
-        confirmButton = {}
-    )
+        }
+    }
 }

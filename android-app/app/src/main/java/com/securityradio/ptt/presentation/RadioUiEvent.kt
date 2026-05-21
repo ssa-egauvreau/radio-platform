@@ -53,6 +53,7 @@ sealed interface RadioUiEvent {
     data object OpenLocationSettings : RadioUiEvent
     data object OpenGpsSettings : RadioUiEvent
     data object RequestIgnoreBatteryOptimizations : RadioUiEvent
+    data object DismissSetupDialog : RadioUiEvent
 
 
     data object ToggleVoiceAnnounceChannelTune : RadioUiEvent
