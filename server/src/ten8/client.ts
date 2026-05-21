@@ -54,6 +54,17 @@ async function ten8Fetch(
   return { ok: r.ok, status: r.status, data };
 }
 
+/**
+ * 10-8's incident API rejects (and can crash on) special characters. Reduce text to letters,
+ * numbers, and single spaces before sending — dashes, brackets, parentheses, periods, etc. out.
+ */
+function sanitizeForTen8(text: string): string {
+  return text
+    .replace(/[^A-Za-z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export async function ten8AddComment(
   agencyId: number,
   callId: string,
@@ -61,7 +72,7 @@ export async function ten8AddComment(
 ): Promise<{ ok: boolean; shadow?: boolean; data?: unknown }> {
   const lookup = encodeURIComponent(callId);
   const res = await ten8Fetch(agencyId, "POST", `/v1/incidents/${lookup}/comments`, {
-    comment: comment.slice(0, 4000),
+    comment: sanitizeForTen8(comment).slice(0, 4000),
   });
   return { ok: res.ok, shadow: (res.data as { shadow?: boolean })?.shadow === true, data: res.data };
 }
