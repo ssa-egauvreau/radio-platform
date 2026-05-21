@@ -123,6 +123,98 @@ export async function playPcmOnChannel(opts: {
   });
 }
 
+/** Sends one 10-33 marker tone burst (marker_tone + PCM, does not key the channel as voice). */
+export async function playMarkerBurstOnChannel(opts: {
+  loopbackPort: number;
+  agencyId: number;
+  channelName: string;
+  unitId: string;
+  pcm: Buffer;
+}): Promise<void> {
+  if (opts.pcm.length === 0) {
+    return;
+  }
+
+  const url = new URL(`ws://127.0.0.1:${opts.loopbackPort}${VOICE_WS_PATH}`);
+  url.searchParams.set("bridge", BRIDGE_LOOPBACK_SECRET);
+  url.searchParams.set("agency", String(opts.agencyId));
+  url.searchParams.set("yields", "1");
+  url.searchParams.set("name", opts.unitId.slice(0, 64));
+
+  await new Promise<void>((resolve, reject) => {
+    const ws = new WebSocket(url.toString());
+    let joined = false;
+    let done = false;
+
+    const finish = (err?: Error) => {
+      if (done) {
+        return;
+      }
+      done = true;
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
+      if (err) {
+        reject(err);
+      } else {
+        resolve();
+      }
+    };
+
+    const sendMarker = async () => {
+      try {
+        ws.send(JSON.stringify({ type: "marker_tone" }));
+        let next = Date.now();
+        for (let off = 0; off < opts.pcm.length; off += FRAME_BYTES) {
+          if (ws.readyState !== WebSocket.OPEN) {
+            break;
+          }
+          const end = Math.min(off + FRAME_BYTES, opts.pcm.length);
+          let frame = opts.pcm.subarray(off, end);
+          if (frame.length < FRAME_BYTES) {
+            frame = Buffer.concat([frame, Buffer.alloc(FRAME_BYTES - frame.length)]);
+          }
+          ws.send(frame);
+          next += 20;
+          const wait = next - Date.now();
+          if (wait > 0) {
+            await sleep(wait);
+          }
+        }
+        finish();
+      } catch (e) {
+        finish(e instanceof Error ? e : new Error(String(e)));
+      }
+    };
+
+    ws.on("open", () => {
+      ws.send(JSON.stringify({ type: "join", channel: opts.channelName, client: "bridge" }));
+    });
+    ws.on("message", (raw: Buffer, isBinary: boolean) => {
+      if (isBinary || joined) {
+        return;
+      }
+      try {
+        const msg = JSON.parse(raw.toString("utf8")) as { type?: string };
+        if (msg.type === "joined") {
+          joined = true;
+          void sendMarker();
+        }
+      } catch {
+        /* ignore */
+      }
+    });
+    ws.on("error", (err) => finish(err));
+    ws.on("close", () => {
+      if (!joined) {
+        finish(new Error("loopback closed before join"));
+      }
+    });
+  });
+}
+
 export async function playMp3UrlOnChannel(opts: {
   loopbackPort: number;
   agencyId: number;

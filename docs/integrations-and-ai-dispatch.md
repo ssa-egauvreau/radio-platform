@@ -44,7 +44,7 @@ Restart the service after changing env vars.
 
 - **ElevenLabs API key** — TTS for that agency’s AI replies.
 - **ElevenLabs voice ID** — Voice from your ElevenLabs library.
-- **AI dispatcher system prompt** — **Your agency’s** instructions: local 10-codes, unit/call sign format, tone, and radio policy. If this field is empty, the server uses `AI_DISPATCH_SYSTEM_PROMPT` from Railway.
+- **AI dispatcher system prompt** — **Your agency’s** instructions: local 10-codes, unit/call sign format, tone, and radio policy. If this field is empty, **Sunset Safety** agencies use the built-in prompt exported from the 10-8 AI dashboard; other agencies use `AI_DISPATCH_SYSTEM_PROMPT` from Railway.
 - **Outbound webhook URL** — Optional HTTPS URL; safeT POSTs JSON when the AI dispatcher sends a reply.
 - **License plate / VIN** — Shown as *Coming soon*; reserved for portal lookup features.
 
@@ -67,8 +67,10 @@ Secrets are stored per `agency_id` in Postgres (`agency_integrations`). The API 
 1. Unit transmits on a channel with **AI DISPATCH ON**.
 2. Recording is transcribed (Whisper).
 3. Server loads the **agency system prompt** (Integrations) or Railway default.
-4. LLM generates a short reply → ElevenLabs TTS → injected on the channel via voice loopback.
-5. Optional outbound webhook with transcript and reply text.
+4. LLM returns structured JSON (same shape as 10-8): `dispatcher_response`, `trigger_emergency_tone`, intents, etc.
+5. **10-33 / 10-34** — regex + AI turn the safeT **10-33 channel marker** on or off (DB flag + marker tone on the channel every 12s), not a browser-only sound.
+6. ElevenLabs speaks `dispatcher_response` → voice loopback on the channel.
+7. Optional outbound webhook with transcript and reply text.
 
 Server logs are tagged `[ai-dispatch]`.
 

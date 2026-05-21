@@ -87,6 +87,14 @@ export function IntegrationsPanel() {
 
       {error && <p className="error">{error}</p>}
 
+      {data?.prompt_source === "sunset_bundled" && (
+        <p className="muted" style={{ marginBottom: "1rem", maxWidth: "52rem" }}>
+          Your agency uses the <strong>built-in Sunset Safety dispatcher prompt</strong> from the
+          10-8 AI dashboard. Leave the system prompt box empty to keep it, or paste a custom prompt
+          to override.
+        </p>
+      )}
+
       {platform && (
         <section className="integrations-platform card-like" style={{ marginBottom: "1.25rem" }}>
           <h3>AI dispatcher (this server)</h3>

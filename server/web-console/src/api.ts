@@ -214,6 +214,7 @@ export interface IntegrationsPayload {
     dispatchUnitId: string;
   };
   platform_note: string;
+  prompt_source?: "custom" | "sunset_bundled" | "railway_default";
   groups: { id: string; label: string; items: IntegrationItem[] }[];
 }
 
@@ -439,7 +440,13 @@ export const api = {
 
   /** Toggles the 10-33 channel marker so radios on that channel show a warning icon. */
   setChannelTen33: (channelName: string, active: boolean) =>
-    request<{ ok: boolean }>("POST", "/v1/channels/ten33", { channel: channelName, active }),
+    request<{ ok: boolean; active: boolean }>("POST", "/v1/channels/ten33", { channel: channelName, active }),
+
+  getChannelTen33: (channelName: string) =>
+    request<{ active: boolean }>(
+      "GET",
+      `/v1/channels/ten33?channel=${encodeURIComponent(channelName)}`,
+    ),
 
   getAiDispatchStatus: () =>
     request<{
@@ -447,6 +454,7 @@ export const api = {
       platform_llm_configured: boolean;
       agency_tts_configured: boolean;
       agency_prompt_configured: boolean;
+      agency_prompt_source?: "custom" | "sunset_bundled" | "railway_default";
       model: string;
       dispatch_unit_id: string;
     }>("GET", "/v1/ai-dispatch/status"),

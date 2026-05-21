@@ -1,5 +1,5 @@
 import type { Request, Response } from "express";
-import { getAiDispatchPlatformStatus } from "../aiDispatch/platformConfig.js";
+import { agencyPromptSource, getAiDispatchPlatformStatus } from "../aiDispatch/platformConfig.js";
 import {
   deleteAgencyIntegration,
   getAgencyIntegrationValue,
@@ -27,7 +27,10 @@ function clientIp(req: Request): string {
   return (first ?? req.socket.remoteAddress ?? "").trim();
 }
 
-function buildIntegrationPayload(agencyId: number, rows: Awaited<ReturnType<typeof listAgencyIntegrationRows>>) {
+async function buildIntegrationPayload(
+  agencyId: number,
+  rows: Awaited<ReturnType<typeof listAgencyIntegrationRows>>,
+) {
   const byKey = new Map(rows.map((r) => [r.integration_key, r]));
   const groups = new Map<
     string,
@@ -48,12 +51,20 @@ function buildIntegrationPayload(agencyId: number, rows: Awaited<ReturnType<type
     }
   >();
 
+  const promptSource = await agencyPromptSource(agencyId);
+
   for (const def of INTEGRATION_DEFINITIONS) {
     if (!groups.has(def.group)) {
       groups.set(def.group, { id: def.group, label: GROUP_LABELS[def.group], items: [] });
     }
     const row = byKey.get(def.key);
     const raw = row?.value?.trim() ?? "";
+    let configured = raw.length > 0;
+    let display_value = maskSecret(raw, def.kind);
+    if (def.key === "ai_dispatch_system_prompt" && promptSource === "sunset_bundled") {
+      configured = true;
+      display_value = "Built-in Sunset Safety prompt (server)";
+    }
     groups.get(def.group)!.items.push({
       key: def.key,
       label: def.label,
@@ -61,8 +72,8 @@ function buildIntegrationPayload(agencyId: number, rows: Awaited<ReturnType<type
       kind: def.kind,
       availability: def.availability,
       placeholder: def.placeholder,
-      configured: raw.length > 0,
-      display_value: maskSecret(raw, def.kind),
+      configured,
+      display_value,
       updated_at: row?.updated_at ?? null,
     });
   }
@@ -71,6 +82,7 @@ function buildIntegrationPayload(agencyId: number, rows: Awaited<ReturnType<type
     platform: getAiDispatchPlatformStatus(),
     platform_note:
       "AI dispatcher LLM and master on/off are set in Railway environment variables for this deployment. Keys below are per agency.",
+    prompt_source: promptSource,
     groups: [...groups.values()],
   };
 }
@@ -78,7 +90,7 @@ function buildIntegrationPayload(agencyId: number, rows: Awaited<ReturnType<type
 export async function handleListIntegrations(req: Request, res: Response): Promise<void> {
   const agencyId = req.authUser!.agencyId!;
   const rows = await listAgencyIntegrationRows(agencyId);
-  res.json(buildIntegrationPayload(agencyId, rows));
+  res.json(await buildIntegrationPayload(agencyId, rows));
 }
 
 export async function handleSetIntegration(req: Request, res: Response): Promise<void> {
@@ -96,7 +108,7 @@ export async function handleSetIntegration(req: Request, res: Response): Promise
 
   const body = req.body as { value?: unknown };
   let value = body?.value === undefined || body?.value === null ? "" : String(body.value).trim();
-  const maxLen = def.kind === "multiline" ? 16_000 : 4_096;
+  const maxLen = def.kind === "multiline" ? 72_000 : 4_096;
   if (value.length > maxLen) {
     res.status(400).json({ error: "value_too_long" });
     return;
@@ -121,7 +133,7 @@ export async function handleSetIntegration(req: Request, res: Response): Promise
       const existing = await getAgencyIntegrationValue(agencyId, key);
       if (existing) {
         const rows = await listAgencyIntegrationRows(agencyId);
-        res.json(buildIntegrationPayload(agencyId, rows));
+        res.json(await buildIntegrationPayload(agencyId, rows));
         return;
       }
     }
@@ -141,7 +153,7 @@ export async function handleSetIntegration(req: Request, res: Response): Promise
   });
 
   const rows = await listAgencyIntegrationRows(agencyId);
-  res.json(buildIntegrationPayload(agencyId, rows));
+  res.json(await buildIntegrationPayload(agencyId, rows));
 }
 
 /** Internal: read a configured agency secret (server-side only). */

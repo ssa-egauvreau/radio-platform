@@ -361,17 +361,29 @@ export function ChannelPanel({
     });
   }
 
+  useEffect(() => {
+    let cancelled = false;
+    const syncTen33 = () => {
+      void api.getChannelTen33(channel.name).then((r) => {
+        if (cancelled) {
+          return;
+        }
+        setMarker((prev) => (prev === r.active ? prev : r.active));
+      });
+    };
+    syncTen33();
+    const timer = window.setInterval(syncTen33, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [channel.name]);
+
   function toggleMarker() {
-    const client = clientRef.current;
-    if (!client) {
-      return;
-    }
     const next = !marker;
-    client.setChannelMarker(next);
     setMarker(next);
-    // Also flag the channel server-side so radios show the 10-33 warning icon.
+    // Server sets DB flag, plays marker on channel, and radios poll the 10-33 icon.
     void api.setChannelTen33(channel.name, next).catch(() => {
-      client.setChannelMarker(!next);
       setMarker(!next);
     });
   }

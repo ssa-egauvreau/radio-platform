@@ -1446,6 +1446,15 @@ export async function setChannelTen33(
   );
 }
 
+/** Whether a channel is currently flagged 10-33. */
+export async function getChannelTen33Active(agencyId: number, channelName: string): Promise<boolean> {
+  const res = await requirePool().query<{ active: boolean }>(
+    `SELECT active FROM channel_markers WHERE agency_id = $1 AND channel_name = $2;`,
+    [agencyId, channelName],
+  );
+  return res.rows[0]?.active === true;
+}
+
 /** Channel names currently flagged 10-33 for an agency. */
 export async function listTen33Channels(agencyId: number): Promise<string[]> {
   const res = await requirePool().query<{ channel_name: string }>(

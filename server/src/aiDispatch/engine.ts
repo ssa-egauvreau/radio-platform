@@ -6,7 +6,8 @@ import {
   getChannelAiDispatchRow,
   getTransmissionDispatchContext,
 } from "../store.js";
-import { generateDispatcherReply } from "./llm.js";
+import { adaptDispatcherResponseForChannel, detectEmergencyCodeFromTranscript } from "./emergencyCodes.js";
+import { parseDispatcherTransmission } from "./parse.js";
 import {
   getAiDispatchPlatformConfig,
   isAiDispatchUnit,
@@ -15,6 +16,7 @@ import {
 import { playMp3UrlOnChannel } from "./playback.js";
 import { synthesizeElevenLabsMp3 } from "./tts.js";
 import { postOutboundWebhook } from "./webhook.js";
+import { applyChannelTen33Marker } from "./ten33Marker.js";
 
 const queue: number[] = [];
 let working = false;
@@ -22,6 +24,10 @@ let loopbackPort = 8080;
 
 export function configureAiDispatchEngine(options: { port: number }): void {
   loopbackPort = options.port;
+}
+
+export function getAiDispatchLoopbackPort(): number {
+  return loopbackPort;
 }
 
 export function enqueueAiDispatchForTransmission(transmissionId: number): void {
@@ -68,54 +74,122 @@ async function processTransmission(transmissionId: number): Promise<void> {
       return;
     }
 
-    const systemPrompt = await resolveAiDispatchSystemPrompt(tx.agency_id);
+    const platform = getAiDispatchPlatformConfig();
     const unitId = (tx.unit_id ?? "UNIT").trim().toUpperCase() || "UNIT";
-    const reply = await generateDispatcherReply({
+
+    // Regex 10-33 / 10-34 first (same as 10-8 dashboard) — fires marker immediately.
+    const emergencyRegex = detectEmergencyCodeFromTranscript(transcript);
+    if (emergencyRegex === "activate") {
+      await applyChannelTen33Marker({
+        loopbackPort,
+        agencyId: tx.agency_id,
+        channelName: tx.channel_name,
+        active: true,
+        markerUnitId: platform.dispatchUnitId,
+        source: "regex",
+      });
+    } else if (emergencyRegex === "clear") {
+      await applyChannelTen33Marker({
+        loopbackPort,
+        agencyId: tx.agency_id,
+        channelName: tx.channel_name,
+        active: false,
+        markerUnitId: platform.dispatchUnitId,
+        source: "regex",
+      });
+    }
+
+    const systemPrompt = await resolveAiDispatchSystemPrompt(tx.agency_id);
+    const parsed = await parseDispatcherTransmission({
       systemPrompt,
       unitId,
       channelName: tx.channel_name,
       transcript,
     });
-    if (!reply) {
+
+    if (parsed) {
+      if (parsed.trigger_emergency_tone || parsed.intent === "emergency") {
+        await applyChannelTen33Marker({
+          loopbackPort,
+          agencyId: tx.agency_id,
+          channelName: tx.channel_name,
+          active: true,
+          markerUnitId: platform.dispatchUnitId,
+          source: "ai",
+        });
+      } else if (parsed.intent === "emergency_clear") {
+        await applyChannelTen33Marker({
+          loopbackPort,
+          agencyId: tx.agency_id,
+          channelName: tx.channel_name,
+          active: false,
+          markerUnitId: platform.dispatchUnitId,
+          source: "ai",
+        });
+      }
+    }
+
+    const replyRaw = parsed?.dispatcher_response?.trim() ?? "";
+    if (!replyRaw) {
+      const needDefaultEmergency =
+        emergencyRegex === "activate" ||
+        parsed?.trigger_emergency_tone === true ||
+        parsed?.intent === "emergency";
+      if (needDefaultEmergency) {
+        const defaultEmergency = `All units 10-33 on ${tx.channel_name}, all units 10-33 on ${tx.channel_name}.`;
+        await speakDispatcherReply(tx, transmissionId, unitId, transcript, defaultEmergency, channelRow.yields_to_units);
+      }
       return;
     }
 
-    const mp3 = await synthesizeElevenLabsMp3(tx.agency_id, reply);
-    if (!mp3) {
-      return;
-    }
-
-    const platform = getAiDispatchPlatformConfig();
-    const tmpPath = join(tmpdir(), `ai-dispatch-${randomBytes(8).toString("hex")}.mp3`);
-    await writeFile(tmpPath, mp3);
-    try {
-      await playMp3UrlOnChannel({
-        loopbackPort,
-        agencyId: tx.agency_id,
-        channelName: tx.channel_name,
-        unitId: platform.dispatchUnitId,
-        yieldsToUnits: channelRow.yields_to_units,
-        mp3Url: tmpPath,
-      });
-    } finally {
-      await unlink(tmpPath).catch(() => undefined);
-    }
-
-    void postOutboundWebhook(tx.agency_id, {
-      type: "ai_dispatch_reply",
-      transmission_id: transmissionId,
-      channel: tx.channel_name,
-      unit_id: unitId,
-      transcript_in: transcript,
-      reply_text: reply,
-    });
-
-    console.log(
-      `[ai-dispatch] agency=${tx.agency_id} channel=${tx.channel_name} unit=${unitId} reply="${reply.slice(0, 80)}"`,
-    );
+    const reply = adaptDispatcherResponseForChannel(replyRaw, tx.channel_name);
+    await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, channelRow.yields_to_units);
   } catch (err) {
     console.warn(`[ai-dispatch] failed for transmission ${transmissionId}`, err);
   }
+}
+
+async function speakDispatcherReply(
+  tx: NonNullable<Awaited<ReturnType<typeof getTransmissionDispatchContext>>>,
+  transmissionId: number,
+  unitId: string,
+  transcript: string,
+  reply: string,
+  yieldsToUnits: boolean,
+): Promise<void> {
+  const mp3 = await synthesizeElevenLabsMp3(tx.agency_id, reply);
+  if (!mp3) {
+    return;
+  }
+
+  const platform = getAiDispatchPlatformConfig();
+  const tmpPath = join(tmpdir(), `ai-dispatch-${randomBytes(8).toString("hex")}.mp3`);
+  await writeFile(tmpPath, mp3);
+  try {
+    await playMp3UrlOnChannel({
+      loopbackPort,
+      agencyId: tx.agency_id,
+      channelName: tx.channel_name,
+      unitId: platform.dispatchUnitId,
+      yieldsToUnits,
+      mp3Url: tmpPath,
+    });
+  } finally {
+    await unlink(tmpPath).catch(() => undefined);
+  }
+
+  void postOutboundWebhook(tx.agency_id, {
+    type: "ai_dispatch_reply",
+    transmission_id: transmissionId,
+    channel: tx.channel_name,
+    unit_id: unitId,
+    transcript_in: transcript,
+    reply_text: reply,
+  });
+
+  console.log(
+    `[ai-dispatch] agency=${tx.agency_id} channel=${tx.channel_name} unit=${unitId} reply="${reply.slice(0, 80)}"`,
+  );
 }
 
 async function loadTranscriptText(transmissionId: number): Promise<string | null> {

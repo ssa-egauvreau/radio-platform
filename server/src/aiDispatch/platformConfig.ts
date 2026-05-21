@@ -4,6 +4,10 @@
  */
 
 import { getAgencyIntegrationValue } from "../store.js";
+import {
+  agencyUsesSunsetSafetyBundledPrompt,
+  getSunsetSafetyBundledPrompt,
+} from "./prompts/sunsetSafety.js";
 
 export interface AiDispatchPlatformConfig {
   enabled: boolean;
@@ -63,13 +67,27 @@ export function getAiDispatchPlatformStatus(): {
   };
 }
 
-/** Agency prompt overrides Railway default when set in Admin → Integrations. */
+/** Agency prompt: Integrations override → Sunset Safety bundled (SSA) → Railway default. */
 export async function resolveAiDispatchSystemPrompt(agencyId: number): Promise<string> {
   const custom = await getAgencyIntegrationValue(agencyId, "ai_dispatch_system_prompt");
   if (custom?.trim()) {
     return custom.trim();
   }
+  if (await agencyUsesSunsetSafetyBundledPrompt(agencyId)) {
+    return getSunsetSafetyBundledPrompt();
+  }
   return getAiDispatchPlatformConfig().defaultSystemPrompt;
+}
+
+export async function agencyPromptSource(agencyId: number): Promise<"custom" | "sunset_bundled" | "railway_default"> {
+  const custom = await getAgencyIntegrationValue(agencyId, "ai_dispatch_system_prompt");
+  if (custom?.trim()) {
+    return "custom";
+  }
+  if (await agencyUsesSunsetSafetyBundledPrompt(agencyId)) {
+    return "sunset_bundled";
+  }
+  return "railway_default";
 }
 
 export function normalizeDispatchUnitId(unitId: string): string {

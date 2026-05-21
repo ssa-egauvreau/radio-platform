@@ -54,7 +54,7 @@ import {
   listChannelsForUser,
   listInboxAlerts,
   listTen33Channels,
-  setChannelTen33,
+  getChannelTen33Active,
   setChannelAiDispatch,
   listChannelAiDispatchEnabled,
   getChannelAiDispatchRow,
@@ -105,7 +105,13 @@ import {
 import { getPool } from "./db.js";
 import { getCachedAuth, invalidateCachedAuth, setCachedAuth } from "./sessionCache.js";
 import { handleListIntegrations, handleSetIntegration } from "./integrations/adminApi.js";
-import { getAiDispatchPlatformStatus } from "./aiDispatch/platformConfig.js";
+import { getAiDispatchLoopbackPort } from "./aiDispatch/engine.js";
+import {
+  agencyPromptSource,
+  getAiDispatchPlatformConfig,
+  getAiDispatchPlatformStatus,
+} from "./aiDispatch/platformConfig.js";
+import { applyChannelTen33Marker } from "./aiDispatch/ten33Marker.js";
 
 /** Legacy global radio key — lets a handset fetch its agency's custom tones. */
 const radioApiKey = process.env.RADIO_API_KEY?.trim();
@@ -1942,12 +1948,13 @@ export function createApiRouter(): Router {
       const platform = getAiDispatchPlatformStatus();
       const elevenKey = await getAgencyIntegrationValue(agencyId, "elevenlabs_api_key");
       const voiceId = await getAgencyIntegrationValue(agencyId, "elevenlabs_voice_id");
-      const prompt = await getAgencyIntegrationValue(agencyId, "ai_dispatch_system_prompt");
+      const promptSource = await agencyPromptSource(agencyId);
       res.json({
         platform_enabled: platform.enabled,
         platform_llm_configured: platform.llmConfigured,
         agency_tts_configured: !!elevenKey && !!voiceId,
-        agency_prompt_configured: !!prompt,
+        agency_prompt_configured: promptSource !== "railway_default",
+        agency_prompt_source: promptSource,
         model: platform.model,
         dispatch_unit_id: platform.dispatchUnitId,
       });
@@ -1994,6 +2001,20 @@ export function createApiRouter(): Router {
     }
   });
 
+  router.get("/channels/ten33", requireAgencyOperator, async (req, res) => {
+    try {
+      const channel = String(req.query.channel ?? "").trim();
+      if (!channel) {
+        res.status(400).json({ error: "missing_channel" });
+        return;
+      }
+      const active = await getChannelTen33Active(req.authUser!.agencyId!, channel);
+      res.json({ active });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
   router.post("/channels/ten33", requireAgencyOperator, async (req, res) => {
     try {
       const body = (req.body ?? {}) as Record<string, unknown>;
@@ -2002,8 +2023,18 @@ export function createApiRouter(): Router {
         res.status(400).json({ error: "missing_channel" });
         return;
       }
-      await setChannelTen33(req.authUser!.agencyId!, channel, body.active === true);
-      res.json({ ok: true });
+      const active = body.active === true;
+      const agencyId = req.authUser!.agencyId!;
+      const platform = getAiDispatchPlatformConfig();
+      await applyChannelTen33Marker({
+        loopbackPort: getAiDispatchLoopbackPort(),
+        agencyId,
+        channelName: channel,
+        active,
+        markerUnitId: platform.dispatchUnitId,
+        source: "manual",
+      });
+      res.json({ ok: true, active });
     } catch (error) {
       fail(res, error);
     }
