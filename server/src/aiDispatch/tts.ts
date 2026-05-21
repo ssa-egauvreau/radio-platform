@@ -2,11 +2,16 @@ import { getAgencyIntegrationValue } from "../store.js";
 import { prepareTextForTts } from "./speech/prepareTextForTts.js";
 import { getTtsPrecacheHit, scheduleAgencyTtsPrecache } from "./ttsPrecache.js";
 
-/** Eleven v3 — expressive dispatcher voice (higher latency than Flash/Turbo). */
-const DEFAULT_MODEL_ID = "eleven_v3";
+/**
+ * Real-time dispatcher voice. `eleven_v3` is alpha and NOT reachable through the
+ * public text-to-speech API (it 4xxs for self-serve accounts), which silences the
+ * dispatcher entirely — so default to the API-accessible Turbo model. Set
+ * ELEVENLABS_MODEL_ID=eleven_v3 only on an account with v3 API access.
+ */
+const DEFAULT_MODEL_ID = "eleven_turbo_v2_5";
 
 /**
- * Eleven v3 stability presets (UI labels → API value):
+ * Stability presets (UI labels → API value):
  *   Creative = 0.0 (widest emotional range)
  *   Natural  = 0.5
  *   Robust   = 1.0 (most consistent)
