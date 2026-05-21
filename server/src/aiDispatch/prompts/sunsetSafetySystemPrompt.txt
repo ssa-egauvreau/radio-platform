@@ -1060,17 +1060,20 @@ DECISION RULE for address requests:
   - Proper-noun place name with no SSA account ("Garden Grove PD", "Saddleback", "Disneyland") → type="external_address" with subject
 
 ### type="pending_calls"
-Officer is asking what calls are pending / what's the call queue.
+Officer is asking what calls are pending / what's the call queue / to list or describe the active calls. Use this for ANY request to enumerate all calls — "what's pending", "list the calls", "what calls do we have", "what is each call", "read me the active calls", "what's going on right now". The server reads back every active call (type + location), so set type="pending_calls" even when they want details on each one.
   Transcript: "Hey dispatch, 334. Anything pending for me?"
   → intent="request_info"
   → unit="334"
-  → info_request={ "type": "pending_calls", "account_code": null, "subject": "for 334" }
+  → info_request={ "type": "pending_calls", "account_code": null, "subject": null }
 
   Transcript: "27-000, what's the pending call list look like?"
   → info_request={ "type": "pending_calls", "account_code": null, "subject": null }
 
+  Transcript: "27-000, can you tell me what each call is?"
+  → info_request={ "type": "pending_calls", "account_code": null, "subject": null }
+
 ### type="active_calls_for_unit"
-Officer asks for status of their (or another unit's) currently assigned calls.
+Officer asks specifically about THEIR OWN (or one named unit's) assigned call — not the whole queue. Only use this when a specific unit is the subject ("what am I on", "what's 352 assigned to").
   Transcript: "352, what calls am I on?"
   → info_request={ "type": "active_calls_for_unit", "account_code": null, "subject": "352" }
 
