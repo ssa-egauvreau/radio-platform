@@ -270,6 +270,13 @@ fun RadioScreen(
                     styles = styles,
                 )
             }
+            if (state.appUpdateBanner.isNotEmpty()) {
+                LcdAlertBanner(
+                    text = state.appUpdateBanner,
+                    accent = palette.statusAmber,
+                    styles = styles,
+                )
+            }
             if (state.replayBanner.isNotEmpty()) {
                 Column(
                     modifier = Modifier.fillMaxWidth(),
@@ -418,6 +425,13 @@ private fun LcdUniversalCockpit(
                 } else {
                     p.statusRed
                 },
+                styles = styles,
+            )
+        }
+        if (state.appUpdateBanner.isNotEmpty()) {
+            LcdAlertBanner(
+                text = state.appUpdateBanner,
+                accent = p.statusAmber,
                 styles = styles,
             )
         }

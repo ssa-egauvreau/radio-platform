@@ -33,6 +33,7 @@ class RadioViewModelFactory(
                 connectivityMonitor = graph.connectivityMonitor,
                 serverReachabilityMonitor = graph.serverReachabilityMonitor,
                 externalMicMonitor = graph.externalMicMonitor,
+                appUpdater = graph.appUpdater,
             ) as T
         }
         throw IllegalArgumentException("Unknown ViewModel type ${modelClass.name}")

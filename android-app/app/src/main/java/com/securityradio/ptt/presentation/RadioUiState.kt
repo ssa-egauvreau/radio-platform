@@ -114,6 +114,12 @@ data class RadioUiState(
      */
     val connectivityBanner: String,
 
+    /**
+     * OTA APK downloaded from the server — operator should reboot so the new build installs.
+     * Cleared automatically once [android.os.Build.VERSION_CODE] reaches the pending build.
+     */
+    val appUpdateBanner: String = "",
+
     /** Non-blank while the last RX is replaying; holds the "who was talking" caption. */
     val replayBanner: String,
     /** Whisper transcript for quick replay (shown under [replayBanner]). */

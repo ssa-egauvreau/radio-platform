@@ -35,8 +35,10 @@ import com.securityradio.ptt.device.LocationReporter
 import com.securityradio.ptt.device.PttHapticFeedback
 import com.securityradio.ptt.device.PttMicCapture
 import com.securityradio.ptt.DisplayRouter
+import com.securityradio.ptt.device.AppUpdater
 import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.RadioUiSoundPlayer
+import com.securityradio.ptt.BuildConfig
 import com.securityradio.ptt.device.ServerReachabilityMonitor
 import com.securityradio.ptt.device.VoiceControlEvent
 import com.securityradio.ptt.device.ScanVoiceListenTransport
@@ -87,6 +89,7 @@ class RadioViewModel(
     private val connectivityMonitor: ConnectivityMonitor,
     private val serverReachabilityMonitor: ServerReachabilityMonitor,
     private val externalMicMonitor: ExternalMicMonitor,
+    private val appUpdater: AppUpdater,
 ) : ViewModel() {
 
     @Volatile
@@ -208,6 +211,8 @@ class RadioViewModel(
                 mp22UsePhysicalDisplay = radioPreferences.isMp22UsePhysicalDisplay(),
             )
         }
+        refreshAppUpdateBanner()
+        appUpdater.setUpdateListener { notice -> onAppUpdateDownloaded(notice) }
         viewModelScope.launch {
             while (isActive) {
                 refreshClock()
@@ -405,6 +410,38 @@ class RadioViewModel(
     /** Menu / non-PTT control click sound (same as channel switch WAV). */
     fun playUiMenuSound() {
         soundPlayer.playChannelSwitch()
+    }
+
+    /** Called on launch and when [AppUpdater] finishes downloading a newer APK. */
+    fun refreshAppUpdateBanner() {
+        val installedCode = BuildConfig.VERSION_CODE.toLong()
+        val notice = appUpdater.peekPendingUpdateNotice()
+        if (notice == null) {
+            _uiState.update { it.copy(appUpdateBanner = "") }
+            return
+        }
+        applyAppUpdateBanner(notice.versionName)
+    }
+
+    fun onAppUpdateDownloaded(notice: AppUpdater.UpdateNotice) {
+        if (notice.versionCode <= BuildConfig.VERSION_CODE.toLong()) {
+            appUpdater.clearPendingUpdate()
+            _uiState.update { it.copy(appUpdateBanner = "") }
+            return
+        }
+        applyAppUpdateBanner(notice.versionName)
+        soundPlayer.playChannelSwitch()
+    }
+
+    private fun applyAppUpdateBanner(versionName: String) {
+        val label = versionName.trim().ifBlank { "NEW" }
+        val banner = "UPDATE $label DOWNLOADED — REBOOT RADIO TO INSTALL"
+        _uiState.update {
+            it.copy(
+                appUpdateBanner = banner,
+                statusMessage = "REBOOT TO INSTALL UPDATE",
+            )
+        }
     }
 
     /** MP22: track which display the activity is on (for setup vs radio screen hints). */
@@ -2133,6 +2170,7 @@ class RadioViewModel(
     }
 
     override fun onCleared() {
+        appUpdater.setUpdateListener(null)
         // Voice and GPS intentionally keep running after the UI is gone — a
         // foreground service holds the process, like a radio left in a pocket.
         // pttMicCapture and soundPlayer are process-scoped singletons whose

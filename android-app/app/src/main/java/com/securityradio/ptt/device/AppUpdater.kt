@@ -3,6 +3,8 @@ package com.securityradio.ptt.device
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import androidx.core.content.FileProvider
 import com.securityradio.ptt.data.remote.normalizeApiBaseUrl
@@ -48,6 +50,40 @@ class AppUpdater(
         val sha256: String,
     )
 
+    /** Shown on the radio LCD after a verified APK download (install may finish after reboot). */
+    data class UpdateNotice(
+        val versionCode: Long,
+        val versionName: String,
+    )
+
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var updateListener: ((UpdateNotice) -> Unit)? = null
+
+    fun setUpdateListener(listener: ((UpdateNotice) -> Unit)?) {
+        updateListener = listener
+    }
+
+    /**
+     * If a newer build was downloaded but this process is still on an older [currentVersionCode],
+     * returns the pending notice so the UI can prompt for reboot.
+     */
+    fun peekPendingUpdateNotice(): UpdateNotice? {
+        val code = prefs.getLong(KEY_PENDING_VERSION_CODE, 0L)
+        if (code <= currentVersionCode) {
+            if (code > 0L) clearPendingUpdate()
+            return null
+        }
+        val name = prefs.getString(KEY_PENDING_VERSION_NAME, null)?.trim().orEmpty()
+        return UpdateNotice(versionCode = code, versionName = name.ifBlank { code.toString() })
+    }
+
+    fun clearPendingUpdate() {
+        prefs.edit()
+            .remove(KEY_PENDING_VERSION_CODE)
+            .remove(KEY_PENDING_VERSION_NAME)
+            .apply()
+    }
+
     /** Throttled background check → download → install. Safe to call on every launch. */
     fun checkAndInstallAsync(force: Boolean = false) {
         Thread({ runCheck(force) }, "app-updater").start()
@@ -63,6 +99,8 @@ class AppUpdater(
                 return
             }
             val apk = downloadAndVerify(available) ?: return
+            markPendingUpdate(available)
+            notifyUpdateDownloaded(available)
             AppUpdateInstallGate.arm()
             try {
                 launchInstall(apk)
@@ -159,9 +197,27 @@ class AppUpdater(
         prefs.edit().putLong(KEY_LAST_CHECK, System.currentTimeMillis()).apply()
     }
 
+    private fun markPendingUpdate(available: Available) {
+        prefs.edit()
+            .putLong(KEY_PENDING_VERSION_CODE, available.versionCode)
+            .putString(KEY_PENDING_VERSION_NAME, available.versionName)
+            .apply()
+    }
+
+    private fun notifyUpdateDownloaded(available: Available) {
+        val notice =
+            UpdateNotice(
+                versionCode = available.versionCode,
+                versionName = available.versionName,
+            )
+        mainHandler.post { updateListener?.invoke(notice) }
+    }
+
     private companion object {
         const val TAG = "AppUpdater"
         const val KEY_LAST_CHECK = "last_check_ms"
+        const val KEY_PENDING_VERSION_CODE = "pending_version_code"
+        const val KEY_PENDING_VERSION_NAME = "pending_version_name"
         const val CHECK_INTERVAL_MS = 6L * 60 * 60 * 1000 // poll at most every 6 hours
     }
 }
