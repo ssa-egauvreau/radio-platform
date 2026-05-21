@@ -75,6 +75,13 @@ class AssetRadioUiSoundPlayer(
      */
     private val emergencyAttrs: AudioAttributes = emergencyAudioAttributes()
 
+    /**
+     * Busy tone shares the emergency tone's loud, alarm-stream, audibility-enforced routing so
+     * "channel busy" is clearly heard over a running engine / loud environment — the media-stream
+     * path was easily ducked and far too quiet on rugged handsets.
+     */
+    private val busyAttrs: AudioAttributes = emergencyAudioAttributes()
+
     private fun emergencyAudioAttributes(): AudioAttributes {
         val b =
             AudioAttributes.Builder()
@@ -88,6 +95,12 @@ class AssetRadioUiSoundPlayer(
 
     private fun MediaPlayer.applyUiAudio(): MediaPlayer {
         setAudioAttributes(uiAudioAttrs)
+        setVolume(1f, 1f)
+        return this
+    }
+
+    private fun MediaPlayer.applyBusyAudio(): MediaPlayer {
+        setAudioAttributes(busyAttrs)
         setVolume(1f, 1f)
         return this
     }
@@ -164,6 +177,7 @@ class AssetRadioUiSoundPlayer(
                 cancelSwap = ::cancelBusyLoopSwap,
                 setSwapRunnable = { busyLoopSwapRunnable = it },
                 isActive = { busyLoopPlayerA != null && busyLoopPlayerB != null },
+                applyAudio = { applyBusyAudio() },
             )
         }
     }
@@ -314,7 +328,7 @@ class AssetRadioUiSoundPlayer(
     /** Lost-link alert: same busy.wav, capped so it does not loop (re-triggered every 15s offline). */
     private fun playBusyAlertCapped(maxMs: Long) {
         stopBusyAlertInternal()
-        val player = MediaPlayer().applyUiAudio()
+        val player = MediaPlayer().applyBusyAudio()
         if (!applySource(player, FILE_BUSY)) {
             player.release()
             return
@@ -424,8 +438,11 @@ class AssetRadioUiSoundPlayer(
         }
     }
 
-    private fun createLoopMediaPlayer(fileName: String): MediaPlayer? {
-        val player = MediaPlayer().applyUiAudio()
+    private fun createLoopMediaPlayer(
+        fileName: String,
+        applyAudio: MediaPlayer.() -> MediaPlayer = { applyUiAudio() },
+    ): MediaPlayer? {
+        val player = MediaPlayer().applyAudio()
         if (!applySource(player, fileName)) {
             player.release()
             return null
@@ -458,9 +475,10 @@ class AssetRadioUiSoundPlayer(
         cancelSwap: () -> Unit,
         setSwapRunnable: (Runnable?) -> Unit,
         isActive: () -> Boolean,
+        applyAudio: MediaPlayer.() -> MediaPlayer = { applyUiAudio() },
     ) {
-        val a = createLoopMediaPlayer(fileName) ?: return
-        val b = createLoopMediaPlayer(fileName) ?: run {
+        val a = createLoopMediaPlayer(fileName, applyAudio) ?: return
+        val b = createLoopMediaPlayer(fileName, applyAudio) ?: run {
             a.release()
             return
         }
