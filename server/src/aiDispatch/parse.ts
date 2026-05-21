@@ -12,6 +12,7 @@ export interface InfoRequestFields {
     | "external_address"
     | "pending_calls"
     | "active_calls_for_unit"
+    | "call_details"
     | "phone"
     | "contact"
     | "legal_code"
@@ -119,6 +120,7 @@ export function normalizeAiDispatchParse(raw: unknown): AiDispatchParseResult | 
       "external_address",
       "pending_calls",
       "active_calls_for_unit",
+      "call_details",
       "phone",
       "contact",
       "legal_code",
