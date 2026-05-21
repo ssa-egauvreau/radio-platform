@@ -12,7 +12,7 @@ export interface IntegrationDefinition {
   label: string;
   description: string;
   kind: IntegrationFieldKind;
-  group: "ai_dispatch" | "webhooks" | "lookups" | "ten8_cad";
+  group: "ai_dispatch" | "webhooks" | "lookups" | "ten8_cad" | "ten8_new_incident";
   availability: IntegrationAvailability;
   /** Optional placeholder for empty inputs in the admin UI. */
   placeholder?: string;
@@ -87,33 +87,34 @@ export const INTEGRATION_DEFINITIONS: IntegrationDefinition[] = [
   },
   {
     key: "ten8_webhook_secret",
-    label: "10-8 webhook bearer token",
+    label: "10-8 incident export bearer token",
     description:
-      "Bearer token 10-8 Systems sends when posting incident exports to your safeT webhook URL.",
+      "Same value as WEBHOOK_SECRET on the old 10-8 alert dashboard. 10-8 sends this as Authorization: Bearer … when posting incident exports to safeT.",
     kind: "secret",
     group: "webhooks",
     availability: "active",
   },
   {
     key: "ten8_api_key",
-    label: "10-8 CAD API key",
-    description: "X-API-Key from 10-8 support — used when AI posts CAD comments (optional).",
+    label: "10-8 CAD API key (v1.0.8)",
+    description:
+      "Same as TEN8_API_KEY on the old dispatcher. X-API-Key for reads (pending calls, incident lookup) and CAD comments. Not used to create brand-new incidents.",
     kind: "secret",
     group: "ten8_cad",
     availability: "active",
   },
   {
     key: "ten8_api_secret",
-    label: "10-8 CAD API secret",
-    description: "X-API-Secret paired with the 10-8 API key.",
+    label: "10-8 CAD API secret (v1.0.8)",
+    description: "Same as TEN8_API_SECRET on the old dispatcher. Paired with the CAD API key above.",
     kind: "secret",
     group: "ten8_cad",
     availability: "active",
   },
   {
     key: "ten8_api_base_url",
-    label: "10-8 CAD API base URL",
-    description: "Optional override; default is the standard 10-8 AWS gateway URL.",
+    label: "10-8 CAD API base URL (v1.0.8)",
+    description: "Same as TEN8_API_BASE_URL. Optional; default is the standard 10-8 AWS gateway.",
     kind: "url",
     group: "ten8_cad",
     availability: "active",
@@ -122,11 +123,40 @@ export const INTEGRATION_DEFINITIONS: IntegrationDefinition[] = [
   {
     key: "ten8_live_execution",
     label: "10-8 live CAD writes",
-    description: "Set to 1 or true to actually post comments to 10-8 (otherwise shadow/log only).",
+    description:
+      "Same as live_execution_enabled on the old dispatcher. 1 = post comments to CAD; 0 = shadow mode (log only, no writes).",
     kind: "text",
     group: "ten8_cad",
     availability: "active",
     placeholder: "0",
+  },
+  {
+    key: "ten8_new_incident_api_key",
+    label: "10-8 New Incident API key",
+    description:
+      "Same as TEN8_NEW_INCIDENT_API_KEY. Basic-auth username for creating new CAD calls (self-dispatch). Separate from the v1.0.8 key pair.",
+    kind: "secret",
+    group: "ten8_new_incident",
+    availability: "active",
+  },
+  {
+    key: "ten8_new_incident_api_secret",
+    label: "10-8 New Incident API secret",
+    description:
+      "Same as TEN8_NEW_INCIDENT_API_SECRET. Basic-auth password paired with the New Incident API key.",
+    kind: "secret",
+    group: "ten8_new_incident",
+    availability: "active",
+  },
+  {
+    key: "ten8_new_incident_api_base_url",
+    label: "10-8 New Incident API base URL",
+    description:
+      "Same as TEN8_NEW_INCIDENT_API_BASE_URL. Optional; default https://interface.10-8systems.com",
+    kind: "url",
+    group: "ten8_new_incident",
+    availability: "active",
+    placeholder: "https://interface.10-8systems.com",
   },
 ];
 

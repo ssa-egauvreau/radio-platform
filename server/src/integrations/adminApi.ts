@@ -19,7 +19,8 @@ const GROUP_LABELS: Record<IntegrationDefinition["group"], string> = {
   ai_dispatch: "AI dispatcher (agency)",
   webhooks: "Webhooks",
   lookups: "Lookups (portal)",
-  ten8_cad: "10-8 CAD",
+  ten8_cad: "10-8 CAD API (reads & comments)",
+  ten8_new_incident: "10-8 New Incident API (create calls)",
 };
 
 function clientIp(req: Request): string {

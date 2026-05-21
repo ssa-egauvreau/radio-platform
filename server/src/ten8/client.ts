@@ -69,3 +69,81 @@ export async function ten8AddComment(
 export async function ten8Configured(agencyId: number): Promise<boolean> {
   return (await ten8Config(agencyId)) != null;
 }
+
+export async function ten8ListIncidents(
+  agencyId: number,
+  opts?: { from?: number; to?: number; field?: string },
+): Promise<{ ok: boolean; status: number; data: unknown }> {
+  let qs = "";
+  if (opts?.from != null && opts.field) {
+    const params = new URLSearchParams({ from: String(opts.from), field: opts.field });
+    if (opts.to != null) {
+      params.set("to", String(opts.to));
+    }
+    qs = `?${params.toString()}`;
+  }
+  return ten8Fetch(agencyId, "GET", `/v1/incidents${qs}`);
+}
+
+const DEFAULT_NEW_INCIDENT_BASE = "https://interface.10-8systems.com";
+
+async function newIncidentConfig(agencyId: number): Promise<{
+  baseUrl: string;
+  apiKey: string;
+  apiSecret: string;
+  live: boolean;
+} | null> {
+  let apiKey = (await getAgencyIntegrationValue(agencyId, "ten8_new_incident_api_key"))?.trim() ?? "";
+  let apiSecret =
+    (await getAgencyIntegrationValue(agencyId, "ten8_new_incident_api_secret"))?.trim() ?? "";
+  if (!apiKey || !apiSecret) {
+    const cad = await ten8Config(agencyId);
+    if (!cad) {
+      return null;
+    }
+    apiKey = cad.apiKey!;
+    apiSecret = cad.apiSecret!;
+  }
+  const baseUrl =
+    (await getAgencyIntegrationValue(agencyId, "ten8_new_incident_api_base_url"))?.trim() ||
+    DEFAULT_NEW_INCIDENT_BASE;
+  const liveRaw = await getAgencyIntegrationValue(agencyId, "ten8_live_execution");
+  const live = liveRaw === "1" || liveRaw?.toLowerCase() === "true";
+  return { baseUrl: baseUrl.replace(/\/$/, ""), apiKey, apiSecret, live };
+}
+
+export async function ten8NewIncidentConfigured(agencyId: number): Promise<boolean> {
+  return (await newIncidentConfig(agencyId)) != null;
+}
+
+/** Create a CAD call via 10-8 legacy New Incident API (Basic auth). */
+export async function ten8CreateIncident(
+  agencyId: number,
+  body: Record<string, unknown>,
+): Promise<{ ok: boolean; shadow?: boolean; status?: number; data?: unknown }> {
+  const cfg = await newIncidentConfig(agencyId);
+  if (!cfg) {
+    return { ok: false, data: { error: "ten8_new_incident_not_configured" } };
+  }
+  if (!cfg.live) {
+    console.log("[ten8] shadow POST /incidents", body);
+    return { ok: true, shadow: true, data: { shadow: true, path: "/incidents", body } };
+  }
+  const credentials = Buffer.from(`${cfg.apiKey}:${cfg.apiSecret}`).toString("base64");
+  const r = await fetch(`${cfg.baseUrl}/incidents`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${credentials}`,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  let data: unknown = null;
+  try {
+    data = await r.json();
+  } catch {
+    data = await r.text().catch(() => null);
+  }
+  return { ok: r.ok, status: r.status, data };
+}

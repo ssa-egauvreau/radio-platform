@@ -81,10 +81,72 @@ export function IntegrationsPanel() {
       <h2>Integrations</h2>
       <p className="muted" style={{ maxWidth: "52rem" }}>
         Values saved here apply only to <strong>your agency</strong>. Plate/VIN keys power 912
-        readbacks on the radio. Under <strong>Webhooks</strong>, set the 10-8 bearer token, then in
-        10-8 point incident export to{" "}
-        <code>/v1/webhooks/10-8?agency=YOUR_AGENCY_SLUG</code> on this server.
+        readbacks on the radio.
       </p>
+
+      <section
+        className="card-like"
+        style={{ marginBottom: "1.25rem", maxWidth: "52rem", padding: "1rem 1.25rem" }}
+      >
+        <h3 style={{ marginTop: 0, fontSize: "1rem" }}>10-8 Systems — where each key goes</h3>
+        <p className="muted" style={{ fontSize: "0.9rem", marginBottom: "0.75rem" }}>
+          If you migrated from the old <strong>10-8 alert dashboard</strong> Railway project, you
+          likely have <strong>two API key pairs</strong> plus a <strong>webhook bearer</strong>.
+          Paste them into the sections below (not Railway).
+        </p>
+        <table style={{ width: "100%", fontSize: "0.88rem", borderCollapse: "collapse" }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #444" }}>
+                Old Railway name
+              </th>
+              <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #444" }}>
+                Put it here (Integrations)
+              </th>
+              <th style={{ textAlign: "left", padding: "6px 8px", borderBottom: "1px solid #444" }}>
+                Used for
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style={{ padding: "6px 8px", verticalAlign: "top" }}>
+                <code>WEBHOOK_SECRET</code>
+              </td>
+              <td style={{ padding: "6px 8px" }}>
+                <strong>Webhooks</strong> → 10-8 incident export bearer token
+              </td>
+              <td style={{ padding: "6px 8px" }}>
+                10-8 pushes new/updated calls to safeT. In 10-8 admin, set URL to{" "}
+                <code>/v1/webhooks/10-8?agency=YOUR_AGENCY_SLUG</code>
+              </td>
+            </tr>
+            <tr>
+              <td style={{ padding: "6px 8px", verticalAlign: "top" }}>
+                <code>TEN8_API_KEY</code> + <code>TEN8_API_SECRET</code>
+              </td>
+              <td style={{ padding: "6px 8px" }}>
+                <strong>10-8 CAD API</strong> → key + secret (v1.0.8)
+              </td>
+              <td style={{ padding: "6px 8px" }}>
+                Read pending/active calls, look up incidents, post AI comments to CAD
+              </td>
+            </tr>
+            <tr>
+              <td style={{ padding: "6px 8px", verticalAlign: "top" }}>
+                <code>TEN8_NEW_INCIDENT_API_KEY</code> + <code>TEN8_NEW_INCIDENT_API_SECRET</code>
+              </td>
+              <td style={{ padding: "6px 8px" }}>
+                <strong>10-8 New Incident API</strong> → key + secret
+              </td>
+              <td style={{ padding: "6px 8px" }}>
+                Create brand-new CAD incidents (self-dispatch / CFS). Different host than the v1.0.8
+                pair.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
 
       {error && <p className="error">{error}</p>}
 

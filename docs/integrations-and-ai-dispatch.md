@@ -87,14 +87,27 @@ Server logs are tagged `[ai-dispatch]`.
 
 ---
 
-## 10-8 CAD webhook (incident export)
+## 10-8 Systems (three credentials from the old dispatcher)
+
+Migrate from the **10-8 alert dashboard** Railway project into **Admin → Integrations** (not Railway):
+
+| Old Railway variable | Integrations field | Purpose |
+|---------------------|-------------------|---------|
+| `WEBHOOK_SECRET` | **Webhooks** → 10-8 incident export bearer token | 10-8 **pushes** incidents to safeT |
+| `TEN8_API_KEY` + `TEN8_API_SECRET` | **10-8 CAD API** → key + secret (v1.0.8) | **Reads** (pending calls, lookups) + **comments** on existing calls |
+| `TEN8_NEW_INCIDENT_API_KEY` + `TEN8_NEW_INCIDENT_API_SECRET` | **10-8 New Incident API** → key + secret | **Creates** new CAD calls (Basic auth on `interface.10-8systems.com`) |
+| `TEN8_API_BASE_URL` | 10-8 CAD API base URL (optional) | Override v1.0.8 gateway |
+| `TEN8_NEW_INCIDENT_API_BASE_URL` | New Incident API base URL (optional) | Override create-call host |
+| `live_execution_enabled` (UI toggle) | **10-8 live CAD writes** = `1` or `0` | `0` = shadow/log only; `1` = real writes |
+
+### Incident export webhook
 
 Point **10-8 Systems** incident export at:
 
 `https://YOUR_SAFET_HOST/v1/webhooks/10-8?agency=YOUR_AGENCY_SLUG`
 
-- **Auth:** Bearer token — set **10-8 webhook bearer token** under **Admin → Integrations → Webhooks** (recommended). Railway `TEN8_WEBHOOK_SECRET` is an optional operator fallback only.
-- **Agency:** `agency` query must match your agency slug (e.g. `?agency=metro-fire`). Railway `TEN8_WEBHOOK_AGENCY_SLUG` is optional if you always use the query param.
+- **Auth:** Bearer = value from **10-8 incident export bearer token** (same as old `WEBHOOK_SECRET`).
+- **Agency:** `agency` query must match your agency slug.
 
 Active incidents appear on **Command → AI dispatch activity log**.
 
@@ -108,12 +121,17 @@ Active incidents appear on **Command → AI dispatch activity log**.
 
 Do **not** put plate keys in Railway for normal agency setup. Optional env fallbacks (`PLATE_LOOKUP_DEFAULT_STATE`, `PLATE_LOOKUP_PROVIDER`) exist for operators only; per-agency keys in Integrations take precedence.
 
-## 10-8 CAD writes (optional)
+## 10-8 CAD API and New Incident API
 
-**Admin → Integrations → 10-8 CAD:**
+**10-8 CAD API (v1.0.8)** — `TEN8_API_KEY` / `TEN8_API_SECRET` from the old dispatcher:
 
-- API key + secret from 10-8 support.
-- **10-8 live CAD writes** — set to `1` to post AI summary comments to the active incident; leave `0` for shadow mode (log only).
+- List/read incidents, post AI summary **comments** on the active webhook incident.
+- **10-8 live CAD writes** — `1` to post for real; `0` for shadow mode (log only).
+
+**10-8 New Incident API** — `TEN8_NEW_INCIDENT_API_KEY` / `TEN8_NEW_INCIDENT_API_SECRET`:
+
+- Second key pair from 10-8 support; used only to **create** new calls (not reads/comments).
+- If empty, safeT can fall back to the v1.0.8 key pair when creating calls (same as the old server).
 
 ## AI activity log
 
