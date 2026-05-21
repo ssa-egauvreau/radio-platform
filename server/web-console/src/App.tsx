@@ -34,6 +34,9 @@ const OwnerPage = lazy(() =>
 const LegalPage = lazy(() =>
   import("./pages/legal/LegalPage").then((m) => ({ default: m.LegalPage })),
 );
+const AiActivityPage = lazy(() =>
+  import("./pages/AiActivityPage").then((m) => ({ default: m.AiActivityPage })),
+);
 
 export function App() {
   const { ready, user } = useAuth();
@@ -122,6 +125,20 @@ export function App() {
             <Navigate to="/radio" replace />
           ) : (
             <OnAirWindowPage />
+          )
+        }
+      />
+      <Route
+        path="/console/ai-activity"
+        element={
+          !user ? (
+            <Navigate to="/login" replace />
+          ) : user.role === "owner" ? (
+            <Navigate to="/owner" replace />
+          ) : user.role === "radio" ? (
+            <Navigate to="/radio" replace />
+          ) : (
+            <AiActivityPage />
           )
         }
       />

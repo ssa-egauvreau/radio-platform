@@ -85,6 +85,9 @@ export function Topbar({
                 <Link className={section === "console" ? "nav-tab active" : "nav-tab"} to="/console">
                   <IconRadio size={15} /> Command
                 </Link>
+                <Link className="nav-tab" to="/console/ai-activity">
+                  AI Log
+                </Link>
                 <Link className={section === "bridges" ? "nav-tab active" : "nav-tab"} to="/bridges">
                   <IconWaveform size={15} /> Bridges
                 </Link>

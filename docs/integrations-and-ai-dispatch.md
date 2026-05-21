@@ -83,6 +83,32 @@ Server logs are tagged `[ai-dispatch]`.
 
 ---
 
-## Optional: 10-8 Alert Portal server
+## 10-8 CAD webhook (incident export)
 
-You do **not** need to send the old 10-8 dispatcher server repo for this to work. safeT now runs the dispatcher pipeline on the same platform. Share that code only if you want to match exact legacy regex rules, UI, or prompt wording from the old project.
+Point **10-8 Systems** incident export at:
+
+`https://YOUR_SAFET_HOST/v1/webhooks/10-8?agency=YOUR_AGENCY_SLUG`
+
+- **Auth:** Bearer token — set `ten8_webhook_secret` under **Admin → Integrations → Webhooks**, or Railway `TEN8_WEBHOOK_SECRET`.
+- **Agency:** `agency` query must match your agency slug (or set Railway `TEN8_WEBHOOK_AGENCY_SLUG`).
+
+Active incidents appear on **Command → AI dispatch activity log**.
+
+## Plate / VIN lookup
+
+**Admin → Integrations → Lookups:**
+
+- **License plate lookup API key** — PlateToVIN.com key (912 plate readbacks).
+- **VIN lookup API key** — Auto.dev (optional; uses plate key if empty).
+- **Default plate state** — e.g. `CA`.
+
+## 10-8 CAD writes (optional)
+
+**Admin → Integrations → 10-8 CAD:**
+
+- API key + secret from 10-8 support.
+- **10-8 live CAD writes** — set to `1` to post AI summary comments to the active incident; leave `0` for shadow mode (log only).
+
+## AI activity log
+
+**Command → AI dispatch activity log** (or top nav **AI Log**): live feed of transcripts, intents, on-air replies, plate lookups, and 10-8 webhook state. Refreshes every 5 seconds.

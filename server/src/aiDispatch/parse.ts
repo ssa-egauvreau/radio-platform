@@ -1,5 +1,11 @@
 import { getAiDispatchPlatformConfig } from "./platformConfig.js";
 
+export interface PlateRequestFields {
+  plate: string | null;
+  state: string | null;
+  vin: string | null;
+}
+
 export interface AiDispatchParseResult {
   actionable: boolean;
   intent: string;
@@ -7,6 +13,8 @@ export interface AiDispatchParseResult {
   confidence: number;
   dispatcher_response: string | null;
   trigger_emergency_tone: boolean;
+  recommended_action: string | null;
+  plate_request: PlateRequestFields | null;
 }
 
 const VALID_INTENTS = new Set([
@@ -66,6 +74,25 @@ export function normalizeAiDispatchParse(raw: unknown): AiDispatchParseResult | 
       ? ai.dispatcher_response.trim()
       : null;
   const trigger_emergency_tone = ai.trigger_emergency_tone === true;
+  const recommended_action =
+    typeof ai.recommended_action === "string" && ai.recommended_action.trim()
+      ? ai.recommended_action.trim()
+      : null;
+  let plate_request: PlateRequestFields | null = null;
+  if (ai.plate_request && typeof ai.plate_request === "object" && !Array.isArray(ai.plate_request)) {
+    const pr = ai.plate_request as Record<string, unknown>;
+    plate_request = {
+      plate: typeof pr.plate === "string" ? pr.plate.trim().toUpperCase() : null,
+      state: typeof pr.state === "string" ? pr.state.trim().toUpperCase() : null,
+      vin:
+        typeof pr.vin === "string"
+          ? pr.vin.trim().toUpperCase().replace(/[\s-]/g, "")
+          : null,
+    };
+    if (!plate_request.plate && !plate_request.vin) {
+      plate_request = null;
+    }
+  }
   return {
     actionable: ai.actionable,
     intent: ai.intent,
@@ -73,6 +100,8 @@ export function normalizeAiDispatchParse(raw: unknown): AiDispatchParseResult | 
     confidence: ai.confidence,
     dispatcher_response,
     trigger_emergency_tone,
+    recommended_action,
+    plate_request,
   };
 }
 

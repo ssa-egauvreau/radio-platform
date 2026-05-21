@@ -97,6 +97,38 @@ export interface AuditEntry {
   ip: string | null;
 }
 
+export interface AiDispatchActivityEntry {
+  id: number;
+  transmission_id: number | null;
+  channel_name: string | null;
+  unit_id: string | null;
+  transcript: string;
+  intent: string | null;
+  summary: string | null;
+  dispatcher_response: string | null;
+  trigger_emergency_tone: boolean;
+  plate_lookup: {
+    ok: boolean;
+    plate?: string | null;
+    year?: string | null;
+    make?: string | null;
+    model?: string | null;
+    reason?: string;
+  } | null;
+  error: string | null;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+export interface Ten8ActiveIncident {
+  call_id: string;
+  incident_type: string | null;
+  priority: string | null;
+  status: string | null;
+  location: string | null;
+  updated_at: string;
+}
+
 export interface Transmission {
   id: number;
   channel_id: number | null;
@@ -470,6 +502,14 @@ export const api = {
       "GET",
       `/v1/channels/ai-dispatch?channel=${encodeURIComponent(channelName)}`,
     ),
+
+  getAiDispatchActivity: (limit = 50) =>
+    request<{
+      count: number;
+      entries: AiDispatchActivityEntry[];
+      ten8_active_incidents: Ten8ActiveIncident[];
+      ten8_recent_webhooks: { id: number; action: string; call_id: string | null; received_at: string }[];
+    }>("GET", `/v1/ai-dispatch/activity?limit=${limit}`),
 
   channelRoster: (channel: string) =>
     request<{ members: ChannelMember[] }>("GET", `/v1/channels/roster?channel=${encodeURIComponent(channel)}`),

@@ -6,7 +6,9 @@ import {
   getChannelAiDispatchRow,
   getTransmissionDispatchContext,
 } from "../store.js";
+import { insertAiDispatchLog } from "./activityLog.js";
 import { adaptDispatcherResponseForChannel, detectEmergencyCodeFromTranscript } from "./emergencyCodes.js";
+import { handlePlateFromParse } from "./plateHandler.js";
 import { parseDispatcherTransmission } from "./parse.js";
 import {
   getAiDispatchPlatformConfig,
@@ -17,6 +19,10 @@ import { playMp3UrlOnChannel } from "./playback.js";
 import { synthesizeElevenLabsMp3 } from "./tts.js";
 import { postOutboundWebhook } from "./webhook.js";
 import { applyChannelTen33Marker } from "./ten33Marker.js";
+import { listTen8ActiveIncidents } from "../ten8/store.js";
+import { ten8AddComment, ten8Configured } from "../ten8/client.js";
+import type { PlateLookupResult } from "./plateLookup.js";
+import type { AiDispatchParseResult } from "./parse.js";
 
 const queue: number[] = [];
 let working = false;
@@ -55,8 +61,18 @@ async function pump(): Promise<void> {
 }
 
 async function processTransmission(transmissionId: number): Promise<void> {
+  const t0 = Date.now();
+  let parsed: AiDispatchParseResult | null = null;
+  let plateLookup: PlateLookupResult | null = null;
+  let ten8Actions: Record<string, unknown> | null = null;
+  let error: string | null = null;
+  let transcript = "";
+  let tx: NonNullable<Awaited<ReturnType<typeof getTransmissionDispatchContext>>> | null = null;
+  let unitId = "UNIT";
+  let yieldsToUnits = true;
+
   try {
-    const tx = await getTransmissionDispatchContext(transmissionId);
+    tx = await getTransmissionDispatchContext(transmissionId);
     if (!tx) {
       return;
     }
@@ -68,16 +84,17 @@ async function processTransmission(transmissionId: number): Promise<void> {
     if (!channelRow?.enabled) {
       return;
     }
+    yieldsToUnits = channelRow.yields_to_units;
 
-    const transcript = await loadTranscriptText(transmissionId);
-    if (!transcript) {
+    const text = await loadTranscriptText(transmissionId);
+    if (!text) {
       return;
     }
+    transcript = text;
 
     const platform = getAiDispatchPlatformConfig();
-    const unitId = (tx.unit_id ?? "UNIT").trim().toUpperCase() || "UNIT";
+    unitId = (tx.unit_id ?? "UNIT").trim().toUpperCase() || "UNIT";
 
-    // Regex 10-33 / 10-34 first (same as 10-8 dashboard) — fires marker immediately.
     const emergencyRegex = detectEmergencyCodeFromTranscript(transcript);
     if (emergencyRegex === "activate") {
       await applyChannelTen33Marker({
@@ -100,7 +117,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
     }
 
     const systemPrompt = await resolveAiDispatchSystemPrompt(tx.agency_id);
-    const parsed = await parseDispatcherTransmission({
+    parsed = await parseDispatcherTransmission({
       systemPrompt,
       unitId,
       channelName: tx.channel_name,
@@ -127,25 +144,75 @@ async function processTransmission(transmissionId: number): Promise<void> {
           source: "ai",
         });
       }
-    }
 
-    const replyRaw = parsed?.dispatcher_response?.trim() ?? "";
-    if (!replyRaw) {
-      const needDefaultEmergency =
-        emergencyRegex === "activate" ||
-        parsed?.trigger_emergency_tone === true ||
-        parsed?.intent === "emergency";
-      if (needDefaultEmergency) {
-        const defaultEmergency = `All units 10-33 on ${tx.channel_name}, all units 10-33 on ${tx.channel_name}.`;
-        await speakDispatcherReply(tx, transmissionId, unitId, transcript, defaultEmergency, channelRow.yields_to_units);
+      const plate = await handlePlateFromParse({
+        agencyId: tx.agency_id,
+        unitId,
+        parsed,
+      });
+      plateLookup = plate.lookup;
+
+      ten8Actions = {};
+      if (parsed.recommended_action) {
+        ten8Actions.recommended_action = parsed.recommended_action;
       }
-      return;
-    }
+      if (plate.lookup) {
+        ten8Actions.plate_lookup = plate.lookup;
+      }
 
-    const reply = adaptDispatcherResponseForChannel(replyRaw, tx.channel_name);
-    await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, channelRow.yields_to_units);
+      if (await ten8Configured(tx.agency_id)) {
+        const cadNote = `[AI] ${parsed.summary}`.slice(0, 500);
+        const active = await listTen8ActiveIncidents(tx.agency_id);
+        if (active.length > 0 && parsed.actionable) {
+          const target = active[0]!.call_id;
+          const res = await ten8AddComment(tx.agency_id, target, cadNote);
+          ten8Actions.ten8_comment = { call_id: target, ...res };
+        } else {
+          ten8Actions.ten8_comment = { skipped: "no_active_incident" };
+        }
+      }
+
+      let speakText = plate.speakText || parsed.dispatcher_response?.trim() || "";
+      if (!speakText) {
+        const needDefaultEmergency =
+          emergencyRegex === "activate" ||
+          parsed.trigger_emergency_tone ||
+          parsed.intent === "emergency";
+        if (needDefaultEmergency) {
+          speakText = `All units 10-33 on ${tx.channel_name}, all units 10-33 on ${tx.channel_name}.`;
+        }
+      }
+
+      if (speakText) {
+        const reply = adaptDispatcherResponseForChannel(speakText, tx.channel_name);
+        parsed = { ...parsed, dispatcher_response: reply };
+        await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits);
+      }
+    } else {
+      error = "AI parse failed";
+      if (emergencyRegex === "activate") {
+        const defaultEmergency = `All units 10-33 on ${tx.channel_name}, all units 10-33 on ${tx.channel_name}.`;
+        await speakDispatcherReply(tx, transmissionId, unitId, transcript, defaultEmergency, yieldsToUnits);
+      }
+    }
   } catch (err) {
+    error = err instanceof Error ? err.message : String(err);
     console.warn(`[ai-dispatch] failed for transmission ${transmissionId}`, err);
+  } finally {
+    if (tx && transcript) {
+      await insertAiDispatchLog({
+        agencyId: tx.agency_id,
+        transmissionId,
+        channelName: tx.channel_name,
+        unitId,
+        transcript,
+        parsed,
+        plateLookup,
+        ten8Actions,
+        error,
+        durationMs: Date.now() - t0,
+      }).catch((e) => console.warn("[ai-dispatch] log insert failed", e));
+    }
   }
 }
 

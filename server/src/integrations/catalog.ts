@@ -12,7 +12,7 @@ export interface IntegrationDefinition {
   label: string;
   description: string;
   kind: IntegrationFieldKind;
-  group: "ai_dispatch" | "webhooks" | "lookups";
+  group: "ai_dispatch" | "webhooks" | "lookups" | "ten8_cad";
   availability: IntegrationAvailability;
   /** Optional placeholder for empty inputs in the admin UI. */
   placeholder?: string;
@@ -62,18 +62,71 @@ export const INTEGRATION_DEFINITIONS: IntegrationDefinition[] = [
   {
     key: "license_plate_lookup_api_key",
     label: "License plate lookup API key",
-    description: "Reserved for plate-to-vehicle lookup in the dispatch portal (coming soon).",
+    description: "PlateToVIN.com API key for 912 plate lookups (Authorization header, no Bearer prefix).",
     kind: "secret",
     group: "lookups",
-    availability: "coming_soon",
+    availability: "active",
+    placeholder: "PlateToVIN key",
   },
   {
     key: "vin_lookup_api_key",
     label: "VIN lookup API key",
-    description: "Reserved for VIN decode / vehicle info in the dispatch portal (coming soon).",
+    description: "Auto.dev API key for 17-character VIN decode. Falls back to plate key if empty.",
     kind: "secret",
     group: "lookups",
-    availability: "coming_soon",
+    availability: "active",
+  },
+  {
+    key: "plate_lookup_default_state",
+    label: "Default plate state",
+    description: "Two-letter state when the officer does not say one (default CA).",
+    kind: "text",
+    group: "lookups",
+    availability: "active",
+    placeholder: "CA",
+  },
+  {
+    key: "ten8_webhook_secret",
+    label: "10-8 webhook bearer token",
+    description:
+      "Bearer token 10-8 Systems sends when posting incident exports to your safeT webhook URL.",
+    kind: "secret",
+    group: "webhooks",
+    availability: "active",
+  },
+  {
+    key: "ten8_api_key",
+    label: "10-8 CAD API key",
+    description: "X-API-Key from 10-8 support — used when AI posts CAD comments (optional).",
+    kind: "secret",
+    group: "ten8_cad",
+    availability: "active",
+  },
+  {
+    key: "ten8_api_secret",
+    label: "10-8 CAD API secret",
+    description: "X-API-Secret paired with the 10-8 API key.",
+    kind: "secret",
+    group: "ten8_cad",
+    availability: "active",
+  },
+  {
+    key: "ten8_api_base_url",
+    label: "10-8 CAD API base URL",
+    description: "Optional override; default is the standard 10-8 AWS gateway URL.",
+    kind: "url",
+    group: "ten8_cad",
+    availability: "active",
+    placeholder: "https://ps569km5w9.execute-api.us-gov-west-1.amazonaws.com/prod",
+  },
+  {
+    key: "ten8_live_execution",
+    label: "10-8 live CAD writes",
+    description: "Set to 1 or true to actually post comments to 10-8 (otherwise shadow/log only).",
+    kind: "text",
+    group: "ten8_cad",
+    availability: "active",
+    placeholder: "0",
   },
 ];
 

@@ -112,6 +112,9 @@ import {
   getAiDispatchPlatformStatus,
 } from "./aiDispatch/platformConfig.js";
 import { applyChannelTen33Marker } from "./aiDispatch/ten33Marker.js";
+import { listAiDispatchLog } from "./aiDispatch/activityLog.js";
+import { handleTen8Webhook, handleTen8WebhookGet } from "./ten8/webhook.js";
+import { listTen8ActiveIncidents, listTen8WebhookLog } from "./ten8/store.js";
 
 /** Legacy global radio key — lets a handset fetch its agency's custom tones. */
 const radioApiKey = process.env.RADIO_API_KEY?.trim();
@@ -233,6 +236,9 @@ function requireAgencyOperator(req: Request, res: Response, next: NextFunction):
 /** Router for account/auth, admin, owner, and radio endpoints, mounted at `/v1`. */
 export function createApiRouter(): Router {
   const router = Router();
+
+  router.get("/webhooks/10-8", handleTen8WebhookGet);
+  router.post("/webhooks/10-8", handleTen8Webhook);
 
   // Reject API calls from an account whose agency was disabled (or deleted)
   // after its token was issued, or whose own account row has been disabled or
@@ -1982,6 +1988,24 @@ export function createApiRouter(): Router {
         ip: clientIp(req),
       });
       res.json({ ok: true, enabled });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get("/ai-dispatch/activity", requireAgencyMember, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const limit = Number(req.query.limit ?? 50);
+      const entries = await listAiDispatchLog(agencyId, Number.isFinite(limit) ? limit : 50);
+      const ten8_active = await listTen8ActiveIncidents(agencyId);
+      const ten8_webhooks = await listTen8WebhookLog(agencyId, 25);
+      res.json({
+        count: entries.length,
+        entries,
+        ten8_active_incidents: ten8_active,
+        ten8_recent_webhooks: ten8_webhooks,
+      });
     } catch (error) {
       fail(res, error);
     }

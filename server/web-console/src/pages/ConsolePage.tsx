@@ -5,6 +5,7 @@ import { MapPanel } from "./MapPanel";
 import { AlertsPanel } from "./AlertsPanel";
 import { ChannelListPanel } from "./ChannelListPanel";
 import { OnAirPanel } from "./OnAirPanel";
+import { Link } from "react-router-dom";
 import { PopOutSection } from "./PopOutSection";
 
 export function ConsolePage() {
@@ -21,6 +22,11 @@ export function ConsolePage() {
   return (
     <div className="app-shell">
       <Topbar section="console" />
+
+      <p style={{ padding: "0.5rem 1rem 0", margin: 0 }}>
+        <Link to="/console/ai-activity">AI dispatch activity log</Link>
+        <span className="muted"> — transcripts, 10-33, plate lookups, 10-8 CAD notes</span>
+      </p>
 
       <div className="console-grid">
         <div className="console-col">

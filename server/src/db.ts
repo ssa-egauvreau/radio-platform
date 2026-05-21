@@ -395,6 +395,57 @@ export async function ensureSchema(): Promise<void> {
     );
   `);
 
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS ai_dispatch_log (
+      id BIGSERIAL PRIMARY KEY,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      transmission_id INT REFERENCES transmissions(id) ON DELETE SET NULL,
+      channel_name TEXT,
+      unit_id TEXT,
+      transcript TEXT NOT NULL,
+      intent TEXT,
+      summary TEXT,
+      dispatcher_response TEXT,
+      trigger_emergency_tone BOOLEAN NOT NULL DEFAULT FALSE,
+      plate_lookup JSONB,
+      ten8_actions JSONB,
+      error TEXT,
+      duration_ms INT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_dispatch_log_agency_ts
+      ON ai_dispatch_log (agency_id, created_at DESC);
+  `);
+
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS ten8_incidents (
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      call_id TEXT NOT NULL,
+      action TEXT,
+      is_closed BOOLEAN NOT NULL DEFAULT FALSE,
+      incident_type TEXT,
+      priority TEXT,
+      status TEXT,
+      location TEXT,
+      payload JSONB NOT NULL DEFAULT '{}',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (agency_id, call_id)
+    );
+  `);
+
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS ten8_webhook_log (
+      id BIGSERIAL PRIMARY KEY,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      action TEXT,
+      call_id TEXT,
+      payload JSONB NOT NULL DEFAULT '{}',
+      received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_ten8_webhook_log_agency_ts
+      ON ten8_webhook_log (agency_id, received_at DESC);
+  `);
+
   // --- migrate any pre-existing single-tenant data into the default agency ---
   const def = await p.query<{ id: number }>(
     `INSERT INTO agencies (name, slug)

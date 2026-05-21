@@ -80,9 +80,10 @@ export function IntegrationsPanel() {
     <div className="integrations-panel">
       <h2>Integrations</h2>
       <p className="muted" style={{ maxWidth: "52rem" }}>
-        Values saved here apply only to <strong>your agency</strong>. Other agencies on this server
-        use their own keys. License plate, VIN, and similar lookup tools will use slots under{" "}
-        <strong>Lookups</strong> when those features ship in the portal.
+        Values saved here apply only to <strong>your agency</strong>. Plate/VIN keys power 912
+        readbacks on the radio. Under <strong>Webhooks</strong>, set the 10-8 bearer token, then in
+        10-8 point incident export to{" "}
+        <code>/v1/webhooks/10-8?agency=YOUR_AGENCY_SLUG</code> on this server.
       </p>
 
       {error && <p className="error">{error}</p>}
