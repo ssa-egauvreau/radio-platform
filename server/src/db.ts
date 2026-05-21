@@ -371,6 +371,30 @@ export async function ensureSchema(): Promise<void> {
     );
   `);
 
+  // Per-agency integration secrets (API keys, webhooks) — tenant-isolated.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS agency_integrations (
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      integration_key TEXT NOT NULL,
+      value TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_by_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+      PRIMARY KEY (agency_id, integration_key)
+    );
+  `);
+
+  // Per-channel AI dispatcher toggle (voice loop uses platform env + agency integrations).
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS channel_ai_dispatch (
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      channel_name TEXT NOT NULL,
+      enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      yields_to_units BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (agency_id, channel_name)
+    );
+  `);
+
   // --- migrate any pre-existing single-tenant data into the default agency ---
   const def = await p.query<{ id: number }>(
     `INSERT INTO agencies (name, slug)

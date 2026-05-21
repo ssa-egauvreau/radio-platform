@@ -1708,3 +1708,97 @@ export async function seedInitialAccounts(): Promise<void> {
     console.log(`Seeded initial admin — username "admin", password "${adminPassword}". Change it after first login.`);
   }
 }
+
+// --- agency integrations (per-tenant API keys, webhooks) -----------------
+
+export interface AgencyIntegrationRow {
+  integration_key: string;
+  value: string;
+  updated_at: string;
+}
+
+export async function listAgencyIntegrationRows(agencyId: number): Promise<AgencyIntegrationRow[]> {
+  const res = await requirePool().query<AgencyIntegrationRow>(
+    `SELECT integration_key, value, updated_at
+       FROM agency_integrations
+      WHERE agency_id = $1;`,
+    [agencyId],
+  );
+  return res.rows;
+}
+
+export async function getAgencyIntegrationValue(
+  agencyId: number,
+  integrationKey: string,
+): Promise<string | null> {
+  const res = await requirePool().query<{ value: string }>(
+    `SELECT value FROM agency_integrations WHERE agency_id = $1 AND integration_key = $2;`,
+    [agencyId, integrationKey],
+  );
+  const row = res.rows[0];
+  if (!row) {
+    return null;
+  }
+  const v = row.value?.trim() ?? "";
+  return v.length > 0 ? v : null;
+}
+
+export async function setAgencyIntegrationValue(
+  agencyId: number,
+  integrationKey: string,
+  value: string,
+  updatedByUserId: number | null,
+): Promise<void> {
+  await requirePool().query(
+    `INSERT INTO agency_integrations (agency_id, integration_key, value, updated_by_user_id)
+       VALUES ($1, $2, $3, $4)
+     ON CONFLICT (agency_id, integration_key)
+       DO UPDATE SET value = EXCLUDED.value,
+                     updated_at = now(),
+                     updated_by_user_id = EXCLUDED.updated_by_user_id;`,
+    [agencyId, integrationKey, value, updatedByUserId],
+  );
+}
+
+export async function deleteAgencyIntegration(agencyId: number, integrationKey: string): Promise<void> {
+  await requirePool().query(`DELETE FROM agency_integrations WHERE agency_id = $1 AND integration_key = $2;`, [
+    agencyId,
+    integrationKey,
+  ]);
+}
+
+// --- per-channel AI dispatch toggle --------------------------------------
+
+export async function isChannelAiDispatchEnabled(agencyId: number, channelName: string): Promise<boolean> {
+  const res = await requirePool().query<{ enabled: boolean }>(
+    `SELECT enabled FROM channel_ai_dispatch WHERE agency_id = $1 AND channel_name = $2;`,
+    [agencyId, channelName],
+  );
+  return res.rows[0]?.enabled === true;
+}
+
+export async function setChannelAiDispatch(
+  agencyId: number,
+  channelName: string,
+  enabled: boolean,
+  yieldsToUnits?: boolean,
+): Promise<void> {
+  const yields = yieldsToUnits ?? true;
+  await requirePool().query(
+    `INSERT INTO channel_ai_dispatch (agency_id, channel_name, enabled, yields_to_units)
+       VALUES ($1, $2, $3, $4)
+     ON CONFLICT (agency_id, channel_name)
+       DO UPDATE SET enabled = EXCLUDED.enabled,
+                     yields_to_units = EXCLUDED.yields_to_units,
+                     updated_at = now();`,
+    [agencyId, channelName, enabled, yields],
+  );
+}
+
+export async function listChannelAiDispatchEnabled(agencyId: number): Promise<string[]> {
+  const res = await requirePool().query<{ channel_name: string }>(
+    `SELECT channel_name FROM channel_ai_dispatch WHERE agency_id = $1 AND enabled = TRUE;`,
+    [agencyId],
+  );
+  return res.rows.map((r) => r.channel_name);
+}

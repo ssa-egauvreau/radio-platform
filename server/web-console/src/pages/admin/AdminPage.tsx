@@ -9,12 +9,14 @@ import { ToneOutsPanel } from "./ToneOutsPanel";
 import { BrandingPanel } from "./BrandingPanel";
 import { BridgesPanel } from "./BridgesPanel";
 import { AuditPanel } from "./AuditPanel";
+import { IntegrationsPanel } from "./IntegrationsPanel";
 
 type TabId =
   | "accounts"
   | "channels"
   | "assignments"
   | "aliases"
+  | "integrations"
   | "sounds"
   | "soundboard"
   | "branding"
@@ -26,6 +28,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "channels", label: "Channels" },
   { id: "assignments", label: "Assignments" },
   { id: "aliases", label: "Unit Aliases" },
+  { id: "integrations", label: "Integrations" },
   { id: "sounds", label: "Sounds" },
   { id: "soundboard", label: "Soundboard" },
   { id: "branding", label: "Branding" },
@@ -57,6 +60,7 @@ export function AdminPage() {
           {tab === "channels" && <ChannelsPanel />}
           {tab === "assignments" && <AssignmentsPanel />}
           {tab === "aliases" && <UnitAliasesPanel />}
+          {tab === "integrations" && <IntegrationsPanel />}
           {tab === "sounds" && <SoundsPanel />}
           {tab === "soundboard" && <ToneOutsPanel />}
           {tab === "branding" && <BrandingPanel />}

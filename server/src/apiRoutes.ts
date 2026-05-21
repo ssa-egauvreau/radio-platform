@@ -100,6 +100,7 @@ import {
 } from "./store.js";
 import { getPool } from "./db.js";
 import { getCachedAuth, invalidateCachedAuth, setCachedAuth } from "./sessionCache.js";
+import { handleListIntegrations, handleSetIntegration } from "./integrations/adminApi.js";
 
 /** Legacy global radio key — lets a handset fetch its agency's custom tones. */
 const radioApiKey = process.env.RADIO_API_KEY?.trim();
@@ -1268,6 +1269,24 @@ export function createApiRouter(): Router {
         ip: clientIp(req),
       });
       res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- agency integrations (API keys, webhooks — per tenant) ---------------
+
+  router.get("/admin/integrations", requireAdmin, async (req, res) => {
+    try {
+      await handleListIntegrations(req, res);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.patch("/admin/integrations/:key", requireAdmin, async (req, res) => {
+    try {
+      await handleSetIntegration(req, res);
     } catch (error) {
       fail(res, error);
     }

@@ -192,6 +192,29 @@ export interface AgencySound {
   updated_at: string;
 }
 
+export interface IntegrationItem {
+  key: string;
+  label: string;
+  description: string;
+  kind: "secret" | "text" | "url";
+  availability: "active" | "coming_soon";
+  placeholder?: string;
+  configured: boolean;
+  display_value: string | null;
+  updated_at: string | null;
+}
+
+export interface IntegrationsPayload {
+  platform: {
+    enabled: boolean;
+    llmConfigured: boolean;
+    model: string;
+    dispatchUnitId: string;
+  };
+  platform_note: string;
+  groups: { id: string; label: string; items: IntegrationItem[] }[];
+}
+
 export interface Bridge {
   id: number;
   name: string;
@@ -483,6 +506,13 @@ export const api = {
   ) => request<{ user: AdminUser }>("PATCH", `/v1/owner/agencies/${id}/users/${uid}`, patch),
   deleteAgencyUser: (id: number, uid: number) =>
     request<{ ok: boolean }>("DELETE", `/v1/owner/agencies/${id}/users/${uid}`),
+
+  // --- agency integrations (API keys, webhooks) ----------------------------
+  getIntegrations: () => request<IntegrationsPayload>("GET", "/v1/admin/integrations"),
+  setIntegration: (key: string, value: string) =>
+    request<IntegrationsPayload>("PATCH", `/v1/admin/integrations/${encodeURIComponent(key)}`, {
+      value,
+    }),
 
   // --- custom radio tones ------------------------------------------------
   listSounds: () => request<{ sounds: AgencySound[] }>("GET", "/v1/admin/sounds"),
