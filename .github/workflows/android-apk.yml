@@ -62,12 +62,18 @@ jobs:
       - name: Decode release keystore
         env:
           RELEASE_KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
         run: |
-          # Strip any whitespace/newlines/CR the secret may have picked up when pasted,
-          # otherwise `base64 -d` errors with "invalid input".
-          printf '%s' "$RELEASE_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > "$RUNNER_TEMP/release.keystore"
+          # The secret can pick up wrapping, CR, or stray marker text when pasted. Strip whitespace
+          # and let base64 ignore any non-alphabet garbage so decoding never hard-fails on punctuation.
+          printf '%s' "$RELEASE_KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d -i > "$RUNNER_TEMP/release.keystore" || true
           if [ ! -s "$RUNNER_TEMP/release.keystore" ]; then
-            echo "::error::Decoded keystore is empty — the RELEASE_KEYSTORE_BASE64 secret looks truncated. Re-paste the full one-line value." >&2
+            echo "::error::Decoded keystore is empty — RELEASE_KEYSTORE_BASE64 is missing or truncated. Re-paste the full one-line value (no marker lines)." >&2
+            exit 1
+          fi
+          # Prove it's a real keystore that opens with the password, with a clear message if not.
+          if ! keytool -list -keystore "$RUNNER_TEMP/release.keystore" -storepass "$RELEASE_KEYSTORE_PASSWORD" >/dev/null 2>&1; then
+            echo "::error::Keystore did not open. RELEASE_KEYSTORE_BASE64 is corrupt/incomplete (e.g. marker lines pasted in) or RELEASE_KEYSTORE_PASSWORD is wrong." >&2
             exit 1
           fi
 
