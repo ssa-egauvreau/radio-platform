@@ -4,11 +4,7 @@ import { useAuth } from "./auth";
 import { LandingPage } from "./pages/LandingPage";
 import { LoginPage } from "./pages/LoginPage";
 import { ConsolePage } from "./pages/ConsolePage";
-import {
-  ChannelsWindowPage,
-  OnAirWindowPage,
-  AlertsWindowPage,
-} from "./pages/ConsoleWindows";
+import { ChannelsWindowPage, AlertsWindowPage } from "./pages/ConsoleWindows";
 
 /*
  * Heavy / rarely-accessed pages get pulled in lazily so the initial dispatch bundle stays slim.
@@ -111,20 +107,6 @@ export function App() {
             <Navigate to="/radio" replace />
           ) : (
             <ChannelsWindowPage />
-          )
-        }
-      />
-      <Route
-        path="/console/onair"
-        element={
-          !user ? (
-            <Navigate to="/login" replace />
-          ) : user.role === "owner" ? (
-            <Navigate to="/owner" replace />
-          ) : user.role === "radio" ? (
-            <Navigate to="/radio" replace />
-          ) : (
-            <OnAirWindowPage />
           )
         }
       />

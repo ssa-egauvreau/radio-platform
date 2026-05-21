@@ -3,7 +3,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type DragEvent,
   type PointerEvent,
 } from "react";
 import type { Permission, ToneOut, UserChannel } from "../api";
@@ -15,6 +14,8 @@ import { useToneOuts, loadTonePcm, ToneOutBadge } from "../toneOuts";
 import {
   IconBolt,
   IconBeacon,
+  IconRadio,
+  IconHeadphones,
   IconToneRoutine,
   IconTonePriority,
   IconToneStatus,
@@ -23,17 +24,13 @@ import {
   IconVolumeMuted,
 } from "../icons";
 import {
-  PANEL_MAX_WIDTH,
-  PANEL_MIN_WIDTH,
   PERMISSION_LABEL,
   STATE_LABEL,
   keyLabel,
   loadMuted,
-  loadPanelWidth,
   loadTxDigital,
   loadVolume,
   muteKey,
-  panelWidthKey,
   txDigitalKey,
   volumeKey,
 } from "./consoleShared";
@@ -43,25 +40,34 @@ const VOICE_RECONNECT_DELAY_MS = 3000;
 
 interface ChannelPanelProps {
   channel: UserChannel;
+  /** Whether live voice is connected for this channel ("on"). */
+  monitoring: boolean;
+  /** Whether the full control surface is revealed. */
+  expanded: boolean;
   /** Whether the keyboard PTT key controls this panel. */
   primary: boolean;
   pttCode: string;
   keyboardOn: boolean;
+  onToggleMonitor: () => void;
+  onToggleExpanded: () => void;
   onMakePrimary: () => void;
-  onClose: () => void;
-  /** Drops a dragged panel (by channel id) onto this one to reorder the strip. */
-  onReorder?: (fromId: number) => void;
 }
 
-/** One channel's full control surface: listen, transmit, marker, and tone-outs. */
+/**
+ * One channel as a collapsible accordion row. Collapsed it shows the name, an
+ * on/off (monitor) toggle, and a quick PTT button; expanded it reveals the full
+ * control surface — listen, transmit, 10-33 marker, AI dispatch, and tone-outs.
+ */
 export function ChannelPanel({
   channel,
+  monitoring,
+  expanded,
   primary,
   pttCode,
   keyboardOn,
+  onToggleMonitor,
+  onToggleExpanded,
   onMakePrimary,
-  onClose,
-  onReorder,
 }: ChannelPanelProps) {
   const [voiceState, setVoiceState] = useState<VoiceState>("connecting");
   const [voiceDetail, setVoiceDetail] = useState<string | null>(null);
@@ -88,79 +94,6 @@ export function ChannelPanel({
    */
   const wantConnectedRef = useRef(true);
   const reconnectTimerRef = useRef<number | null>(null);
-
-  // --- panel layout: drag-to-reorder + drag-to-resize --------------------
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  // dragenter/dragleave bubble from children, so a depth counter avoids flicker.
-  const dragDepth = useRef(0);
-  const [dragOver, setDragOver] = useState(false);
-
-  // Restore the operator's saved panel width and persist any later resize.
-  useEffect(() => {
-    const el = rootRef.current;
-    if (!el) {
-      return;
-    }
-    const saved = loadPanelWidth(channel.id);
-    if (saved != null) {
-      el.style.width = `${saved}px`;
-    }
-    if (typeof ResizeObserver === "undefined") {
-      return;
-    }
-    let timer: number | undefined;
-    const observer = new ResizeObserver(() => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        const width = parseInt(el.style.width, 10);
-        if (Number.isFinite(width) && width >= PANEL_MIN_WIDTH && width <= PANEL_MAX_WIDTH) {
-          localStorage.setItem(panelWidthKey(channel.id), String(width));
-        }
-      }, 400);
-    });
-    observer.observe(el);
-    return () => {
-      observer.disconnect();
-      window.clearTimeout(timer);
-    };
-  }, [channel.id]);
-
-  function handleDragEnter() {
-    if (!onReorder) {
-      return;
-    }
-    dragDepth.current += 1;
-    setDragOver(true);
-  }
-
-  function handleDragLeave() {
-    if (!onReorder) {
-      return;
-    }
-    dragDepth.current -= 1;
-    if (dragDepth.current <= 0) {
-      dragDepth.current = 0;
-      setDragOver(false);
-    }
-  }
-
-  function handleDragOver(event: DragEvent<HTMLDivElement>) {
-    if (!onReorder) {
-      return;
-    }
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "move";
-  }
-
-  function handleDrop(event: DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    dragDepth.current = 0;
-    setDragOver(false);
-    const from = Number(event.dataTransfer.getData("text/plain"));
-    if (Number.isFinite(from) && from !== channel.id) {
-      onReorder?.(from);
-    }
-  }
 
   function clearReconnectTimer() {
     if (reconnectTimerRef.current !== null) {
@@ -216,7 +149,15 @@ export function ChannelPanel({
     client.connect();
   }, [channel.id, channel.name]);
 
+  // Live voice exists only while the channel is "on". Toggling off tears the
+  // client down (releasing its WebSocket, AudioContext, and IMBE decoder);
+  // toggling on reconnects. Collapsing/expanding the row does not touch voice.
   useEffect(() => {
+    if (!monitoring) {
+      setVoiceState("idle");
+      setVoiceDetail(null);
+      return;
+    }
     connect();
     return () => {
       wantConnectedRef.current = false;
@@ -225,7 +166,7 @@ export function ChannelPanel({
       clientRef.current = null;
       sounds.busyLoopStop();
     };
-  }, [connect]);
+  }, [connect, monitoring]);
 
   const startTx = useCallback(async () => {
     const client = clientRef.current;
@@ -266,9 +207,9 @@ export function ChannelPanel({
     sounds.busyLoopStop();
   }, []);
 
-  // Keyboard hold-to-talk — only while this panel is the primary one.
+  // Keyboard hold-to-talk — only while this panel is the primary, monitoring one.
   useEffect(() => {
-    if (!primary || !keyboardOn) {
+    if (!primary || !keyboardOn || !monitoring) {
       return;
     }
     let held = false;
@@ -309,7 +250,7 @@ export function ChannelPanel({
       window.removeEventListener("keyup", up);
       window.removeEventListener("blur", blur);
     };
-  }, [primary, keyboardOn, pttCode, startTx, stopTx]);
+  }, [primary, keyboardOn, monitoring, pttCode, startTx, stopTx]);
 
   function beginTransmit(event: PointerEvent<HTMLButtonElement>) {
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -317,6 +258,11 @@ export function ChannelPanel({
   }
 
   useEffect(() => {
+    // The AI dispatch toggle only lives in the expanded body — don't fetch its
+    // status for every collapsed row.
+    if (!expanded) {
+      return;
+    }
     let cancelled = false;
     void (async () => {
       try {
@@ -348,7 +294,7 @@ export function ChannelPanel({
     return () => {
       cancelled = true;
     };
-  }, [channel.name]);
+  }, [channel.name, expanded]);
 
   function toggleAiDispatch() {
     if (!aiDispatchReady) {
@@ -362,6 +308,10 @@ export function ChannelPanel({
   }
 
   useEffect(() => {
+    // Only poll the 10-33 marker for rows the operator is actually watching.
+    if (!monitoring && !expanded) {
+      return;
+    }
     let cancelled = false;
     const syncTen33 = () => {
       void api.getChannelTen33(channel.name).then((r) => {
@@ -377,7 +327,7 @@ export function ChannelPanel({
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [channel.name]);
+  }, [channel.name, monitoring, expanded]);
 
   function toggleMarker() {
     const next = !marker;
@@ -464,50 +414,71 @@ export function ChannelPanel({
 
   return (
     <div
-      ref={rootRef}
-      className={`channel-panel live-panel${primary ? " primary" : ""}${dragOver ? " drag-over" : ""}`}
-      style={channel.color ? { borderTopColor: channel.color, borderTopWidth: 3 } : undefined}
-      onDragEnter={handleDragEnter}
-      onDragLeave={handleDragLeave}
-      onDragOver={handleDragOver}
-      onDrop={handleDrop}
+      className={`channel-card${expanded ? " expanded" : ""}${primary ? " primary" : ""}`}
+      style={channel.color ? { borderLeftColor: channel.color, borderLeftWidth: 3 } : undefined}
     >
-      <div
-        className="cp-head"
-        onClick={onMakePrimary}
-        title={primary ? "Keyboard PTT controls this channel" : "Click to control with the keyboard PTT"}
-      >
-        {onReorder && (
-          <span
-            className="cp-grip"
-            draggable
-            onClick={(e) => e.stopPropagation()}
-            onDragStart={(e) => {
-              e.dataTransfer.setData("text/plain", String(channel.id));
-              e.dataTransfer.effectAllowed = "move";
-            }}
-            title="Drag to reorder this channel"
-            aria-label="Drag to reorder this channel"
-          >
-            ⠿
-          </span>
-        )}
-        <span className="live-channel cp-name">{channel.name}</span>
-        <span className={`state-chip ${voiceState}`}>{STATE_LABEL[voiceState]}</span>
-        {receiving && !transmitting && <span className="state-chip busy">BUSY</span>}
-        {primary && <span className="cp-primary">PTT</span>}
+      <div className="ch-card-head">
         <button
-          className="cp-close"
-          onClick={(e) => {
-            e.stopPropagation();
-            onClose();
-          }}
-          title="Close channel"
+          className="ch-disclosure"
+          onClick={onToggleExpanded}
+          aria-expanded={expanded}
+          title={expanded ? "Collapse channel" : "Expand channel"}
         >
-          ✕
+          {expanded ? "▾" : "▸"}
+        </button>
+        <button className="ch-card-name" onClick={onToggleExpanded}>
+          <IconRadio size={14} />
+          <span className="ch-card-label">{channel.name}</span>
+          {channel.simulcast && <span className="chan-sim-tag">SIM</span>}
+        </button>
+        {monitoring && (
+          <span className={`state-chip ${voiceState}`}>{STATE_LABEL[voiceState]}</span>
+        )}
+        {monitoring && receiving && !transmitting && <span className="state-chip busy">BUSY</span>}
+        {monitoring &&
+          (primary ? (
+            <span className="cp-primary" title="Keyboard PTT controls this channel">
+              PTT
+            </span>
+          ) : (
+            <button
+              className="ch-setprimary"
+              onClick={onMakePrimary}
+              title="Use the keyboard PTT for this channel"
+            >
+              Set PTT
+            </button>
+          ))}
+        <button
+          className={monitoring ? "ch-power active" : "ch-power"}
+          onClick={onToggleMonitor}
+          aria-pressed={monitoring}
+          title={monitoring ? "Turn channel off (stop monitoring)" : "Turn channel on (monitor)"}
+        >
+          <IconHeadphones size={16} />
+          <span>{monitoring ? "ON" : "OFF"}</span>
+        </button>
+        <button
+          className={transmitting ? "ch-quick-ptt active" : "ch-quick-ptt"}
+          disabled={!monitoring || !connected || !canTransmit}
+          onPointerDown={beginTransmit}
+          onPointerUp={stopTx}
+          onPointerCancel={stopTx}
+          title={
+            !monitoring
+              ? "Turn the channel on to talk"
+              : !canTransmit
+                ? "Listen-only on this channel"
+                : "Hold to talk"
+          }
+        >
+          <IconBolt size={16} />
+          <span>{transmitting ? "ON AIR" : "PTT"}</span>
         </button>
       </div>
 
+      {expanded && (
+      <div className="ch-card-body">
       <div className="live-meta">
         Permission: <strong>{PERMISSION_LABEL[permission]}</strong>
       </div>
@@ -667,6 +638,8 @@ export function ChannelPanel({
       )}
 
       <ChannelRoster channelName={channel.name} />
+      </div>
+      )}
     </div>
   );
 }

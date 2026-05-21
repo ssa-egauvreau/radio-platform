@@ -1,7 +1,6 @@
 import { useEffect } from "react";
 import { bindLostLinkBusyAlerts, sounds } from "../sounds";
-import { ChannelListPanel } from "./ChannelListPanel";
-import { OnAirPanel } from "./OnAirPanel";
+import { ChannelsPanel } from "./ChannelsPanel";
 import { AlertsPanel } from "./AlertsPanel";
 
 /** Window-title + audio setup shared by every detached console section. */
@@ -20,16 +19,10 @@ function useConsoleWindow(title: string): void {
   }, [title]);
 }
 
-/** Standalone window for the popped-out "Channels" list. */
+/** Standalone window for the popped-out "Channels" section. */
 export function ChannelsWindowPage() {
   useConsoleWindow("Channels");
-  return <ChannelListPanel variant="window" />;
-}
-
-/** Standalone window for the popped-out "Channels on air" section. */
-export function OnAirWindowPage() {
-  useConsoleWindow("Channels on air");
-  return <OnAirPanel variant="window" />;
+  return <ChannelsPanel variant="window" />;
 }
 
 /** Standalone window for the popped-out "Alerts & Paging" section. */

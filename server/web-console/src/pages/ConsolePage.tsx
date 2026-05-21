@@ -3,8 +3,7 @@ import { bindLostLinkBusyAlerts, sounds } from "../sounds";
 import { Topbar } from "../Topbar";
 import { MapPanel } from "./MapPanel";
 import { AlertsPanel } from "./AlertsPanel";
-import { ChannelListPanel } from "./ChannelListPanel";
-import { OnAirPanel } from "./OnAirPanel";
+import { ChannelsPanel } from "./ChannelsPanel";
 import { Link } from "react-router-dom";
 import { PopOutSection } from "./PopOutSection";
 
@@ -34,20 +33,9 @@ export function ConsolePage() {
             title="Channels"
             route="/console/channels"
             windowName="safetConsoleChannels"
-            width={460}
+            width={720}
             height={900}
-            render={(onPopOut) => <ChannelListPanel onPopOut={onPopOut} />}
-          />
-        </div>
-
-        <div className="console-col">
-          <PopOutSection
-            title="Channels on air"
-            route="/console/onair"
-            windowName="safetConsoleOnAir"
-            width={1040}
-            height={900}
-            render={(onPopOut) => <OnAirPanel onPopOut={onPopOut} />}
+            render={(onPopOut) => <ChannelsPanel onPopOut={onPopOut} />}
           />
         </div>
 

@@ -2,22 +2,31 @@ import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { api, describeError, type UserChannel } from "../api";
 import { useAuth } from "../auth";
 import { sounds } from "../sounds";
-import { IconRadio } from "../icons";
+import { ChannelPanel } from "./ChannelPanel";
+import { QuickReplay } from "./QuickReplay";
+import { TransmissionLog } from "./TransmissionLog";
 import { SimulcastManager } from "./SimulcastManager";
 import { SectionHeader, type SectionProps } from "./PopOutSection";
-import { PERMISSION_LABEL, keyLabel } from "./consoleShared";
+import { keyLabel } from "./consoleShared";
 import {
-  openChannel,
+  focusChannel,
   reconcileChannels,
+  setChannelMonitoring,
   setKeyboardOn,
+  setPrimaryChannel,
   setPttCode,
+  toggleChannelExpanded,
   useConsoleState,
 } from "../consoleStore";
 
-/** The "Channels" section — the roster of channels the account may open. */
-export function ChannelListPanel({ variant = "embedded", onPopOut }: SectionProps) {
+/**
+ * The "Channels" section — every channel the account may use, each as a
+ * collapsible row. Collapsed rows show the name, an on/off (monitor) toggle, and
+ * a quick PTT button; expanding a row reveals its full control surface.
+ */
+export function ChannelsPanel({ variant = "embedded", onPopOut }: SectionProps) {
   const { user } = useAuth();
-  const { open, primary, pttCode, keyboardOn } = useConsoleState();
+  const { open, expanded, primary, pttCode, keyboardOn } = useConsoleState();
   const [channels, setChannels] = useState<UserChannel[]>([]);
   const [listError, setListError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -46,11 +55,6 @@ export function ChannelListPanel({ variant = "embedded", onPopOut }: SectionProp
       .finally(() => setLoading(false));
   }, []);
 
-  function pick(channel: UserChannel) {
-    sounds.channelSwitch();
-    openChannel(channel.id);
-  }
-
   function toggleKeyboard() {
     const next = !keyboardOn;
     setKeyboardOn(next);
@@ -63,7 +67,7 @@ export function ChannelListPanel({ variant = "embedded", onPopOut }: SectionProp
   const opsRef = useRef({ channels, keyboardOn });
   opsRef.current = { channels, keyboardOn };
 
-  // Keyboard: digit keys 1–9 open that channel (PTT is handled per-panel).
+  // Keyboard: digit keys 1–9 turn on + expand that channel (PTT is per-panel).
   useEffect(() => {
     function inField(): boolean {
       const el = document.activeElement;
@@ -78,7 +82,7 @@ export function ChannelListPanel({ variant = "embedded", onPopOut }: SectionProp
         if (channel) {
           e.preventDefault();
           sounds.channelSwitch();
-          openChannel(channel.id);
+          focusChannel(channel.id);
         }
       }
     }
@@ -107,37 +111,38 @@ export function ChannelListPanel({ variant = "embedded", onPopOut }: SectionProp
   return (
     <div className={variant === "window" ? "section-panel windowed" : "section-panel"}>
       <SectionHeader title="Channels" onPopOut={onPopOut} />
+      <QuickReplay />
+
       {loading && <div className="empty">Loading…</div>}
       {listError && <div className="banner error">{listError}</div>}
       {!loading && !listError && channels.length === 0 && (
         <div className="empty">No channels assigned to this account.</div>
       )}
-      {channels.map((channel, index) => {
-        const isOpen = open.includes(channel.id);
-        const isPrimary = primary === channel.id;
-        const showZone = !!channel.zone && channel.zone !== (channels[index - 1]?.zone ?? null);
-        return (
-          <Fragment key={channel.id}>
-            {showZone && <div className="zone-header">{channel.zone}</div>}
-            <button
-              className={`chan-item${isOpen ? " active" : ""}${isPrimary ? " primary" : ""}`}
-              onClick={() => pick(channel)}
-              style={channel.color ? { boxShadow: `inset 4px 0 0 ${channel.color}` } : undefined}
-            >
-              <span className="chan-name">
-                <IconRadio size={14} />
-                {channel.name}
-              </span>
-              <span className="perm">
-                {isPrimary && <span className="chan-primary-tag">PTT</span>}
-                {channel.simulcast && <span className="chan-sim-tag">SIM</span>}
-                {index < 9 && <span className="chan-key">{index + 1}</span>}
-                {PERMISSION_LABEL[channel.permission]}
-              </span>
-            </button>
-          </Fragment>
-        );
-      })}
+
+      <div className="channel-accordion">
+        {channels.map((channel, index) => {
+          const showZone = !!channel.zone && channel.zone !== (channels[index - 1]?.zone ?? null);
+          return (
+            <Fragment key={channel.id}>
+              {showZone && <div className="zone-header">{channel.zone}</div>}
+              <ChannelPanel
+                channel={channel}
+                monitoring={open.includes(channel.id)}
+                expanded={expanded.includes(channel.id)}
+                primary={primary === channel.id}
+                pttCode={pttCode}
+                keyboardOn={keyboardOn}
+                onToggleMonitor={() =>
+                  setChannelMonitoring(channel.id, !open.includes(channel.id))
+                }
+                onToggleExpanded={() => toggleChannelExpanded(channel.id)}
+                onMakePrimary={() => setPrimaryChannel(channel.id)}
+              />
+            </Fragment>
+          );
+        })}
+      </div>
+
       {channels.length > 0 && (
         <div className="kbd-hint">
           <button
@@ -161,6 +166,7 @@ export function ChannelListPanel({ variant = "embedded", onPopOut }: SectionProp
           )}
         </div>
       )}
+
       {canSimulcast && !loading && !listError && (
         <button
           className="btn sm"
@@ -170,6 +176,8 @@ export function ChannelListPanel({ variant = "embedded", onPopOut }: SectionProp
           Manage simulcast
         </button>
       )}
+
+      <TransmissionLog />
 
       {simulcastOpen && (
         <SimulcastManager

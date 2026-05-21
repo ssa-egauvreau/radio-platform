@@ -15,9 +15,11 @@ import {
 const STATE_KEY = "securityradio.console.state";
 
 export interface ConsoleState {
-  /** Open channel ids, in display order. */
+  /** Channel ids with live voice connected ("on" / monitoring). */
   open: number[];
-  /** The channel the keyboard PTT key controls, or null. */
+  /** Channel ids whose full control surface is expanded (independent of on/off). */
+  expanded: number[];
+  /** The channel the keyboard PTT key controls, or null. Always a monitoring channel. */
   primary: number | null;
   /** KeyboardEvent.code bound to push-to-talk. */
   pttCode: string;
@@ -45,6 +47,9 @@ function parse(raw: string | null): ConsoleState | null {
     const open = numbers(value.open);
     return {
       open,
+      // Pre-redesign state has no "expanded" — keep continuity by expanding the
+      // channels that were already open (shown as full panels) on first load.
+      expanded: Array.isArray(value.expanded) ? numbers(value.expanded) : [...open],
       primary: withValidPrimary(open, value.primary),
       pttCode: typeof value.pttCode === "string" && value.pttCode ? value.pttCode : DEFAULT_PTT_CODE,
       keyboardOn: typeof value.keyboardOn === "boolean" ? value.keyboardOn : true,
@@ -70,6 +75,7 @@ function migrate(): ConsoleState {
   }
   return {
     open,
+    expanded: [...open],
     primary: open.length > 0 ? open[0]! : null,
     pttCode: localStorage.getItem(PTT_CODE_KEY) || DEFAULT_PTT_CODE,
     keyboardOn: localStorage.getItem(KEYBOARD_ENABLED_KEY) !== "0",
@@ -118,19 +124,34 @@ export function useConsoleState(): ConsoleState {
   );
 }
 
-/** Opens a channel (if not already open) and makes it the keyboard-PTT primary. */
-export function openChannel(id: number): void {
-  const open = state.open.includes(id) ? state.open : [...state.open, id];
-  commit({ ...state, open, primary: id });
+/** Turns a channel's live voice on or off. Turning on makes it the keyboard-PTT primary. */
+export function setChannelMonitoring(id: number, on: boolean): void {
+  if (on) {
+    const open = state.open.includes(id) ? state.open : [...state.open, id];
+    commit({ ...state, open, primary: id });
+  } else {
+    if (!state.open.includes(id)) {
+      return;
+    }
+    const open = state.open.filter((x) => x !== id);
+    const primary = state.primary === id ? (open[open.length - 1] ?? null) : state.primary;
+    commit({ ...state, open, primary });
+  }
 }
 
-export function closeChannel(id: number): void {
-  if (!state.open.includes(id)) {
-    return;
-  }
-  const open = state.open.filter((x) => x !== id);
-  const primary = state.primary === id ? (open[open.length - 1] ?? null) : state.primary;
-  commit({ ...state, open, primary });
+/** Expands or collapses a channel's full control surface. */
+export function toggleChannelExpanded(id: number): void {
+  const expanded = state.expanded.includes(id)
+    ? state.expanded.filter((x) => x !== id)
+    : [...state.expanded, id];
+  commit({ ...state, expanded });
+}
+
+/** Keyboard/quick action: turn the channel on, expand it, and make it primary. */
+export function focusChannel(id: number): void {
+  const open = state.open.includes(id) ? state.open : [...state.open, id];
+  const expanded = state.expanded.includes(id) ? state.expanded : [...state.expanded, id];
+  commit({ ...state, open, expanded, primary: id });
 }
 
 export function setPrimaryChannel(id: number): void {
@@ -140,27 +161,19 @@ export function setPrimaryChannel(id: number): void {
   commit({ ...state, primary: id });
 }
 
-/** Moves the dragged channel into the drop target's slot. */
-export function reorderChannels(fromId: number, toId: number): void {
-  if (fromId === toId || !state.open.includes(fromId) || !state.open.includes(toId)) {
-    return;
-  }
-  const without = state.open.filter((x) => x !== fromId);
-  const at = without.indexOf(toId);
-  commit({ ...state, open: [...without.slice(0, at), fromId, ...without.slice(at)] });
-}
-
 /**
- * Drops open channels the account can no longer see. Call only with a freshly
- * fetched channel list — never speculatively, or it would wipe the open set.
+ * Drops channels the account can no longer see from the open/expanded sets. Call
+ * only with a freshly fetched channel list — never speculatively, or it would
+ * wipe the monitoring set.
  */
 export function reconcileChannels(availableIds: number[]): void {
   const allowed = new Set(availableIds);
   const open = state.open.filter((id) => allowed.has(id));
-  if (open.length === state.open.length) {
+  const expanded = state.expanded.filter((id) => allowed.has(id));
+  if (open.length === state.open.length && expanded.length === state.expanded.length) {
     return;
   }
-  commit({ ...state, open, primary: withValidPrimary(open, state.primary) });
+  commit({ ...state, open, expanded, primary: withValidPrimary(open, state.primary) });
 }
 
 export function setPttCode(code: string): void {
