@@ -24,8 +24,13 @@ data class MicCaptureConfig(
     val gainMultiplier: Float,
 ) {
     companion object {
-        /** Matches the historical fixed behaviour: NS on, AGC on, no manual gain. */
-        val DEFAULT = MicCaptureConfig(noiseSuppression = true, autoGain = true, gainMultiplier = 1.0f)
+        /** Matches [RadioPreferences] defaults for new installs. */
+        val DEFAULT =
+            MicCaptureConfig(
+                noiseSuppression = false,
+                autoGain = false,
+                gainMultiplier = RadioPreferences.MAX_MIC_GAIN,
+            )
     }
 }
 

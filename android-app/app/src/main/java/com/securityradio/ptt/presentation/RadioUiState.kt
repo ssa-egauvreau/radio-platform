@@ -1,6 +1,7 @@
 package com.securityradio.ptt.presentation
 
 import com.securityradio.ptt.device.DeviceProfilePreference
+import com.securityradio.ptt.device.RadioPreferences
 import com.securityradio.ptt.device.ResolvedDeviceProfile
 import com.securityradio.ptt.domain.ChannelPermission
 
@@ -159,11 +160,11 @@ data class RadioUiState(
     /** 0 = Buttons, 1 = Device, 2 = Audio, 3 = Account. Persisted only in memory across opens. */
     val settingsTabIndex: Int = 0,
     /** Mirror of [com.securityradio.ptt.device.RadioPreferences.isNoiseSuppressionEnabled]. */
-    val micNoiseSuppressionEnabled: Boolean = true,
+    val micNoiseSuppressionEnabled: Boolean = false,
     /** Mirror of [com.securityradio.ptt.device.RadioPreferences.isMicAutoGainEnabled]. */
-    val micAutoGainEnabled: Boolean = true,
+    val micAutoGainEnabled: Boolean = false,
     /** Mirror of [com.securityradio.ptt.device.RadioPreferences.getMicGainMultiplier]. */
-    val micGainMultiplier: Float = 1.0f,
+    val micGainMultiplier: Float = com.securityradio.ptt.device.RadioPreferences.MAX_MIC_GAIN,
 
     /** MP22 dual-display firmware detected (virtual Display 0 + physical Display 1). */
     val mp22DualDisplay: Boolean = false,

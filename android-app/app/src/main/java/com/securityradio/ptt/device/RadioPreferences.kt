@@ -156,9 +156,9 @@ class RadioPreferences(context: Context) {
     companion object {
         const val MIN_MIC_GAIN: Float = 0.5f
         const val MAX_MIC_GAIN: Float = 3.0f
-        const val DEFAULT_MIC_GAIN_MULTIPLIER: Float = 1.0f
-        const val DEFAULT_MIC_NOISE_SUPPRESSION: Boolean = true
-        const val DEFAULT_MIC_AUTO_GAIN: Boolean = true
+        const val DEFAULT_MIC_GAIN_MULTIPLIER: Float = MAX_MIC_GAIN
+        const val DEFAULT_MIC_NOISE_SUPPRESSION: Boolean = false
+        const val DEFAULT_MIC_AUTO_GAIN: Boolean = false
 
         private const val PREFS_NAME = "security_radio_prefs"
         private const val KEY_THEME = "theme_mode"
