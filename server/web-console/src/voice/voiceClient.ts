@@ -14,6 +14,8 @@ export interface VoiceCallbacks {
   onReceiving: (receiving: boolean) => void;
   /** Fired when the relay rejects our transmission because the channel is already held. */
   onBusy: (holderUnit: string | null) => void;
+  /** Fired when a dispatcher live-moves this unit to another channel (Live Channel Control). */
+  onMove?: (toChannel: string, by: string | null) => void;
 }
 
 const TARGET_RATE = 16000;
@@ -366,7 +368,14 @@ export class VoiceChannelClient {
   }
 
   private handleControl(text: string): void {
-    let msg: { type?: string; permission?: Permission; code?: string; unit_id?: string };
+    let msg: {
+      type?: string;
+      permission?: Permission;
+      code?: string;
+      unit_id?: string;
+      channel?: string;
+      by?: string;
+    };
     try {
       msg = JSON.parse(text);
     } catch {
@@ -382,6 +391,10 @@ export class VoiceChannelClient {
         this.stopTransmit();
       }
       this.callbacks.onBusy(msg.unit_id ?? null);
+    } else if (msg.type === "move" && typeof msg.channel === "string") {
+      // A dispatcher live-moved this unit (Live Channel Control). The client
+      // re-joins the new channel; the relay does not migrate the socket itself.
+      this.callbacks.onMove?.(msg.channel, msg.by ?? null);
     } else if (msg.type === "error") {
       this.setState("error", JOIN_ERRORS[msg.code ?? ""] ?? `Join rejected (${msg.code ?? "unknown"}).`);
       this.close();

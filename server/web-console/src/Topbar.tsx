@@ -88,6 +88,9 @@ export function Topbar({
                 <Link className="nav-tab" to="/console/dashboard">
                   Dashboard
                 </Link>
+                <Link className="nav-tab" to="/console/control">
+                  Live Control
+                </Link>
                 <Link className="nav-tab" to="/console/ai-activity">
                   AI Log
                 </Link>

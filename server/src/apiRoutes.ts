@@ -12,8 +12,10 @@ import {
 import {
   dropAgencyVoiceConnections,
   dropUserVoiceConnections,
+  listAgencyRosters,
   listChannelRoster,
   peekVoiceTransmittingUnit,
+  sendMoveCommand,
   type PresenceStatus,
   type RosterMember,
 } from "./voiceRelay.js";
@@ -2303,6 +2305,48 @@ export function createApiRouter(): Router {
       const channel = typeof req.query.channel === "string" ? req.query.channel : "";
       const members = listChannelRoster(agencyId, channel);
       res.json({ members: await annotateRosterStatus(agencyId, channel, members) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // Live Channel Control: every channel with its currently-connected members.
+  router.get("/channels/rosters", requireAgencyOperator, (req, res) => {
+    try {
+      res.json({ channels: listAgencyRosters(req.authUser!.agencyId!) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // Live Channel Control: push a live "move to channel" command to a unit.
+  router.post("/channels/move", requireAgencyOperator, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const unit = String(req.body?.unit_id ?? "").trim().toUpperCase();
+      const toChannel = String(req.body?.toChannel ?? "").trim();
+      const fromChannel = req.body?.fromChannel ? String(req.body.fromChannel).trim() : null;
+      const reason = req.body?.reason ? String(req.body.reason).trim().slice(0, 80) : null;
+      if (!unit || !toChannel) {
+        res.status(400).json({ error: "missing_unit_or_channel" });
+        return;
+      }
+      const channels = await listChannels(agencyId);
+      if (!channels.some((c) => c.name === toChannel)) {
+        res.status(404).json({ error: "unknown_channel" });
+        return;
+      }
+      const reached = sendMoveCommand(agencyId, unit, toChannel, req.authUser!.username, fromChannel);
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "channel_move",
+        target: `${unit} → ${toChannel}`,
+        detail: { unit, fromChannel, toChannel, reason, reached },
+        ip: clientIp(req),
+      });
+      res.json({ ok: true, reached });
     } catch (error) {
       fail(res, error);
     }
