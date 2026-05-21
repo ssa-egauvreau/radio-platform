@@ -335,6 +335,9 @@ async function processTransmission(transmissionId: number): Promise<void> {
       if (outcome === "processed") {
         if (!speakText) {
           outcome = "no_on_air_reply";
+          console.log(
+            `[ai-dispatch] no on-air reply: intent=${parsed.intent} dispatcher_response=${parsed.dispatcher_response ? "present" : "null"} channel=${tx.channel_name}`,
+          );
           error =
             "AI processed this but had nothing to say on the radio (often chitchat with no dispatcher_response).";
         } else if (!spokeOnAir) {
