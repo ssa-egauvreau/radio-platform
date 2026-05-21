@@ -75,6 +75,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.securityradio.ptt.device.AccessibilitySettingsLauncher
 import com.securityradio.ptt.device.DeviceProfilePreference
 import com.securityradio.ptt.device.DeviceProfileResolver
 import com.securityradio.ptt.device.HardwareAction
@@ -4232,14 +4233,38 @@ fun SetupRequiredDialog(
                 }
 
                 if (state.needsAccessibilityService) {
+                    val context = androidx.compose.ui.platform.LocalContext.current
+                    val component = android.content.ComponentName(
+                        context,
+                        com.securityradio.ptt.device.InricoHardwareService::class.java,
+                    )
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Text("• ACCESSIBILITY SERVICE", fontWeight = FontWeight.Bold, color = p.textPrimary)
-                        Text("Required for physical PTT & Emergency buttons to work in background.", fontSize = 12.sp, color = p.textMuted)
+                        Text(
+                            "Required for physical PTT and Emergency buttons in the background.",
+                            fontSize = 12.sp,
+                            color = p.textMuted,
+                        )
+                        if (AccessibilitySettingsLauncher.prefersAdbEnableHint(context)) {
+                            Text(
+                                "TM-7 Plus on Android 10: Settings often shows an empty list. " +
+                                    "Tap the button below first; if there is no toggle, run these two commands " +
+                                    "on your PC (USB debugging or scrcpy):",
+                                fontSize = 12.sp,
+                                color = p.textMuted,
+                            )
+                            Text(
+                                AccessibilitySettingsLauncher.adbEnableBlock(context, component),
+                                fontSize = 11.sp,
+                                color = p.textPrimary,
+                                fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            )
+                        }
                         TextButton(
                             onClick = { onEvent(RadioUiEvent.OpenAccessibilitySettings) },
                             colors = androidx.compose.material3.ButtonDefaults.textButtonColors(containerColor = p.softKeyInactiveFill)
                         ) {
-                            Text("ENABLE SERVICE", color = p.textOnButton)
+                            Text("OPEN ACCESSIBILITY SETTINGS", color = p.textOnButton)
                         }
                     }
                 }

@@ -26,6 +26,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.securityradio.ptt.device.AccessibilitySettingsLauncher
 import com.securityradio.ptt.device.HandsetVolumeKnob
 import com.securityradio.ptt.device.HardwareAction
 import com.securityradio.ptt.device.HardwareButtonEvent
@@ -302,48 +303,25 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /**
-     * Opens the accessibility settings for [InricoHardwareService]. On stock Android the bare
-     * ACTION_ACCESSIBILITY_SETTINGS page lists every installed service, but several Inrico rugged
-     * builds (notably the Android 10 TM-7 Plus) hide third-party / sideloaded services from that
-     * list entirely — the page opens with no toggle. The `:settings:fragment_args_key` extras
-     * deep-link straight to this service's own enable/disable page, bypassing the hidden list.
-     * If that fails we fall back to the plain list, and finally to the app-details page, with a
-     * toast pointing the operator at the right place.
-     */
+    /** Opens the [InricoHardwareService] toggle; TM-7 Plus on Android 10 often needs ADB instead. */
     private fun openAccessibilitySettings() {
         val component = android.content.ComponentName(this, InricoHardwareService::class.java)
-        val componentKey = component.flattenToString()
-        val args = Bundle().apply { putString(":settings:fragment_args_key", componentKey) }
-        val deepLink = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).apply {
-            putExtra(":settings:fragment_args_key", componentKey)
-            putExtra(":settings:show_fragment_args", args)
-        }
-        // The deep-link and the plain list resolve to the same Settings activity, so a successful
-        // launch tells us nothing about whether the OEM actually rendered a toggle. We can't detect
-        // the empty-page case from here, so always show a short hint covering both outcomes: if the
-        // service toggle is on screen, ignore it; if the list is empty (locked-down Inrico build),
-        // it points at the manual locations / the ADB fallback the deployer can use over scrcpy.
-        if (tryStart(deepLink) || tryStart(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))) {
-            Toast.makeText(
-                this,
-                "If there's no toggle here, this device hides sideloaded services. Enable over ADB:\n" +
-                    "adb shell settings put secure enabled_accessibility_services $componentKey",
-                Toast.LENGTH_LONG,
-            ).show()
+        if (AccessibilitySettingsLauncher.tryOpen(this, component)) {
+            val message = if (AccessibilitySettingsLauncher.prefersAdbEnableHint(this)) {
+                getString(R.string.accessibility_tm7_android10_hint) + "\n\n" +
+                    AccessibilitySettingsLauncher.adbEnableBlock(this, component)
+            } else {
+                getString(R.string.accessibility_generic_hint)
+            }
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show()
             return
         }
         openAppSettings()
-    }
-
-    /** Starts [intent], returning false if no activity can handle it. */
-    private fun tryStart(intent: Intent): Boolean {
-        return try {
-            startActivity(intent)
-            true
-        } catch (_: ActivityNotFoundException) {
-            false
-        }
+        Toast.makeText(
+            this,
+            getString(R.string.accessibility_open_failed),
+            Toast.LENGTH_LONG,
+        ).show()
     }
 
     private fun openAppSettings() {
@@ -366,6 +344,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun isAccessibilityServiceEnabled(context: Context, service: Class<*>): Boolean {
+        val accessibilityOn = Settings.Secure.getInt(
+            context.contentResolver,
+            Settings.Secure.ACCESSIBILITY_ENABLED,
+            0,
+        ) == 1
+        if (!accessibilityOn) return false
+
         val expectedComponentName = android.content.ComponentName(context, service)
         val enabledServices = Settings.Secure.getString(
             context.contentResolver,

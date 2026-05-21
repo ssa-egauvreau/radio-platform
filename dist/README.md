@@ -63,3 +63,19 @@ The MP22 has a **virtual Display 0** (PC can click/type with scrcpy) and a **phy
 5. Use the radio’s **hardware keys** on the physical panel. Optional: scrcpy with `--display-id=1 --no-control` to watch only.
 
 **IRC590 and other radios** are not affected — they launch normally on their only screen.
+
+## TM-7 Plus on Android 10 (accessibility / PTT keys)
+
+Some TM-7 Plus units on **Android 10** open **Settings → Accessibility** with an **empty list** — Inrico hides sideloaded apps there, so there is no on-screen toggle for safeT PTT.
+
+**Try in the app first:** open safeT PTT → permissions prompt → **OPEN ACCESSIBILITY SETTINGS**. Newer builds deep-link to the service page when the radio allows it.
+
+**If the list is still empty (most common on Android 10 TM-7 Plus):**
+
+1. On the radio: turn on **USB debugging** (Developer options).
+2. Connect the radio to your PC with USB (or use your existing scrcpy setup).
+3. On the PC, open a Command Prompt in this repo’s **`dist`** folder.
+4. Double-click **`Enable TM7 Plus Accessibility.bat`** (or run it from the prompt).
+5. Unplug/reopen safeT PTT — physical **PTT** and **Emergency** keys should work.
+
+The batch file runs the same `adb shell settings put secure ...` commands the app shows in the toast; it **keeps other accessibility services** enabled instead of replacing them.
