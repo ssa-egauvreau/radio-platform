@@ -146,6 +146,29 @@ export interface Transmission {
   transcript_status: string;
 }
 
+/** Live voice relay: who is keyed on a channel (same source as Android `/v1/air`). */
+export interface AirState {
+  occupied: boolean;
+  transmitting_unit_id: string | null;
+  transmitting_display_name: string | null;
+}
+
+/** Home + scan talker hints (Android `/v1/talk-activity`). */
+export interface TalkActivity {
+  main: {
+    channel: string;
+    active: boolean;
+    unit_id: string | null;
+    username: string | null;
+  };
+  scan: {
+    channel: string;
+    active: boolean;
+    unit_id: string | null;
+    username: string | null;
+  };
+}
+
 export interface RadioPosition {
   unit_id: string;
   user_id: number | null;
@@ -463,6 +486,20 @@ export const api = {
       }
     }
     return request<{ transmissions: Transmission[] }>("GET", `/v1/transmissions?${params}`);
+  },
+
+  air: (channel: string) => {
+    const params = new URLSearchParams({ channel: channel.trim() });
+    return request<AirState>("GET", `/v1/air?${params}`);
+  },
+
+  talkActivity: (opts: { home?: string; scan?: string }) => {
+    const params = new URLSearchParams();
+    const home = opts.home?.trim();
+    const scan = opts.scan?.trim();
+    if (home) params.set("home", home);
+    if (scan) params.set("scan", scan);
+    return request<TalkActivity>("GET", `/v1/talk-activity?${params}`);
   },
 
   locations: () => request<{ positions: RadioPosition[] }>("GET", "/v1/locations"),

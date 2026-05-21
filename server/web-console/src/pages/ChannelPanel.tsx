@@ -10,6 +10,7 @@ import { api } from "../api";
 import { VoiceChannelClient, type VoiceState, type ToneOutKind } from "../voice/voiceClient";
 import { Waveform } from "../voice/Waveform";
 import { ChannelRoster } from "./ChannelRoster";
+import { LatestChannelTransmission } from "../components/LatestChannelTransmission";
 import { sounds } from "../sounds";
 import { useToneOuts, loadTonePcm, ToneOutBadge } from "../toneOuts";
 import {
@@ -561,6 +562,15 @@ export function ChannelPanel({
           variant={transmitting ? "tx" : "rx"}
         />
       </div>
+
+      {monitoring && (
+        <LatestChannelTransmission
+          variant="console"
+          channelName={channel.name}
+          active={monitoring && connected}
+          homeReceiving={receiving && !transmitting}
+        />
+      )}
 
       <button className="txmode-btn" onClick={toggleTxMode}>
         TX MODE: <strong>{txDigital ? "COMPRESSED · FAST" : "HIGH QUALITY · NORMAL SPEED"}</strong>

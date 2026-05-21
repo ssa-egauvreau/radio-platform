@@ -2,20 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   describeError,
-  fetchTransmissionAudio,
   type ChannelMember,
   type Permission,
   type PresenceStatus,
-  type Transmission,
   type UserChannel,
 } from "../api";
+import { LatestChannelTransmission } from "../components/LatestChannelTransmission";
 import { useAuth } from "../auth";
 import { Topbar } from "../Topbar";
 import { VoiceChannelClient, type VoiceState } from "../voice/voiceClient";
 import { Waveform } from "../voice/Waveform";
 import { ScanListenClient } from "../voice/scanListenClient";
-import { useUnitAliasResolver } from "../unitAliases";
-import { formatDuration, formatTime, transcriptOf } from "./TransmissionLog";
 import { bindLostLinkBusyAlerts, sounds } from "../sounds";
 
 /** Label + colour class for each derived presence status. */
@@ -27,8 +24,6 @@ const ROSTER_STATUS: Record<PresenceStatus, { label: string; cls: string }> = {
 };
 
 const ROSTER_POLL_MS = 5_000;
-const TRANSMISSIONS_POLL_MS = 12_000;
-const TRANSMISSIONS_CAP = 20;
 const EMERGENCY_HOLD_MS = 1500;
 /** Quiet pause between a voice-WS close and the next reconnect attempt. */
 const VOICE_RECONNECT_DELAY_MS = 3000;
@@ -40,7 +35,6 @@ const VOICE_RECONNECT_DELAY_MS = 3000;
  */
 export function RadioPortal() {
   const { user, logout } = useAuth();
-  const aliasFor = useUnitAliasResolver();
   const [channels, setChannels] = useState<UserChannel[]>([]);
   const [selectedChannel, setSelectedChannel] = useState<string | null>(null);
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
@@ -65,20 +59,13 @@ export function RadioPortal() {
   const [scanPickerOpen, setScanPickerOpen] = useState(false);
 
   const [roster, setRoster] = useState<ChannelMember[]>([]);
-  const [transmissions, setTransmissions] = useState<Transmission[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [emergencyActive, setEmergencyActive] = useState(false);
   const [emergencyArming, setEmergencyArming] = useState(false);
   const [busyEmergency, setBusyEmergency] = useState(false);
-  const [playingTxId, setPlayingTxId] = useState<number | null>(null);
-
   const voiceRef = useRef<VoiceChannelClient | null>(null);
   const scanRef = useRef<ScanListenClient | null>(null);
   const emergencyTimerRef = useRef<number | null>(null);
-  const audioElRef = useRef<HTMLAudioElement | null>(null);
-  // Track the current blob URL so we can revoke it on every transition (next playback, error,
-  // unmount) — relying on the onended listener leaks the URL whenever playback is interrupted.
-  const audioBlobUrlRef = useRef<string | null>(null);
   /*
    * Want-to-stay-connected flag: separates "user picked a new channel" / "user signed out" (no
    * reconnect) from "the WS dropped out from under us" (try to reconnect). Held in a ref so the
@@ -256,30 +243,6 @@ export function RadioPortal() {
         window.clearTimeout(emergencyTimerRef.current);
       }
       sounds.busyLoopStop();
-      // Stop any in-flight transmission playback so audio doesn't bleed into another page
-      // (e.g. after sign-out / navigating away from /radio). Revoke the blob too — onended
-      // would otherwise be the only path that releases the URL, and unmount cancels it.
-      const audio = audioElRef.current;
-      if (audio) {
-        try {
-          audio.pause();
-        } catch {
-          /* already paused or never started */
-        }
-        audio.removeAttribute("src");
-        try {
-          audio.load();
-        } catch {
-          /* defensive */
-        }
-        audio.onended = null;
-        audio.onerror = null;
-        audioElRef.current = null;
-      }
-      if (audioBlobUrlRef.current) {
-        URL.revokeObjectURL(audioBlobUrlRef.current);
-        audioBlobUrlRef.current = null;
-      }
     };
   }, []);
 
@@ -336,30 +299,15 @@ export function RadioPortal() {
     };
   }, [selectedChannel]);
 
-  useEffect(() => {
-    if (!selectedChannel) {
-      setTransmissions([]);
-      return;
-    }
-    let cancelled = false;
-    async function fetchTx() {
-      try {
-        const channel = selectedChannel;
-        if (!channel) return;
-        const res = await api.transmissions({ channel, limit: TRANSMISSIONS_CAP });
-        if (cancelled) return;
-        setTransmissions(res.transmissions);
-      } catch {
-        /* transient */
-      }
-    }
-    void fetchTx();
-    const id = window.setInterval(fetchTx, TRANSMISSIONS_POLL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [selectedChannel]);
+  const scanWatchList = useMemo(() => {
+    if (!scanEnabled || !selectedChannel) return "";
+    return Array.from(scanList)
+      .filter((c) => c !== selectedChannel)
+      .join(",");
+  }, [scanEnabled, scanList, selectedChannel]);
+
+  const voiceConnected =
+    voiceState === "listening" || voiceState === "transmitting";
 
   // --- PTT handlers ---
   // The same client.startTransmit / stopTransmit gestures dispatch uses; we wire them to a big
@@ -487,49 +435,6 @@ export function RadioPortal() {
     }
     setEmergencyArming(false);
   }, []);
-
-  // --- transmission playback ---
-  async function playTransmission(id: number) {
-    let url: string | null = null;
-    try {
-      const blob = await fetchTransmissionAudio(id);
-      url = URL.createObjectURL(blob);
-      // Revoke the prior blob (from an interrupted clip) before re-pointing the element. Without
-      // this, blob URLs accumulate in memory across repeated playback / quickly-skipped clips.
-      if (audioBlobUrlRef.current) {
-        URL.revokeObjectURL(audioBlobUrlRef.current);
-      }
-      audioBlobUrlRef.current = url;
-      const audio = audioElRef.current ?? new Audio();
-      audioElRef.current = audio;
-      audio.onended = () => {
-        setPlayingTxId(null);
-        if (audioBlobUrlRef.current === url && url) {
-          URL.revokeObjectURL(url);
-          audioBlobUrlRef.current = null;
-        }
-      };
-      audio.onerror = () => {
-        setPlayingTxId(null);
-        if (audioBlobUrlRef.current === url && url) {
-          URL.revokeObjectURL(url);
-          audioBlobUrlRef.current = null;
-        }
-      };
-      audio.src = url;
-      setPlayingTxId(id);
-      await audio.play();
-    } catch (err) {
-      // play() can reject after audio.src is set (autoplay policy, format error). Revoke the
-      // URL we created so it doesn't leak even when the catch path runs.
-      if (url && audioBlobUrlRef.current === url) {
-        URL.revokeObjectURL(url);
-        audioBlobUrlRef.current = null;
-      }
-      setError(describeError(err));
-      setPlayingTxId(null);
-    }
-  }
 
   // --- scan picker handlers ---
   function toggleScanChannel(name: string) {
@@ -696,6 +601,22 @@ export function RadioPortal() {
           </button>
         </section>
 
+        <section className="rp-section">
+          <div className="rp-section-head">
+            <h2>On the air</h2>
+          </div>
+          <LatestChannelTransmission
+            variant="radio"
+            channelName={selectedChannel}
+            active={!!selectedChannel && voiceConnected}
+            homeReceiving={receiving}
+            scanRxChannel={scanActiveChannel}
+            scanWatchList={scanWatchList}
+            localUnitId={user?.unitId ?? user?.username ?? null}
+            logHint="Ask dispatch for the full transcript log if you need older messages."
+          />
+        </section>
+
         {/* Channel roster */}
         <section className="rp-section">
           <div className="rp-section-head">
@@ -767,49 +688,6 @@ export function RadioPortal() {
                   ))
               )}
             </div>
-          )}
-        </section>
-
-        {/* Recent transmissions */}
-        <section className="rp-section">
-          <div className="rp-section-head">
-            <h2>Recent transmissions</h2>
-            <span className="count">{transmissions.length}</span>
-          </div>
-          {selectedChannel == null ? (
-            <div className="empty">Pick a channel to see recent traffic.</div>
-          ) : transmissions.length === 0 ? (
-            <div className="empty">No recorded transmissions yet.</div>
-          ) : (
-            <ul className="rp-tx-list">
-              {transmissions.map((tx) => {
-                const transcript = transcriptOf(tx);
-                const speaker = tx.display_name || aliasFor(tx.unit_id) || "Unknown";
-                const isPlaying = playingTxId === tx.id;
-                return (
-                  <li key={tx.id} className="rp-tx-row">
-                    <div className="rp-tx-head">
-                      <span className="rp-tx-speaker">{speaker}</span>
-                      <span className="rp-tx-channel">{tx.channel_name}</span>
-                    </div>
-                    <div className="rp-tx-meta">
-                      {formatTime(tx.started_at)} · {formatDuration(tx.duration_ms)}
-                    </div>
-                    <div className={transcript.muted ? "rp-tx-transcript muted" : "rp-tx-transcript"}>
-                      {transcript.text}
-                    </div>
-                    <button
-                      type="button"
-                      className="btn sm"
-                      onClick={() => void playTransmission(tx.id)}
-                      disabled={isPlaying}
-                    >
-                      {isPlaying ? "Playing…" : "Play"}
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
           )}
         </section>
 

@@ -1574,6 +1574,106 @@ code.mono {
   margin-top: 7px;
 }
 
+/* live talker + single latest transcript (radio portal + channel panel) */
+.live-tx {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.live-tx-radio {
+  margin-top: 4px;
+}
+.live-tx-now {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-2) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent-2) 12%, var(--bg-input));
+}
+.live-tx-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+}
+.live-tx-badge.rx {
+  color: var(--accent-2);
+}
+.live-tx-badge.scan {
+  color: var(--warn, #e6a817);
+}
+.live-tx-talker {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.live-tx-unit {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.02em;
+}
+.live-tx-name {
+  font-size: 16px;
+  color: var(--text-muted);
+}
+.live-tx-pending {
+  margin: 8px 0 0;
+  font-size: 13px;
+}
+.live-tx-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-input);
+  padding: 12px 14px;
+}
+.live-tx-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.live-tx-card-title {
+  font-weight: 600;
+}
+.live-tx-meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.live-tx-speaker {
+  font-weight: 600;
+  font-size: 15px;
+}
+.live-tx-time {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.live-tx-transcript {
+  font-size: 15px;
+  line-height: 1.45;
+  margin-bottom: 10px;
+}
+.live-tx-transcript.muted {
+  color: var(--text-muted);
+  font-style: italic;
+}
+.live-tx-replay {
+  margin-top: 2px;
+}
+.live-tx-log-hint {
+  font-size: 12px;
+  margin: 0;
+}
+
 /* --- pop-out console sections --- */
 .alerts-slot {
   margin-top: 24px;

@@ -4,12 +4,12 @@ import { useUnitAliasResolver } from "../unitAliases";
 import { formatDuration, formatTime, transcriptOf } from "./TransmissionLog";
 import { IconWaveform } from "../icons";
 
-/** How many recent transmissions the quick-replay strip keeps on hand. */
-const REPLAY_COUNT = 3;
+/** One latest transmission — full history is in the transcript log. */
+const REPLAY_COUNT = 1;
 
 /**
  * A compact "replay last transmission" strip for the channels-on-air column —
- * the three most recent transmissions with one-tap playback and transcripts.
+ * the most recent transmission with playback and transcript.
  */
 export function QuickReplay() {
   const [open, setOpen] = useState(false);
@@ -101,7 +101,7 @@ export function QuickReplay() {
         onClick={() => setOpen((v) => !v)}
       >
         <IconWaveform size={15} />
-        Replay last transmission
+        Latest transmission (all channels)
         <span className="quick-replay-caret">{open ? "▾" : "▸"}</span>
       </button>
 
