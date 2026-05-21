@@ -2,39 +2,90 @@
 // model (transformers.js / ONNX). Best-effort: failures never block recording.
 
 import { enqueueAiDispatchForTransmission } from "./aiDispatch/engine.js";
-import { decodeWavToFloat32 } from "./wav.js";
+import { getPool } from "./db.js";
 import { getTransmissionAudio, listPendingTranscriptionIds, setTranscript } from "./store.js";
+import { decodeWavToFloat32 } from "./wav.js";
 
 const ENABLED = (process.env.TRANSCRIPTION ?? "on").trim().toLowerCase() !== "off";
 const MODEL = process.env.WHISPER_MODEL?.trim() || "Xenova/whisper-tiny.en";
+/** After a failed model load, wait before retrying (Railway OOM / cold start). */
+const LOAD_RETRY_MS = Number(process.env.WHISPER_LOAD_RETRY_MS) || 120_000;
 
 type TranscriberState = "idle" | "loading" | "ready" | "broken";
 
-let pipelineFn: ((audio: Float32Array, options?: unknown) => Promise<{ text?: string }>) | null = null;
 let state: TranscriberState = "idle";
+let lastLoadFailedAt = 0;
+type WhisperPipeline = (audio: Float32Array, options?: unknown) => Promise<{ text?: string }>;
+
+let pipelineFn: WhisperPipeline | null = null;
+let loadPromise: Promise<WhisperPipeline | null> | null = null;
 const queue: number[] = [];
 let working = false;
 
-/** Loads the Whisper pipeline once; returns null if it cannot be loaded. */
-async function ensurePipeline(): Promise<typeof pipelineFn> {
-  if (pipelineFn || state === "broken") {
+export interface TranscriptionDiagnostics {
+  enabled: boolean;
+  model: string;
+  state: TranscriberState;
+  database_configured: boolean;
+  queue_depth: number;
+  last_load_failed_at: string | null;
+}
+
+export function getTranscriptionDiagnostics(): TranscriptionDiagnostics {
+  return {
+    enabled: ENABLED,
+    model: MODEL,
+    state,
+    database_configured: getPool() !== null,
+    queue_depth: queue.length,
+    last_load_failed_at: lastLoadFailedAt > 0 ? new Date(lastLoadFailedAt).toISOString() : null,
+  };
+}
+
+/** Loads the Whisper pipeline once; returns null if it cannot be loaded. Retries after cooldown. */
+async function ensurePipeline(): Promise<WhisperPipeline | null> {
+  if (pipelineFn) {
     return pipelineFn;
   }
-  state = "loading";
-  try {
-    // Indirect specifier keeps the server build independent of this optional package.
-    const moduleName = "@huggingface/transformers";
-    const transformers = (await import(moduleName)) as {
-      pipeline: (task: string, model: string) => Promise<typeof pipelineFn>;
-    };
-    pipelineFn = await transformers.pipeline("automatic-speech-recognition", MODEL);
-    state = "ready";
-    console.log(`Transcriber ready (model ${MODEL}).`);
-  } catch (error) {
-    state = "broken";
-    console.warn("Transcriber unavailable — transmissions will be recorded without transcripts.", error);
+  if (state === "broken") {
+    if (Date.now() - lastLoadFailedAt < LOAD_RETRY_MS) {
+      return null;
+    }
+    console.log("[transcribe] retrying Whisper model load after previous failure");
+    state = "idle";
   }
-  return pipelineFn;
+  if (loadPromise) {
+    return loadPromise;
+  }
+
+  loadPromise = (async () => {
+    state = "loading";
+    try {
+      const moduleName = "@huggingface/transformers";
+      const transformers = (await import(moduleName)) as {
+        pipeline: (task: string, model: string) => Promise<WhisperPipeline>;
+      };
+      pipelineFn = await transformers.pipeline("automatic-speech-recognition", MODEL);
+      state = "ready";
+      lastLoadFailedAt = 0;
+      console.log(`Transcriber ready (model ${MODEL}).`);
+    } catch (error) {
+      state = "broken";
+      lastLoadFailedAt = Date.now();
+      pipelineFn = null;
+      console.warn(
+        "Transcriber unavailable — transmissions will be recorded without transcripts.",
+        error,
+      );
+    }
+    return pipelineFn;
+  })();
+
+  try {
+    return await loadPromise;
+  } finally {
+    loadPromise = null;
+  }
 }
 
 async function transcribeOne(id: number): Promise<void> {

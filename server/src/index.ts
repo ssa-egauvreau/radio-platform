@@ -20,7 +20,9 @@ import {
   peekVoiceTransmittingTalker,
 } from "./voiceRelay.js";
 import { configureAiDispatchEngine } from "./aiDispatch/engine.js";
+import { getAiDispatchPlatformStatus } from "./aiDispatch/platformConfig.js";
 import { scheduleAllAgencyTtsPrecache } from "./aiDispatch/ttsPrecache.js";
+import { getTranscriptionDiagnostics } from "./transcribe.js";
 import { startBridgeWorker } from "./bridgeWorker.js";
 
 const app = express();
@@ -126,7 +128,22 @@ app.use(async (req, res, next) => {
 });
 
 app.get("/health", (_req, res) => {
-  res.json({ status: "ok", service: "safet-ptt-api" });
+  const ai = getAiDispatchPlatformStatus();
+  const tx = getTranscriptionDiagnostics();
+  const ok =
+    tx.database_configured &&
+    (!tx.enabled || tx.state === "ready" || tx.state === "loading" || tx.queue_depth === 0);
+  res.json({
+    status: ok ? "ok" : "degraded",
+    service: "safet-ptt-api",
+    database: tx.database_configured,
+    transcription: tx,
+    ai_dispatch: {
+      enabled: ai.enabled,
+      llm_configured: ai.llmConfigured,
+      provider: ai.llmProvider,
+    },
+  });
 });
 
 // Console + admin API. Unmatched paths fall through to the legacy routes below.

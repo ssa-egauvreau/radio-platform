@@ -1,0 +1,71 @@
+# Troubleshooting: no transcripts and AI not responding
+
+The server is a **chain**. If any step breaks, you get no transcript and no AI voice.
+
+```text
+You press PTT → audio saved (needs database)
+            → Whisper transcribes (needs transcription on)
+            → AI reads transcript (needs AI_DISPATCH_ENABLED + channel AI ON)
+            → ElevenLabs speaks (needs Integrations API key)
+```
+
+## Quick check (no login)
+
+Open in a browser:
+
+`https://safet.up.railway.app/health`
+
+Look at the JSON:
+
+| Field | Good | Bad — what it means |
+|--------|------|---------------------|
+| `database` | `true` | `false` — **DATABASE_URL** missing on Railway; nothing is recorded |
+| `transcription.state` | `ready` | `broken` — Whisper failed to load (often out of memory); transcripts fail |
+| `transcription.enabled` | `true` | `false` — **TRANSCRIPTION** is set to `off` on Railway |
+| `ai_dispatch.enabled` | `true` | `false` — **AI_DISPATCH_ENABLED** is not `1` |
+| `ai_dispatch.llm_configured` | `true` | `false` — **AI_DISPATCH_LLM_API_KEY** missing |
+
+`status: "degraded"` means something in that chain is wrong.
+
+## In the web console
+
+1. Sign in → open **Transmissions** (or the channel transmission list).
+2. Transmit on the radio, wait ~10–20 seconds, refresh.
+
+| What you see | Meaning |
+|--------------|---------|
+| **No new row at all** | Recording not saving — check **database** on `/health` and that you are on the right agency/channel |
+| **Transcribing…** (stuck) | Whisper still loading or stuck — check Railway logs for `Transcriber` |
+| **Transcript unavailable** | Whisper failed — redeploy or increase Railway memory |
+| **Transcription disabled** | Set `TRANSCRIPTION=on` on Railway (or remove `TRANSCRIPTION=off`) |
+| Transcript text OK, no AI voice | AI dispatch — see below |
+
+## AI dispatch checklist (Railway Variables)
+
+| Variable | Required value |
+|----------|----------------|
+| `AI_DISPATCH_ENABLED` | `1` |
+| `AI_DISPATCH_LLM_API_KEY` | Anthropic `sk-ant-…` (same as old `ANTHROPIC_API_KEY`) |
+| `DATABASE_URL` | Linked from Postgres service |
+
+**Admin → Integrations** (your agency):
+
+- ElevenLabs API key and voice ID filled in
+
+**Dispatch console → channel panel:**
+
+- **AI DISPATCH** toggle is **ON** for the channel you are testing
+
+## Railway logs (2 minutes)
+
+1. Railway → safeT service → **Deployments** → latest → **View logs**.
+2. Search for:
+
+- `Transcriber ready` — good
+- `Transcriber unavailable` — Whisper failed (try larger plan or redeploy)
+- `Database bootstrap failed` — Postgres problem
+- `[ai-dispatch]` lines — AI ran or skipped
+
+## Redeploy
+
+After changing variables: **Deploy** or push to `main` and wait for **Success**, then test again.
