@@ -66,18 +66,6 @@ class RadioPreferences(context: Context) {
             .apply()
     }
 
-    /**
-     * Installing a new build keeps app data, so a stale session would resume
-     * silently. Drop the session when the app's install timestamp no longer
-     * matches the one saved at sign-in; a plain device reboot leaves it intact.
-     */
-    fun clearSessionIfReinstalled() {
-        if (getAuthToken().isBlank()) return
-        if (prefs.getLong(KEY_SESSION_INSTALL_TOKEN, 0L) != currentInstallToken()) {
-            clearAuthSession()
-        }
-    }
-
     /** Timestamp of the last package install/update — changes on every new build. */
     @Suppress("DEPRECATION")
     private fun currentInstallToken(): Long = try {
