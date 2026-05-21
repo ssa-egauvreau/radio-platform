@@ -97,11 +97,15 @@ async function transcribeOne(id: number): Promise<void> {
     const run = await ensurePipeline();
     if (!run) {
       await setTranscript(id, "failed", null);
+      // Still hand off to AI so the activity log records a "transcript unavailable" skip
+      // instead of the transmission silently vanishing from the AI dispatch log.
+      enqueueAiDispatchForTransmission(id);
       return;
     }
     const samples = decodeWavToFloat32(record.audio);
     if (samples.length === 0) {
       await setTranscript(id, "done", "");
+      enqueueAiDispatchForTransmission(id);
       return;
     }
     const result = await run(samples, { chunk_length_s: 30, stride_length_s: 5 });
@@ -112,6 +116,7 @@ async function transcribeOne(id: number): Promise<void> {
   } catch (error) {
     console.warn(`Transcription failed for transmission ${id}`, error);
     await setTranscript(id, "failed", null).catch(() => undefined);
+    enqueueAiDispatchForTransmission(id);
   }
 }
 
@@ -133,7 +138,9 @@ async function pump(): Promise<void> {
 /** Queues a freshly recorded transmission for transcription. */
 export function enqueueTranscription(id: number): void {
   if (!ENABLED) {
-    void setTranscript(id, "disabled", null).catch(() => undefined);
+    void setTranscript(id, "disabled", null)
+      .then(() => enqueueAiDispatchForTransmission(id))
+      .catch(() => undefined);
     return;
   }
   queue.push(id);
