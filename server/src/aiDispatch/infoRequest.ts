@@ -29,6 +29,18 @@ function incidentPayloadHasUnit(inc: { payload: unknown }, targetUnit: string): 
   });
 }
 
+/** Trim a full street address to street + city for brevity on the air (drop state/zip/country). */
+function shortenLocationForRadio(loc: string | null): string {
+  if (!loc?.trim()) {
+    return "";
+  }
+  const parts = loc
+    .split(",")
+    .map((p) => p.replace(/\b[A-Z]{2}\s+\d{5}(?:-\d{4})?\b/g, "").trim())
+    .filter((p) => p && !/^USA$/i.test(p) && !/^\d{5}(?:-\d{4})?$/.test(p) && !/^[A-Z]{2}$/.test(p));
+  return parts.slice(0, 2).join(", ");
+}
+
 export function buildInfoRequestAck(requestingUnit: string | null | undefined): string {
   if (!requestingUnit) {
     return "Copy. Standby.";
@@ -83,13 +95,18 @@ export async function buildInfoRequestResponse(
       if (pending.length === 0) {
         return `${csPart}no pending calls at this time.`;
       }
-      if (pending.length === 1) {
-        const inc = pending[0]!;
-        const codeOrType = inc.incident_type || "call";
-        const loc = inc.location || "unknown location";
-        return `${csPart}one pending call: ${codeOrType} at ${loc}.`;
+      const MAX_READ = 6;
+      const items = pending.slice(0, MAX_READ).map((inc) => {
+        const codeOrType = (inc.incident_type || "call").trim();
+        const loc = shortenLocationForRadio(inc.location);
+        return loc ? `${codeOrType} at ${loc}` : codeOrType;
+      });
+      const intro = pending.length === 1 ? "one pending call:" : `${pending.length} pending calls:`;
+      let body = items.join("; ");
+      if (pending.length > MAX_READ) {
+        body += `; plus ${pending.length - MAX_READ} more on the dashboard`;
       }
-      return `${csPart}${pending.length} pending calls. Check the dashboard for details.`;
+      return `${csPart}${intro} ${body}.`;
     }
 
     case "active_calls_for_unit": {
