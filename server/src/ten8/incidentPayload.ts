@@ -1,5 +1,5 @@
 import type { AiDispatchParseResult } from "../aiDispatch/parse.js";
-import { accountCodeDashForm } from "../aiDispatch/speech/numbers.js";
+import { accountCodeLocnotesForm } from "../aiDispatch/speech/numbers.js";
 import { lookupSsaProperty } from "../aiDispatch/ssaProperties.js";
 import { isWebSearchConfigured, webSearchAnswer } from "../aiDispatch/webSearch.js";
 import { resolveTen8IncidentType, resolveTen8PriorityForCode, clampPriority } from "./callTypes.js";
@@ -62,7 +62,7 @@ export function formatLocationForTen8(parts: {
 /** SSA account property — exact name and property number for 10-8 locnotes. */
 export function buildSsaPropertyLocnotes(accountCode: string, prop: { name: string }): string {
   const name = prop.name.trim();
-  const acct = accountCodeDashForm(accountCode).trim();
+  const acct = accountCodeLocnotesForm(accountCode).trim();
   if (name && acct) {
     return `${name}, property ${acct}`;
   }

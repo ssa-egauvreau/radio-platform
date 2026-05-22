@@ -102,3 +102,8 @@ export function accountCodeDashForm(code: string): string {
   }
   return digits;
 }
+
+/** Property number for 10-8 locnotes — digits only (3208), never dashes (32-08). */
+export function accountCodeLocnotesForm(code: string): string {
+  return String(code).replace(/[^0-9]/g, "");
+}
