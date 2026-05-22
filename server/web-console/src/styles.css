@@ -1084,7 +1084,7 @@ code.mono {
     0 0 0 2px var(--accent);
 }
 .channel-workspace-tile.moving .ch-card-chrome,
-.channel-workspace-tile.moving .ch-card-title-main {
+.channel-workspace-tile.moving .ch-card-title-row {
   pointer-events: none;
 }
 .channel-workspace-tile.moving.channel-off .channel-off-overlay {
@@ -2025,11 +2025,19 @@ code.mono {
   gap: 0;
   padding: 0;
   min-width: 0;
+  min-height: 32px;
   border: 1px solid var(--text);
   border-radius: 8px 8px 0 0;
   background: var(--text);
   color: var(--bg);
   box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--bg) 18%, transparent);
+  cursor: grab;
+  touch-action: manipulation;
+  user-select: none;
+}
+.channel-card.workspace .ch-card-title-row.dragging {
+  cursor: grabbing;
+  touch-action: none;
 }
 .channel-card.workspace .ch-card-title-main {
   flex: 1 1 auto;
@@ -2038,14 +2046,13 @@ code.mono {
   flex-wrap: wrap;
   gap: 4px 6px;
   min-width: 0;
+  min-height: 32px;
   padding: 5px 52px 5px 8px;
-  cursor: default;
-  touch-action: manipulation;
-  user-select: none;
+  pointer-events: none;
 }
-.channel-card.workspace .ch-card-title-row.dragging .ch-card-title-main {
-  cursor: grabbing;
-  touch-action: none;
+.channel-card.workspace .ch-card-title-main .ch-card-name,
+.channel-card.workspace .ch-card-title-main .chan-sim-tag {
+  pointer-events: auto;
 }
 .channel-card.workspace .ch-card-chrome {
   position: absolute;

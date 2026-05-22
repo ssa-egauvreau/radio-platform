@@ -589,12 +589,10 @@ export function ChannelPanel({
                   ? { background: channel.color, color: "#fff", borderColor: channel.color }
                   : undefined
               }
+              onPointerDown={workspaceChrome?.onDragPointerDown}
+              title={workspaceChrome ? "Drag the name bar to reorder (not PTT or S / M / L)" : undefined}
             >
-              <div
-                className="ch-card-title-main"
-                onPointerDown={workspaceChrome?.onDragPointerDown}
-                title={workspaceChrome ? "Drag to reorder" : undefined}
-              >
+              <div className="ch-card-title-main">
                 <div className="ch-card-name ch-card-name-static">
                   <IconRadio size={14} />
                   <span className="ch-card-label">{channel.name}</span>
@@ -603,7 +601,10 @@ export function ChannelPanel({
                 {showMemberCount && <ChannelMemberCount channelName={channel.name} />}
               </div>
               {workspaceChrome ? (
-                <div className="ch-card-chrome">
+                <div
+                  className="ch-card-chrome"
+                  onPointerDown={(e) => e.stopPropagation()}
+                >
                   <button
                     type="button"
                     className="channel-workspace-size-btn"

@@ -2,6 +2,10 @@ import type { WorkspaceDropEdge } from "./channelWorkspaceOrder";
 
 /** Tiles whose tops are within this distance share a row (row-dense reading order). */
 const ROW_CLUSTER_PX = 52;
+/** Vertical padding when deciding which row the pointer is in. */
+const ROW_BAND_PAD_Y = 44;
+/** Horizontal padding for empty space beside a row. */
+const ROW_BAND_PAD_X = 10;
 
 type TileRect = {
   id: number;
@@ -14,8 +18,6 @@ type TileRect = {
 
 /** Gap below a tile where dropping means “stack under this channel”. */
 const UNDER_GAP_PX = 56;
-/** Tiles whose centers are within this distance share a column. */
-const COLUMN_CLUSTER_PX = 88;
 
 function readTileRects(root: HTMLElement, order: number[], excludeId: number | null): TileRect[] {
   const out: TileRect[] = [];
@@ -38,6 +40,20 @@ function readTileRects(root: HTMLElement, order: number[], excludeId: number | n
     });
   }
   return out;
+}
+
+function rowBounds(row: TileRect[]): { top: number; bottom: number; left: number; right: number } {
+  let top = Infinity;
+  let bottom = -Infinity;
+  let left = Infinity;
+  let right = -Infinity;
+  for (const t of row) {
+    top = Math.min(top, t.top);
+    bottom = Math.max(bottom, t.bottom);
+    left = Math.min(left, t.left);
+    right = Math.max(right, t.right);
+  }
+  return { top, bottom, left, right };
 }
 
 /** Group tiles into horizontal rows (top-to-bottom), each sorted left-to-right. */
@@ -71,34 +87,6 @@ function clusterRows(tiles: TileRect[]): TileRect[][] {
   return rows;
 }
 
-/** Group tiles into vertical columns (left-to-right), each sorted top-to-bottom. */
-function clusterColumns(tiles: TileRect[]): TileRect[][] {
-  if (tiles.length === 0) {
-    return [];
-  }
-  const sorted = [...tiles].sort((a, b) => a.left - b.left || a.top - b.top);
-  const columns: TileRect[][] = [];
-  for (const tile of sorted) {
-    let placed = false;
-    for (const col of columns) {
-      const ref = col[0]!;
-      if (Math.abs(tile.cx - ref.cx) <= COLUMN_CLUSTER_PX) {
-        col.push(tile);
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) {
-      columns.push([tile]);
-    }
-  }
-  for (const col of columns) {
-    col.sort((a, b) => a.top - b.top);
-  }
-  columns.sort((a, b) => a[0]!.left - b[0]!.left);
-  return columns;
-}
-
 /** Reading order for row-dense grid: left-to-right within each row, then the next row. */
 export function rowMajorOrderFromDom(
   root: HTMLElement,
@@ -112,24 +100,31 @@ export function rowMajorOrderFromDom(
 /** @deprecated Use rowMajorOrderFromDom — kept for imports during transition. */
 export const columnMajorOrderFromDom = rowMajorOrderFromDom;
 
-function columnBounds(col: TileRect[]): { left: number; right: number } {
-  let left = Infinity;
-  let right = -Infinity;
-  for (const t of col) {
-    left = Math.min(left, t.left);
-    right = Math.max(right, t.right);
+/** Pick the row band that best matches the pointer Y. */
+function pickRowIndex(rows: TileRect[][], clientY: number): number {
+  for (let i = 0; i < rows.length; i++) {
+    const { top, bottom } = rowBounds(rows[i]!);
+    if (clientY >= top - ROW_BAND_PAD_Y && clientY <= bottom + ROW_BAND_PAD_Y) {
+      return i;
+    }
   }
-  return { left, right };
-}
-
-function pointerInColumnBand(x: number, col: TileRect[], pad = 12): boolean {
-  const { left, right } = columnBounds(col);
-  return x >= left - pad && x <= right + pad;
+  let bestIdx = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < rows.length; i++) {
+    const { top, bottom } = rowBounds(rows[i]!);
+    const cy = (top + bottom) / 2;
+    const dist = Math.abs(clientY - cy);
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIdx = i;
+    }
+  }
+  return bestIdx;
 }
 
 /**
- * Find drop target using column stacks — supports gaps *under* a channel, not only
- * hovering on the tile body (which felt like “side only” with column layout).
+ * Drop target for row-dense layout: respects empty space to the right/left of a row,
+ * gaps between tiles, and vertical gaps between rows (not only the first column).
  */
 export function findWorkspaceDropTarget(
   root: HTMLElement,
@@ -142,69 +137,111 @@ export function findWorkspaceDropTarget(
   if (tiles.length === 0) {
     return null;
   }
-  const columns = clusterColumns(tiles);
 
-  let targetColumn: TileRect[] | null = null;
-  for (const col of columns) {
-    if (pointerInColumnBand(clientX, col)) {
-      targetColumn = col;
-      break;
-    }
-  }
-  if (!targetColumn) {
-    let bestDist = Infinity;
-    for (const col of columns) {
-      const { left, right } = columnBounds(col);
-      const cx = (left + right) / 2;
-      const dist = Math.abs(clientX - cx);
-      if (dist < bestDist) {
-        bestDist = dist;
-        targetColumn = col;
+  const rows = clusterRows(tiles);
+
+  for (let i = 0; i < rows.length - 1; i++) {
+    const curr = rowBounds(rows[i]!);
+    const nextTop = rowBounds(rows[i + 1]!).top;
+    if (clientY > curr.bottom && clientY < nextTop) {
+      const mid = (curr.bottom + nextTop) / 2;
+      if (clientY < mid) {
+        const last = rows[i]![rows[i]!.length - 1]!;
+        return { targetId: last.id, edge: "after" };
       }
+      const first = rows[i + 1]![0]!;
+      return { targetId: first.id, edge: "before" };
     }
   }
-  if (!targetColumn || targetColumn.length === 0) {
-    return null;
+
+  const firstRow = rows[0]!;
+  const lastRow = rows[rows.length - 1]!;
+  const firstBounds = rowBounds(firstRow);
+  const lastBounds = rowBounds(lastRow);
+
+  if (clientY < firstBounds.top - ROW_BAND_PAD_Y) {
+    return { targetId: firstRow[0]!.id, edge: "before" };
+  }
+  if (clientY > lastBounds.bottom + ROW_BAND_PAD_Y) {
+    return { targetId: lastRow[lastRow.length - 1]!.id, edge: "after" };
   }
 
-  const col = targetColumn;
+  const rowIdx = pickRowIndex(rows, clientY);
+  const row = rows[rowIdx]!;
+  const band = rowBounds(row);
 
-  for (let i = 0; i < col.length; i++) {
-    const tile = col[i]!;
-    const next = col[i + 1];
+  for (let i = 0; i < row.length; i++) {
+    const tile = row[i]!;
+    const next = row[i + 1];
 
-    if (clientY >= tile.top && clientY <= tile.bottom) {
-      const midY = tile.top + (tile.bottom - tile.top) / 2;
-      return { targetId: tile.id, edge: clientY < midY ? "before" : "after" };
+    if (
+      clientX >= tile.left &&
+      clientX <= tile.right &&
+      clientY >= tile.top &&
+      clientY <= tile.bottom
+    ) {
+      const midX = tile.left + (tile.right - tile.left) / 2;
+      return { targetId: tile.id, edge: clientX < midX ? "before" : "after" };
     }
 
-    const underBottom = next ? Math.min(tile.bottom + UNDER_GAP_PX, next.top) : tile.bottom + UNDER_GAP_PX;
-    if (clientY > tile.bottom && clientY <= underBottom && pointerInColumnBand(clientX, col, 4)) {
+    if (next && clientX > tile.right && clientX < next.left) {
+      const midX = (tile.right + next.left) / 2;
+      return clientX < midX
+        ? { targetId: tile.id, edge: "after" }
+        : { targetId: next.id, edge: "before" };
+    }
+
+    const underBottom = next
+      ? Math.min(tile.bottom + UNDER_GAP_PX, next.top)
+      : tile.bottom + UNDER_GAP_PX;
+    if (
+      clientY > tile.bottom &&
+      clientY <= underBottom &&
+      clientX >= tile.left - ROW_BAND_PAD_X &&
+      clientX <= tile.right + ROW_BAND_PAD_X
+    ) {
       return { targetId: tile.id, edge: "after" };
     }
-
-    if (next && clientY > underBottom && clientY < next.top) {
-      const gapMid = (tile.bottom + next.top) / 2;
-      return {
-        targetId: gapMid - tile.bottom < next.top - gapMid ? tile.id : next.id,
-        edge: gapMid - tile.bottom < next.top - gapMid ? "after" : "before",
-      };
-    }
   }
 
-  const first = col[0]!;
-  const last = col[col.length - 1]!;
-  if (clientY < first.top) {
+  const first = row[0]!;
+  const last = row[row.length - 1]!;
+
+  if (
+    clientY >= band.top - ROW_BAND_PAD_Y &&
+    clientY <= band.bottom + ROW_BAND_PAD_Y &&
+    clientX < band.left - ROW_BAND_PAD_X
+  ) {
     return { targetId: first.id, edge: "before" };
   }
-  if (clientY > last.bottom) {
+
+  if (
+    clientY >= band.top - ROW_BAND_PAD_Y &&
+    clientY <= band.bottom + ROW_BAND_PAD_Y &&
+    clientX > band.right + ROW_BAND_PAD_X
+  ) {
     return { targetId: last.id, edge: "after" };
   }
 
-  return { targetId: last.id, edge: "after" };
+  let nearest = row[0]!;
+  let nearestDist = Infinity;
+  for (const tile of row) {
+    const dx = clientX < tile.cx ? tile.left - clientX : clientX - tile.right;
+    const dy =
+      clientY < tile.top ? tile.top - clientY : clientY > tile.bottom ? clientY - tile.bottom : 0;
+    const dist = dx * dx + dy * dy;
+    if (dist < nearestDist) {
+      nearestDist = dist;
+      nearest = tile;
+    }
+  }
+  return {
+    targetId: nearest.id,
+    edge: clientX < nearest.cx ? "before" : "after",
+  };
 }
 
-/** Insert index when dropping a rail channel onto the workspace (column-major). */
+/** Insert index when dropping a rail channel onto the workspace (row-major). */
 export function insertIndexFromPointer(
   clientX: number,
   clientY: number,
@@ -223,7 +260,7 @@ export function insertIndexFromPointer(
   return drop.edge === "after" ? idx + 1 : idx;
 }
 
-/** Apply a column-major order after preview insert (for commit on drop). */
+/** Apply row-major order after preview insert (for commit on drop). */
 export function orderAfterDrop(
   visualOrder: number[],
   sourceId: number,

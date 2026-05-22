@@ -495,7 +495,7 @@ export function ChannelWorkspace({
         <div className="channel-workspace-empty">
           <p>Tap a channel in the list to open it here — or drag it in.</p>
           <p className="muted">
-            Drag the name bar to reorder — drop beside or below a channel · S / M / L · ✕.
+            Drag the colored name bar to reorder — drop in empty space beside a channel · S / M / L · ✕.
           </p>
         </div>
       ) : (
