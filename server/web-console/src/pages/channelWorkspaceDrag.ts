@@ -1,10 +1,7 @@
 import type { WorkspaceDropEdge } from "./channelWorkspaceOrder";
 
-/** Row tracks for column-first grid so tiles wrap into multiple columns. */
-export function workspaceGridRowSlots(itemCount: number, colCount: number): number {
-  const cols = Math.max(1, colCount);
-  return Math.max(6, Math.ceil(itemCount / cols) * 3);
-}
+/** Tiles whose tops are within this distance share a row (row-dense reading order). */
+const ROW_CLUSTER_PX = 52;
 
 type TileRect = {
   id: number;
@@ -43,6 +40,37 @@ function readTileRects(root: HTMLElement, order: number[], excludeId: number | n
   return out;
 }
 
+/** Group tiles into horizontal rows (top-to-bottom), each sorted left-to-right. */
+function clusterRows(tiles: TileRect[]): TileRect[][] {
+  if (tiles.length === 0) {
+    return [];
+  }
+  const sorted = [...tiles].sort((a, b) => a.top - b.top || a.left - b.left);
+  const rows: TileRect[][] = [];
+  for (const tile of sorted) {
+    let placed = false;
+    for (const row of rows) {
+      const ref = row[0]!;
+      const sameRow =
+        Math.abs(tile.top - ref.top) <= ROW_CLUSTER_PX ||
+        (tile.top < ref.bottom && tile.bottom > ref.top);
+      if (sameRow) {
+        row.push(tile);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) {
+      rows.push([tile]);
+    }
+  }
+  for (const row of rows) {
+    row.sort((a, b) => a.left - b.left);
+  }
+  rows.sort((a, b) => a[0]!.top - b[0]!.top);
+  return rows;
+}
+
 /** Group tiles into vertical columns (left-to-right), each sorted top-to-bottom. */
 function clusterColumns(tiles: TileRect[]): TileRect[][] {
   if (tiles.length === 0) {
@@ -71,15 +99,18 @@ function clusterColumns(tiles: TileRect[]): TileRect[][] {
   return columns;
 }
 
-/** Reading order for column-first grid: down each column, then the next column. */
-export function columnMajorOrderFromDom(
+/** Reading order for row-dense grid: left-to-right within each row, then the next row. */
+export function rowMajorOrderFromDom(
   root: HTMLElement,
   order: number[],
   excludeId: number | null = null,
 ): number[] {
   const tiles = readTileRects(root, order, excludeId);
-  return clusterColumns(tiles).flatMap((col) => col.map((t) => t.id));
+  return clusterRows(tiles).flatMap((row) => row.map((t) => t.id));
 }
+
+/** @deprecated Use rowMajorOrderFromDom — kept for imports during transition. */
+export const columnMajorOrderFromDom = rowMajorOrderFromDom;
 
 function columnBounds(col: TileRect[]): { left: number; right: number } {
   let left = Infinity;
@@ -180,7 +211,7 @@ export function insertIndexFromPointer(
   root: HTMLElement,
   channelIds: number[],
 ): number {
-  const visual = columnMajorOrderFromDom(root, channelIds, null);
+  const visual = rowMajorOrderFromDom(root, channelIds, null);
   const drop = findWorkspaceDropTarget(root, clientX, clientY, visual, null);
   if (!drop) {
     return channelIds.length;

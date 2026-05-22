@@ -15,11 +15,10 @@ import type { UserChannel } from "../api";
 import { ChannelPanel } from "./ChannelPanel";
 import { previewWorkspaceOrder, type WorkspaceDropEdge } from "./channelWorkspaceOrder";
 import {
-  columnMajorOrderFromDom,
   findWorkspaceDropTarget,
   insertIndexFromPointer,
   orderAfterDrop,
-  workspaceGridRowSlots,
+  rowMajorOrderFromDom,
 } from "./channelWorkspaceDrag";
 import {
   getRailDragPreview,
@@ -47,6 +46,9 @@ const SIZE_LABEL: Record<WorkspaceWidgetSize, string> = {
   medium: "M",
   large: "L",
 };
+
+/** Pixels the pointer must move before a title-bar press becomes a drag (avoids “click to hide”). */
+const WORKSPACE_DRAG_THRESHOLD_PX = 6;
 
 function nextSizeTitle(size: WorkspaceWidgetSize, tile: WorkspaceTileLayout): string {
   const foot = workspaceTileFootprintLabel(tile);
@@ -152,10 +154,11 @@ export function ChannelWorkspace({
   const placeholderIndex =
     moveChannelId !== null ? previewIds.indexOf(moveChannelId) : -1;
 
-  const gridRowSlots = useMemo(
-    () => workspaceGridRowSlots(dockedChannels.length, cols),
-    [dockedChannels.length, cols],
-  );
+  useEffect(() => {
+    const clearRailDrag = () => setRailDragPreview(null);
+    window.addEventListener("dragend", clearRailDrag);
+    return () => window.removeEventListener("dragend", clearRailDrag);
+  }, []);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -209,20 +212,32 @@ export function ChannelWorkspace({
     e.preventDefault();
     e.stopPropagation();
     const handle = e.currentTarget;
-    handle.setPointerCapture(e.pointerId);
-    setMoveChannelId(channelId);
-    clearDragOver();
-    const rootAtStart = rootRef.current;
-    if (rootAtStart) {
-      setDragLayoutOrder(columnMajorOrderFromDom(rootAtStart, channelIds, channelId));
-    }
+    const startX = e.clientX;
+    const startY = e.clientY;
+    let dragging = false;
+    const thresholdSq = WORKSPACE_DRAG_THRESHOLD_PX * WORKSPACE_DRAG_THRESHOLD_PX;
 
     const onMove = (ev: globalThis.PointerEvent) => {
+      if (!dragging) {
+        const dx = ev.clientX - startX;
+        const dy = ev.clientY - startY;
+        if (dx * dx + dy * dy < thresholdSq) {
+          return;
+        }
+        dragging = true;
+        handle.setPointerCapture(ev.pointerId);
+        setMoveChannelId(channelId);
+        clearDragOver();
+        const rootAtStart = rootRef.current;
+        if (rootAtStart) {
+          setDragLayoutOrder(rowMajorOrderFromDom(rootAtStart, channelIds, channelId));
+        }
+      }
       const root = rootRef.current;
       if (!root) {
         return;
       }
-      const visual = columnMajorOrderFromDom(root, channelIds, channelId);
+      const visual = rowMajorOrderFromDom(root, channelIds, channelId);
       setDragLayoutOrder(visual);
       const drop = findWorkspaceDropTarget(root, ev.clientX, ev.clientY, visual, channelId);
       if (drop) {
@@ -244,15 +259,26 @@ export function ChannelWorkspace({
     };
 
     const onEnd = (ev: globalThis.PointerEvent) => {
-      handle.releasePointerCapture(ev.pointerId);
+      if (dragging) {
+        handle.releasePointerCapture(ev.pointerId);
+      }
+      if (!dragging) {
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onEnd);
+        handle.removeEventListener("pointercancel", onEnd);
+        return;
+      }
       const root = rootRef.current;
       if (!root) {
         setMoveChannelId(null);
         setDragLayoutOrder([]);
         clearDragOver();
+        handle.removeEventListener("pointermove", onMove);
+        handle.removeEventListener("pointerup", onEnd);
+        handle.removeEventListener("pointercancel", onEnd);
         return;
       }
-      const visual = columnMajorOrderFromDom(root, channelIds, channelId);
+      const visual = rowMajorOrderFromDom(root, channelIds, channelId);
       const drop = findWorkspaceDropTarget(root, ev.clientX, ev.clientY, visual, channelId);
       if (drop) {
         setWorkspaceChannelOrder(
@@ -291,7 +317,7 @@ export function ChannelWorkspace({
     const footprint = workspaceTileFootprintLabel(tile);
     const isDragging = moveChannelId === channel.id;
     const isRailDragSource = railDrag?.channelId === channel.id && !isDragging;
-    const isDragSource = isDragging || isRailDragSource;
+    const isDragSource = isRailDragSource;
     const isDropTarget =
       !isDragSource && dragOverChannelId === channel.id && dropEdge !== null;
     return (
@@ -409,7 +435,6 @@ export function ChannelWorkspace({
       aria-label="Channel workspace"
       style={{
         gridTemplateColumns: `repeat(auto-fill, minmax(${WORKSPACE_MIN_COL_PX}px, 1fr))`,
-        gridTemplateRows: `repeat(${gridRowSlots}, minmax(min-content, auto))`,
       }}
       onDragOver={(e) => {
         e.preventDefault();
@@ -431,7 +456,7 @@ export function ChannelWorkspace({
         <div className="channel-workspace-empty">
           <p>Tap a channel in the list to open it here — or drag it in.</p>
           <p className="muted">
-            Drag the name bar to reorder — drop below a channel to stack under it · S / M / L · ✕.
+            Drag the name bar to reorder — drop beside or below a channel · S / M / L · ✕.
           </p>
         </div>
       ) : (

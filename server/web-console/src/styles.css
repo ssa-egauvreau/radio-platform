@@ -946,13 +946,12 @@ code.mono {
   font-size: 9px;
 }
 
-/* --- Mission Control: column-first grid — tiles stack vertically per column --- */
+/* --- Mission Control: row-dense grid — tiles pack side-by-side and stack in rows --- */
 .channel-workspace-rows.channel-workspace-grid {
   display: grid;
-  /* Fill each column top-to-bottom before the next column (masonry-style columns). */
   grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
   grid-auto-rows: minmax(min-content, auto);
-  grid-auto-flow: column dense;
+  grid-auto-flow: row dense;
   align-items: start;
   gap: 8px;
   align-content: start;
@@ -995,6 +994,7 @@ code.mono {
 }
 .channel-workspace-tile {
   position: relative;
+  z-index: 1;
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
@@ -1013,6 +1013,12 @@ code.mono {
   transition:
     box-shadow 0.15s ease,
     transform 0.15s ease;
+}
+.channel-workspace-tile:hover {
+  z-index: 12;
+}
+.channel-workspace-tile:focus-within {
+  z-index: 14;
 }
 .channel-workspace-tile.workspace-tile-stacked {
   box-shadow:
@@ -1054,8 +1060,8 @@ code.mono {
   z-index: 7;
 }
 .channel-workspace-tile.moving {
-  opacity: 0.4;
-  z-index: 30;
+  opacity: 0.55;
+  z-index: 40;
   cursor: grabbing;
   pointer-events: none;
   filter: grayscale(0.72) saturate(0.4) brightness(0.9);
@@ -1368,6 +1374,7 @@ code.mono {
 }
 .channel-workspace-tile-inner {
   position: relative;
+  z-index: 1;
   flex: 0 1 auto;
   display: flex;
   flex-direction: column;

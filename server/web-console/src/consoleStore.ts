@@ -15,7 +15,7 @@ import {
 const STATE_KEY = "securityradio.console.state";
 
 /** Bump when workspace layout rules change — triggers one-time localStorage migration. */
-const CURRENT_LAYOUT_VERSION = 12;
+const CURRENT_LAYOUT_VERSION = 13;
 const MAX_STATE_STORAGE_BYTES = 256 * 1024;
 const MAX_OPEN_CHANNELS = 16;
 const MAX_DOCKED_CHANNELS = 12;
