@@ -2069,7 +2069,10 @@ export function createApiRouter(): Router {
         return;
       }
       const enabled = body.enabled === true;
-      await setChannelAiDispatch(req.authUser!.agencyId!, channel, enabled);
+      const agencyId = req.authUser!.agencyId!;
+      await setChannelAiDispatch(agencyId, channel, enabled);
+      const { notifyChannelAiDispatchListenPcm } = await import("./voiceRelay.js");
+      notifyChannelAiDispatchListenPcm(agencyId, channel, enabled);
       await writeAudit({
         agencyId: req.authUser!.agencyId!,
         actorUserId: req.authUser!.id,

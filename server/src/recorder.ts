@@ -5,6 +5,7 @@ import { getPool } from "./db.js";
 import { insertTransmission } from "./store.js";
 import { encodeWavPcm16 } from "./wav.js";
 import { enqueueTranscription } from "./transcribe.js";
+import { isAiDispatchChannelCached } from "./aiDispatch/channelCache.js";
 import { createImbeDecoder, type ImbeStreamDecoder } from "./imbeServerCodec.js";
 
 const SAMPLE_RATE = 16000;
@@ -25,6 +26,8 @@ export interface FrameAttribution {
   userId: number | null;
   unitId: string;
   displayName: string | null;
+  /** AI dispatch on this channel — record clear PCM only, never vocoded IMBE. */
+  aiDispatchListenPcm?: boolean;
 }
 
 /** Recordings are tracked per agency + channel so tenants never share a talk-spurt. */
@@ -97,10 +100,16 @@ export function recordFrame(attr: FrameAttribution, payload: Buffer): void {
     rec = { ...attr, startedAt: now, lastFrameMs: now, chunks: [], bytes: 0, decoder: null };
     active.set(key, rec);
   }
-  // Digital (IMBE) frames are decoded to PCM with a decoder dedicated to this
-  // talk-spurt, so interleaved channels never share frame-to-frame history.
+  const aiListenPcm =
+    attr.aiDispatchListenPcm === true ||
+    isAiDispatchChannelCached(attr.agencyId, attr.channelName);
+
+  // AI dispatch transcription uses clear PCM — IMBE decode is unintelligible to Whisper.
   let pcm: Buffer;
   if (isImbeFrame(payload)) {
+    if (aiListenPcm) {
+      return;
+    }
     if (!rec.decoder) {
       rec.decoder = createImbeDecoder();
     }

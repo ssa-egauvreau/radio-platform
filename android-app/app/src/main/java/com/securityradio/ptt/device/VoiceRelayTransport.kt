@@ -47,7 +47,13 @@ fun httpApiBaseUrlToVoiceWebSocketUrl(httpBaseUrl: String): String {
  * Codec: see [VoiceAudioSpecs] (PCM); IMBE via bundled dvmvocoder (GPL — see cpp/dvmvocoder).
  */
 sealed interface VoiceControlEvent {
-    data class Joined(val channel: String, val permission: String) : VoiceControlEvent
+    data class Joined(
+        val channel: String,
+        val permission: String,
+        val aiDispatchListenPcm: Boolean = false,
+    ) : VoiceControlEvent
+    /** AI dispatch on this channel — uplink clear PCM instead of IMBE vocoder. */
+    data class AiDispatchPcm(val enabled: Boolean) : VoiceControlEvent
     data class Error(val code: String) : VoiceControlEvent
     data class Busy(val holderUnit: String?) : VoiceControlEvent
     /** Dispatcher live-moved this radio to another channel (Live Channel Control). */
@@ -137,12 +143,21 @@ class VoiceRelayTransport(
             val json = JSONObject(text)
             when (json.optString("type")) {
                 "joined" -> {
+                    aiDispatchListenPcm = json.optBoolean("ai_dispatch_listen_pcm", false)
                     _controlEvents.tryEmit(
                         VoiceControlEvent.Joined(
                             channel = json.optString("channel"),
                             permission = json.optString("permission", "talk"),
+                            aiDispatchListenPcm = aiDispatchListenPcm,
                         ),
                     )
+                }
+                "ai_dispatch_pcm" -> {
+                    aiDispatchListenPcm = json.optBoolean("enabled", false)
+                    if (aiDispatchListenPcm) {
+                        pcmAccLen = 0
+                    }
+                    _controlEvents.tryEmit(VoiceControlEvent.AiDispatchPcm(enabled = aiDispatchListenPcm))
                 }
                 "error" -> {
                     _controlEvents.tryEmit(
@@ -197,7 +212,10 @@ class VoiceRelayTransport(
     private fun ensureImbeNativeLoadedForRx(): Boolean =
         P25ImbeNative.isAvailable || P25ImbeNative.tryLoadLibrary()
 
-    private fun p25UplinkEligible(): Boolean = P25ImbeNative.isAvailable
+    @Volatile
+    private var aiDispatchListenPcm: Boolean = false
+
+    private fun p25UplinkEligible(): Boolean = P25ImbeNative.isAvailable && !aiDispatchListenPcm
 
     private fun reconcileAccumulatorForModeToggle() {
         val cur = p25UplinkEligible()

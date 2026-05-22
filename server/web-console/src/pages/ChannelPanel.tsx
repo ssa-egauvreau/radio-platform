@@ -148,7 +148,7 @@ export function ChannelPanel({
         );
       },
     });
-    client.setDigitalTx(loadTxDigital(channel.id));
+    client.setDigitalTx(aiDispatch ? false : loadTxDigital(channel.id));
     client.setVolume(loadVolume(channel.id));
     client.setMuted(loadMuted(channel.id));
     clientRef.current = client;
@@ -302,6 +302,19 @@ export function ChannelPanel({
     };
   }, [channel.name, expanded]);
 
+  useEffect(() => {
+    const client = clientRef.current;
+    if (!client || !monitoring) {
+      return;
+    }
+    client.setAiDispatchListenPcm(aiDispatch);
+    if (aiDispatch) {
+      client.setDigitalTx(false);
+    } else {
+      client.setDigitalTx(loadTxDigital(channel.id));
+    }
+  }, [aiDispatch, monitoring, channel.id]);
+
   function toggleAiDispatch() {
     if (!aiDispatchReady) {
       return;
@@ -311,6 +324,14 @@ export function ChannelPanel({
     void api.setChannelAiDispatch(channel.name, next).catch(() => {
       setAiDispatch(!next);
     });
+    clientRef.current?.setAiDispatchListenPcm(next);
+    if (next) {
+      clientRef.current?.setDigitalTx(false);
+      setAiDispatchHint("AI dispatch listens to clear audio (not digital vocoder) on this channel.");
+    } else {
+      clientRef.current?.setDigitalTx(loadTxDigital(channel.id));
+      setAiDispatchHint(null);
+    }
   }
 
   useEffect(() => {

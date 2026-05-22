@@ -284,6 +284,15 @@ async function main(): Promise<void> {
   startRecorder();
   void recoverPendingTranscriptions();
   void initServerImbe();
+  void (async () => {
+    try {
+      const { warmAiDispatchChannelCache } = await import("./aiDispatch/channelCache.js");
+      const { listAllChannelAiDispatchEnabledRows } = await import("./store.js");
+      warmAiDispatchChannelCache(await listAllChannelAiDispatchEnabledRows());
+    } catch (e) {
+      console.warn("[ai-dispatch] channel cache warm failed", e);
+    }
+  })();
 
   const server = createServer(app);
   // Match an upstream LB / edge proxy's idle timeout (Railway / Cloudflare default ~60 s).

@@ -9,6 +9,8 @@ You press PTT → audio saved (needs database)
             → ElevenLabs speaks (needs Integrations API key)
 ```
 
+On channels with **AI dispatch ON**, radios must send **clear PCM** (not P25 IMBE vocoder). The server ignores IMBE for recordings on those channels; updated Android and web clients switch automatically when AI dispatch is enabled.
+
 ## Quick check (no login)
 
 Open in a browser:

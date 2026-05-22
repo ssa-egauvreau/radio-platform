@@ -26,16 +26,21 @@ import { normalizedChannel } from "./presence.js";
 import { verifyToken, type AuthUser } from "./auth.js";
 import { getPool } from "./db.js";
 import {
+  setAiDispatchChannelCached,
+  isAiDispatchChannelCached,
+} from "./aiDispatch/channelCache.js";
+import {
   getAgencyById,
   getBridgeById,
   getChannelByName,
   getMembership,
   getSimulcastByName,
   getUserById,
+  isChannelAiDispatchEnabled,
   resolveAgencyByKey,
   type Permission,
 } from "./store.js";
-import { recordFrame } from "./recorder.js";
+import { recordFrame, type FrameAttribution } from "./recorder.js";
 import { getCachedAuth, setCachedAuth } from "./sessionCache.js";
 
 export const VOICE_WS_PATH = "/v1/voice/stream";
@@ -100,6 +105,8 @@ interface ClientMeta {
    * but do not claim `/v1/air` (so handsets do not show "dispatcher transmitting").
    */
   markerToneUntilMs: number;
+  /** When true, uplink should be clear PCM so AI dispatch / Whisper can understand speech. */
+  aiDispatchListenPcm: boolean;
 }
 
 /** Throttle for the per-client "channel busy" notice. */
@@ -162,6 +169,41 @@ const voiceRoster = new Map<WebSocket, RosterRecord>();
 
 /** Every open voice socket and its connection metadata (the relay is a singleton). */
 const clientMeta = new Map<WebSocket, ClientMeta>();
+
+function frameAttribution(meta: ClientMeta): FrameAttribution {
+  return {
+    agencyId: meta.agencyId,
+    channelNorm: meta.channelNorm!,
+    channelName: meta.channelName,
+    channelId: meta.channelId,
+    userId: meta.userId,
+    unitId: meta.unitId,
+    displayName: meta.displayName,
+    aiDispatchListenPcm: meta.aiDispatchListenPcm,
+  };
+}
+
+/** Tell connected voice clients on a channel to uplink clear PCM (AI dispatch listening). */
+export function notifyChannelAiDispatchListenPcm(
+  agencyId: number,
+  channelName: string,
+  enabled: boolean,
+): void {
+  setAiDispatchChannelCached(agencyId, channelName, enabled);
+  const chNorm = normalizedChannel(channelName);
+  const key = channelKey(agencyId, chNorm);
+  for (const [ws, meta] of clientMeta) {
+    if (meta.channelKey !== key) {
+      continue;
+    }
+    meta.aiDispatchListenPcm = enabled;
+    try {
+      ws.send(JSON.stringify({ type: "ai_dispatch_pcm", enabled }));
+    } catch {
+      /* socket closing */
+    }
+  }
+}
 
 /** Composite channel key namespacing a normalized channel under its agency. */
 function channelKey(agencyId: number, channelNorm: string): string {
@@ -655,6 +697,7 @@ export function attachVoiceRelay(
             yields: identity.kind === "bridge" ? identity.yields : false,
             lastBusyMs: 0,
             markerToneUntilMs: 0,
+            aiDispatchListenPcm: false,
           });
           wss.emit("connection", ws, req);
         });
@@ -781,6 +824,16 @@ export function attachVoiceRelay(
         })
       : null;
     meta.joined = true;
+    let aiListenPcm = isAiDispatchChannelCached(meta.agencyId, channelName);
+    if (!aiListenPcm && channelRow && !simulcast) {
+      try {
+        aiListenPcm = await isChannelAiDispatchEnabled(meta.agencyId, channelName);
+        setAiDispatchChannelCached(meta.agencyId, channelName, aiListenPcm);
+      } catch {
+        aiListenPcm = false;
+      }
+    }
+    meta.aiDispatchListenPcm = aiListenPcm;
     const prior = voiceRoster.get(ws);
     voiceRoster.set(ws, {
       channelKey: chanKey,
@@ -793,7 +846,15 @@ export function attachVoiceRelay(
       // (Android re-sends `join` on the same socket periodically).
       joinedAt: prior && prior.channelKey === chanKey ? prior.joinedAt : Date.now(),
     });
-    ws.send(JSON.stringify({ type: "joined", channel: channelName, permission, unit_id: unitId }));
+    ws.send(
+      JSON.stringify({
+        type: "joined",
+        channel: channelName,
+        permission,
+        unit_id: unitId,
+        ...(aiListenPcm ? { ai_dispatch_listen_pcm: true } : {}),
+      }),
+    );
   }
 
   wss.on("connection", (ws: WebSocket) => {
@@ -859,31 +920,18 @@ export function attachVoiceRelay(
               broadcastExcept(ws, target.channelKey, payload);
               recordFrame(
                 {
-                  agencyId: meta.agencyId,
+                  ...frameAttribution(meta),
                   channelNorm: target.channelNorm,
                   channelName: target.channelName,
                   channelId: target.channelId,
-                  userId: meta.userId,
-                  unitId: meta.unitId,
-                  displayName: meta.displayName,
+                  aiDispatchListenPcm: isAiDispatchChannelCached(meta.agencyId, target.channelName),
                 },
                 payload,
               );
             }
           } else if (meta.channelKey) {
             broadcastExcept(ws, meta.channelKey, payload);
-            recordFrame(
-              {
-                agencyId: meta.agencyId,
-                channelNorm: meta.channelNorm!,
-                channelName: meta.channelName,
-                channelId: meta.channelId,
-                userId: meta.userId,
-                unitId: meta.unitId,
-                displayName: meta.displayName,
-              },
-              payload,
-            );
+            recordFrame(frameAttribution(meta), payload);
           }
           // One WebSocket binary message carries the whole marker clip.
           meta.markerToneUntilMs = 0;
@@ -899,13 +947,11 @@ export function attachVoiceRelay(
             broadcastExcept(ws, target.channelKey, payload);
             recordFrame(
               {
-                agencyId: meta.agencyId,
+                ...frameAttribution(meta),
                 channelNorm: target.channelNorm,
                 channelName: target.channelName,
                 channelId: target.channelId,
-                userId: meta.userId,
-                unitId: meta.unitId,
-                displayName: meta.displayName,
+                aiDispatchListenPcm: isAiDispatchChannelCached(meta.agencyId, target.channelName),
               },
               payload,
             );
@@ -928,18 +974,7 @@ export function attachVoiceRelay(
           return;
         }
         broadcastExcept(ws, meta.channelKey, payload);
-        recordFrame(
-          {
-            agencyId: meta.agencyId,
-            channelNorm: meta.channelNorm,
-            channelName: meta.channelName,
-            channelId: meta.channelId,
-            userId: meta.userId,
-            unitId: meta.unitId,
-            displayName: meta.displayName,
-          },
-          payload,
-        );
+        recordFrame(frameAttribution(meta), payload);
       } catch (e) {
         console.warn("voiceRelay message handling error", e);
       }

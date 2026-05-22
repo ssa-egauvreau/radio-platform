@@ -190,6 +190,8 @@ export class VoiceChannelClient {
   /** Active looping soundboard tone-outs, keyed by tone-out id. */
   private readonly customLoops = new Map<number, number>();
   private digitalTx = true;
+  /** Server asked for clear PCM uplink so AI dispatch can transcribe speech. */
+  private aiDispatchListenPcm = false;
   private readonly txConditioner = new ImbeTxConditioner();
   private gestureUnbind: (() => void) | null = null;
 
@@ -218,6 +220,11 @@ export class VoiceChannelClient {
   /** Chooses P25 IMBE (true) or clear PCM (false) for outgoing audio. */
   setDigitalTx(on: boolean): void {
     this.digitalTx = on;
+  }
+
+  /** Force clear PCM uplink when AI dispatch is listening on this channel. */
+  setAiDispatchListenPcm(on: boolean): void {
+    this.aiDispatchListenPcm = on;
   }
 
   /** Sets channel listen volume (0–1). Takes effect immediately and on next connect. */
@@ -377,6 +384,8 @@ export class VoiceChannelClient {
       unit_id?: string;
       channel?: string;
       by?: string;
+      ai_dispatch_listen_pcm?: boolean;
+      enabled?: boolean;
     };
     try {
       msg = JSON.parse(text);
@@ -386,7 +395,16 @@ export class VoiceChannelClient {
     if (msg.type === "joined") {
       this.permission = msg.permission ?? "listen_only";
       this.callbacks.onPermission(this.permission);
+      if (msg.ai_dispatch_listen_pcm === true) {
+        this.aiDispatchListenPcm = true;
+        this.digitalTx = false;
+      }
       this.setState("listening");
+    } else if (msg.type === "ai_dispatch_pcm") {
+      this.aiDispatchListenPcm = msg.enabled === true;
+      if (this.aiDispatchListenPcm) {
+        this.digitalTx = false;
+      }
     } else if (msg.type === "busy") {
       // The relay rejected our audio — another unit holds the channel.
       if (this.transmitting) {
@@ -510,7 +528,7 @@ export class VoiceChannelClient {
       if (!this.transmitting || !ws || ws.readyState !== WebSocket.OPEN || !(event.data instanceof ArrayBuffer)) {
         return;
       }
-      if (this.digitalTx && imbeReady()) {
+      if (this.digitalTx && !this.aiDispatchListenPcm && imbeReady()) {
         // Condition then encode to P25 IMBE so transmissions carry the
         // digital-voice character without riding background noise.
         const pcm = new Int16Array(event.data);

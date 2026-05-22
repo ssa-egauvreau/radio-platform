@@ -1851,6 +1851,15 @@ export async function setChannelAiDispatch(
   );
 }
 
+export async function listAllChannelAiDispatchEnabledRows(): Promise<
+  Array<{ agency_id: number; channel_name: string }>
+> {
+  const res = await requirePool().query<{ agency_id: number; channel_name: string }>(
+    `SELECT agency_id, channel_name FROM channel_ai_dispatch WHERE enabled = TRUE;`,
+  );
+  return res.rows;
+}
+
 export async function listChannelAiDispatchEnabled(agencyId: number): Promise<string[]> {
   const res = await requirePool().query<{ channel_name: string }>(
     `SELECT channel_name FROM channel_ai_dispatch WHERE agency_id = $1 AND enabled = TRUE;`,
