@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
-import { MapPanel } from "./MapPanel";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
+const MapPanel = lazy(() => import("./MapPanel").then((m) => ({ default: m.MapPanel })));
 import { AlertsPanel } from "./AlertsPanel";
 import { PopOutSection } from "./PopOutSection";
 
@@ -24,7 +24,13 @@ function loadSplitPct(): number {
 /** Right column: resizable map (top) and alerts (bottom). */
 export function MapAlertsColumn() {
   const [mapPct, setMapPct] = useState(loadSplitPct);
+  const [mapReady, setMapReady] = useState(false);
   const columnRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const id = window.requestAnimationFrame(() => setMapReady(true));
+    return () => window.cancelAnimationFrame(id);
+  }, []);
 
   useEffect(() => {
     try {
@@ -60,7 +66,13 @@ export function MapAlertsColumn() {
   return (
     <div ref={columnRef} className="map-alerts-column">
       <div className="map-alerts-map" style={{ flex: `${mapPct} 1 0` }}>
-        <MapPanel />
+        {mapReady ? (
+          <Suspense fallback={<div className="empty">Loading map…</div>}>
+            <MapPanel />
+          </Suspense>
+        ) : (
+          <div className="empty">Loading map…</div>
+        )}
       </div>
       <button
         type="button"

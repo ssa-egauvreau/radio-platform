@@ -15,7 +15,8 @@ import {
 const STATE_KEY = "securityradio.console.state";
 
 /** Bump when workspace layout rules change — triggers one-time localStorage migration. */
-const CURRENT_LAYOUT_VERSION = 3;
+const CURRENT_LAYOUT_VERSION = 4;
+const MAX_STATE_STORAGE_BYTES = 256 * 1024;
 const MAX_OPEN_CHANNELS = 16;
 const MAX_DOCKED_CHANNELS = 12;
 const COMMIT_STORM_LIMIT = 24;
@@ -237,9 +238,18 @@ function normalizeConsoleState(input: ConsoleState): ConsoleState {
     workspaceLayout = {};
   }
 
+  // Too many docked channels at once can freeze the tab (black screen) on reload.
+  let safeOpen = open;
+  let safeExpanded = expanded;
+  if (version < CURRENT_LAYOUT_VERSION || safeExpanded.length > 6 || safeOpen.length > 8) {
+    safeExpanded = safeExpanded.slice(0, 6);
+    safeOpen = safeOpen.slice(0, 8);
+    workspaceLayout = workspaceLayoutForExpanded(safeExpanded, workspaceLayout);
+  }
+
   return {
-    open,
-    expanded,
+    open: safeOpen,
+    expanded: safeExpanded,
     primary: withValidPrimary(open, input.primary),
     pttCode: input.pttCode || DEFAULT_PTT_CODE,
     keyboardOn: input.keyboardOn,
@@ -260,15 +270,93 @@ function stateSnapshotEqual(a: ConsoleState, b: ConsoleState): boolean {
   );
 }
 
+function defaultConsoleState(): ConsoleState {
+  return withPackedWorkspaceLayout({
+    open: [],
+    expanded: [],
+    primary: null,
+    pttCode: DEFAULT_PTT_CODE,
+    keyboardOn: true,
+    workspaceLayout: {},
+    layoutVersion: CURRENT_LAYOUT_VERSION,
+  });
+}
+
+/** Runs before reading state — `?console_reset=1` on the URL clears broken saved data. */
+function applyConsoleResetFromUrl(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("console_reset") !== "1") {
+      return;
+    }
+    localStorage.removeItem(STATE_KEY);
+    localStorage.removeItem(OPEN_CHANNELS_KEY);
+    localStorage.removeItem(LAST_CHANNEL_KEY);
+    params.delete("console_reset");
+    const qs = params.toString();
+    const next = `${window.location.pathname}${qs ? `?${qs}` : ""}${window.location.hash}`;
+    window.history.replaceState(null, "", next);
+  } catch {
+    /* ignore */
+  }
+}
+
+function readStoredStateRaw(): string | null {
+  try {
+    const raw = localStorage.getItem(STATE_KEY);
+    if (raw && raw.length > MAX_STATE_STORAGE_BYTES) {
+      console.warn("[Mission Control] Saved console state was too large and has been cleared.");
+      localStorage.removeItem(STATE_KEY);
+      return null;
+    }
+    return raw;
+  } catch {
+    return null;
+  }
+}
+
 function loadInitialState(): ConsoleState {
-  const parsed = parse(localStorage.getItem(STATE_KEY)) ?? migrate();
-  return withPackedWorkspaceLayout(normalizeConsoleState(parsed));
+  applyConsoleResetFromUrl();
+  try {
+    const parsed = parse(readStoredStateRaw()) ?? migrate();
+    return withPackedWorkspaceLayout(normalizeConsoleState(parsed));
+  } catch (err) {
+    console.error("[Mission Control] Could not load saved console state:", err);
+    try {
+      localStorage.removeItem(STATE_KEY);
+    } catch {
+      /* ignore */
+    }
+    return defaultConsoleState();
+  }
+}
+
+/** Write migrated state to disk once — does not notify React (avoids startup render loops). */
+function persistInitialStateSync(snapshot: ConsoleState): void {
+  try {
+    const raw = localStorage.getItem(STATE_KEY);
+    const stored = parse(raw);
+    if (stored && stateSnapshotEqual(snapshot, withPackedWorkspaceLayout(normalizeConsoleState(stored)))) {
+      return;
+    }
+    localStorage.setItem(STATE_KEY, JSON.stringify(snapshot));
+    clearLegacyConsoleKeys();
+  } catch {
+    /* ignore */
+  }
 }
 
 let state: ConsoleState = loadInitialState();
 const listeners = new Set<() => void>();
 let commitsInWindow = 0;
 let commitWindowStart = 0;
+
+if (typeof window !== "undefined") {
+  persistInitialStateSync(state);
+}
 
 function clearLegacyConsoleKeys(): void {
   try {
@@ -315,11 +403,6 @@ function commit(next: ConsoleState): void {
 }
 
 if (typeof window !== "undefined") {
-  const stored = parse(localStorage.getItem(STATE_KEY));
-  if (!stored || !stateSnapshotEqual(state, withPackedWorkspaceLayout(normalizeConsoleState(stored)))) {
-    queueMicrotask(() => commit(state));
-  }
-
   // Another window (a pop-out, or the console) changed the shared state.
   window.addEventListener("storage", (event) => {
     if (event.key !== STATE_KEY || event.newValue == null) {
@@ -419,15 +502,15 @@ function commitWorkspaceIfChanged(expanded: number[], workspaceLayout: Record<st
  */
 export function resetMissionControlSavedData(): void {
   commitsInWindow = 0;
-  commit({
-    open: [],
-    expanded: [],
-    primary: null,
-    pttCode: state.pttCode,
-    keyboardOn: state.keyboardOn,
-    workspaceLayout: {},
-    layoutVersion: CURRENT_LAYOUT_VERSION,
-  });
+  try {
+    localStorage.removeItem(STATE_KEY);
+    localStorage.removeItem(OPEN_CHANNELS_KEY);
+    localStorage.removeItem(LAST_CHANNEL_KEY);
+  } catch {
+    /* ignore */
+  }
+  state = defaultConsoleState();
+  listeners.forEach((listener) => listener());
 }
 
 /** Column span for the workspace grid from the current window width (3- or 4-wide panels). */

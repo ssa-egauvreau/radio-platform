@@ -83,6 +83,31 @@ body {
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
+.boot-fatal {
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 2rem 1.5rem;
+  max-width: 520px;
+  margin: 0 auto;
+}
+.boot-fatal h1 {
+  margin: 0 0 0.75rem;
+  font-size: 1.25rem;
+}
+.boot-fatal p {
+  margin: 0.5rem 0 0;
+  line-height: 1.5;
+}
+.boot-fatal code {
+  font-size: 0.9em;
+  color: var(--accent-2);
+}
+.boot-fatal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 1.25rem;
+}
 
 button {
   font: inherit;

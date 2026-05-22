@@ -211,7 +211,7 @@ export function ChannelsPanel({ variant = "embedded", onPopOut }: SectionProps) 
                     )
                   ) {
                     resetMissionControlSavedData();
-                    window.location.reload();
+                    window.location.href = "/console?console_reset=1";
                   }
                 }}
               >
@@ -221,17 +221,28 @@ export function ChannelsPanel({ variant = "embedded", onPopOut }: SectionProps) 
           )}
         </aside>
 
-        <ChannelWorkspace
-          dockedChannels={dockedChannels}
-          open={open}
-          primary={primary}
-          pttCode={pttCode}
-          keyboardOn={keyboardOn}
-          onToggleMonitor={(id) => setChannelMonitoring(id, !open.includes(id))}
-          onUndock={undockChannel}
-          onMakePrimary={setPrimaryChannel}
-          onDockFromRail={dockFromRail}
-        />
+        {loading ? (
+          <section
+            className="channel-workspace-rows channel-workspace-grid"
+            aria-label="Channel workspace"
+          >
+            <div className="channel-workspace-empty">
+              <p>Loading channels…</p>
+            </div>
+          </section>
+        ) : (
+          <ChannelWorkspace
+            dockedChannels={dockedChannels}
+            open={open}
+            primary={primary}
+            pttCode={pttCode}
+            keyboardOn={keyboardOn}
+            onToggleMonitor={(id) => setChannelMonitoring(id, !open.includes(id))}
+            onUndock={undockChannel}
+            onMakePrimary={setPrimaryChannel}
+            onDockFromRail={dockFromRail}
+          />
+        )}
       </div>
 
       <LiveControlPanel />

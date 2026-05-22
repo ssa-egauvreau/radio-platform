@@ -32,7 +32,7 @@ export class ConsoleErrorBoundary extends Component<Props, State> {
               className="btn sm"
               onClick={() => {
                 resetMissionControlSavedData();
-                window.location.reload();
+                window.location.href = "/console?console_reset=1";
               }}
             >
               Reset layout and reload

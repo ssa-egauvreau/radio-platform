@@ -19,6 +19,18 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>
+      (function () {
+        try {
+          var params = new URLSearchParams(location.search);
+          if (params.get("console_reset") === "1") {
+            localStorage.removeItem("securityradio.console.state");
+            localStorage.removeItem("securityradio.openChannels");
+            localStorage.removeItem("securityradio.lastChannel");
+          }
+        } catch (e) {}
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

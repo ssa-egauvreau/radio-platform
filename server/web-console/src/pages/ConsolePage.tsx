@@ -21,6 +21,7 @@ export function ConsolePage() {
 
   return (
     <div className="app-shell">
+      <ConsoleErrorBoundary>
       <Topbar section="console" />
 
       <p className="mission-control-intro">
@@ -28,7 +29,6 @@ export function ConsolePage() {
         <span className="muted"> — transcripts, 10-33, plate lookups, 10-8 CAD notes</span>
       </p>
 
-      <ConsoleErrorBoundary>
         <MissionControlLayout
           channels={
             <PopOutSection
