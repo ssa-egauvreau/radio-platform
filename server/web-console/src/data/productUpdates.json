@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.14",
+    "date": "2026-05-22",
+    "title": "Out with — new calls vs comments",
+    "changes": [
+      "Saying out with one (or a number) with no active call creates a pedestrian stop.",
+      "Out with a vehicle description or plate creates a 961 car stop.",
+      "If you are already on a call (for example 602 trespassing), out with updates go on that call as a comment — not a new call.",
+      "Out with the RP, property manager, or similar on your current call is logged as a comment only."
+    ]
+  },
+  {
     "version": "1.13",
     "date": "2026-05-22",
     "title": "Clearer AI dispatcher voice",

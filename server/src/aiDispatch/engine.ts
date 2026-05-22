@@ -17,6 +17,7 @@ import {
 } from "./platformConfig.js";
 import { playMp3UrlOnChannel } from "./playback.js";
 import { buildDeterministicDispatchAck } from "./dispatchAck.js";
+import { applyOutWithCadRules } from "./outWithCad.js";
 import {
   buildInfoRequestAck,
   buildInfoRequestResponse,
@@ -205,6 +206,7 @@ async function postTen8RadioCommentIfVerified(opts: {
   active: Ten8ActiveIncident[];
   callsign: string;
   transcript: string;
+  commentText?: string | null;
 }): Promise<Record<string, unknown>> {
   const callId = opts.callId.trim();
   if (!callId) {
@@ -214,7 +216,10 @@ async function postTen8RadioCommentIfVerified(opts: {
     console.warn(`[ten8] skip comment — call ${callId} not in open incident list`);
     return { skipped: "call_not_verified_open" };
   }
-  const note = formatTen8RadioComment(opts.callsign, opts.transcript);
+  const shorthand = opts.commentText?.trim();
+  const note = shorthand
+    ? `${opts.callsign.trim()} ${shorthand}`.slice(0, 4000)
+    : formatTen8RadioComment(opts.callsign, opts.transcript);
   if (!note) {
     return { skipped: "empty_radio_comment" };
   }
@@ -372,6 +377,12 @@ async function processTransmission(transmissionId: number): Promise<void> {
       transcript,
     });
 
+    let activeIncidents: Ten8ActiveIncident[] = [];
+    if (parsed && (await ten8Configured(tx.agency_id))) {
+      activeIncidents = await listTen8ActiveIncidents(tx.agency_id);
+      parsed = applyOutWithCadRules(parsed, transcript, activeIncidents, unitId);
+    }
+
     if (allowOnAir && isEmergencyClear(emergencyRegex, parsed)) {
       await applyChannelTen33Marker({
         loopbackPort,
@@ -412,7 +423,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
 
       if (await ten8Configured(tx.agency_id)) {
         const callsign = (parsed.unit ?? unitId ?? "").trim();
-        const active = await listTen8ActiveIncidents(tx.agency_id);
+        const active = activeIncidents;
         const knownIncidentTypes = active
           .map((i) => i.incident_type)
           .filter((t): t is string => !!t?.trim());
@@ -464,6 +475,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
                 active,
                 callsign,
                 transcript,
+                commentText: parsed.comment_text,
               });
             }
           }
@@ -701,6 +713,7 @@ async function runAsyncInfoLookup(
         location_code: null,
         location_name: null,
         info_request: parsed.info_request,
+        comment_text: null,
       },
       plateLookup: null,
       ten8Actions: null,

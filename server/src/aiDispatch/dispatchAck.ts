@@ -27,6 +27,18 @@ export function buildDeterministicDispatchAck(
   }
 
   if (parsed.intent === "dispatch") {
+    if (code === "ped") {
+      if (locationPhrase) {
+        return `Copy ${csShort}, pedestrian stop at ${locationPhrase}.`;
+      }
+      return `Copy ${csShort}, pedestrian stop.`;
+    }
+    if (code === "961") {
+      if (locationPhrase) {
+        return `Copy ${csShort}, 961 at ${locationPhrase}.`;
+      }
+      return `Copy ${csShort}, 961.`;
+    }
     if (code && locationPhrase) {
       return `Copy ${csShort}, ${code} at ${locationPhrase}.`;
     }
@@ -40,6 +52,9 @@ export function buildDeterministicDispatchAck(
   }
 
   if (parsed.intent === "on_scene") {
+    if (parsed.comment_text?.toUpperCase().includes("OUT W")) {
+      return `Copy ${csShort}, logged on your call.`;
+    }
     if (locationPhrase) {
       return `Copy ${csShort}, on scene at ${locationPhrase}.`;
     }

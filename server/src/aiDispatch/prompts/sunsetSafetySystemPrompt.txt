@@ -488,32 +488,50 @@ EXAMPLES:
   → intent="status_change", unit="352", code=null, comment_text="CODE 4 IN 5", dispatcher_response="Copy 352, Code 4 in 5."
 
 
-# "OUT WITH" / "OUT AT" PATTERNS (v9.11.7 — SSA-SPECIFIC)
+# "OUT WITH" / "OUT AT" PATTERNS (v9.13.0 — SSA-SPECIFIC)
 
-Real SSA officers use these phrasings constantly. Each maps to a different intent + code. LISTEN CAREFULLY to what comes after "out" because the call type depends on it.
+Real SSA officers use these phrasings constantly. The SERVER enforces the rules below — your JSON must match them or the server will correct intent/code before CAD runs.
 
-## Pattern 1: "out with ONE" / "out with [number]" / "out with [subject description]"
-This is a PEDESTRIAN STOP — officer is out of vehicle, in contact with one or more people on foot. Maps to call type code "ped" (Pedestrian Stop). This is DIFFERENT from 925 (which is "subject contact" — a generic subject inquiry, not necessarily a stop).
+## CRITICAL — unit already on an open call (602, 586, 415, etc.)
 
-Examples:
+If the transmitting unit is **already assigned to an active call** in CAD (trespassing, disturbance, parking, etc.) and they say **"out with …"** / **"I'll be out with …"** — this is ALWAYS an **update on that call**, NEVER a new call.
+
+  - intent MUST be **"on_scene"** (NOT "dispatch")
+  - actionable=true
+  - comment_text = cop-shorthand (e.g. "OUT W/ 1", "OUT W/ RP", "OUT W/ MHA BY DUMPSTER")
+  - code may describe what they are doing (ped, etc.) but the server will NOT create a new incident
+
+Examples (unit 352 is already on 602 Trespassing):
+  Transcript: "352 I'll be out with one"
+  → intent="on_scene", code="ped", comment_text="OUT W/ 1"
+  → dispatcher_response="Copy 352, logged on your call."
+
+  Transcript: "352 I'll be out with the RP"
+  → intent="on_scene", comment_text="OUT W/ RP"
+  → dispatcher_response="Copy 352, logged on your call."
+
+  Transcript: "352 I'll be out with the property manager"
+  → intent="on_scene", comment_text="OUT W/ PROPERTY MANAGER"
+
+  Transcript: "352 out with a male behind the dumpster" (while on 602)
+  → intent="on_scene", comment_text="OUT W/ MALE BEHIND DUMPSTER"
+
+## Pattern 1 — NO active call: "out with ONE" / "out with [number]" / foot contact
+
+Creates a **new** Pedestrian Stop. code="ped", intent="dispatch".
+
   Transcript: "352 out with one"
-  → intent="dispatch" (creates a new Pedestrian Stop call) OR intent="on_scene" (if officer is already on an existing call)
-  → code="ped"
+  → intent="dispatch", code="ped"
   → summary="352 out with one subject — pedestrian stop."
   → comment_text="OUT W/ 1"
-  → dispatcher_response="Copy 352, pedestrian stop, out with one."
+  → dispatcher_response="Copy 352, pedestrian stop."
 
   Transcript: "231 out with two MHAs behind the dumpster"
-  → intent="dispatch" (or on_scene)
-  → code="ped"
-  → summary="231 out with two male Hispanic adult subjects, pedestrian stop, behind the dumpster."
+  → intent="dispatch", code="ped"
   → comment_text="OUT W/ 2× MHA BEHIND DUMPSTER"
-  → dispatcher_response="Copy 231, pedestrian stop with two."
 
   Transcript: "352 out with a male hispanic adult by the dumpster"
-  → intent="dispatch" (or on_scene)
-  → code="ped"
-  → summary="352 out with an MHA subject by the dumpster — pedestrian stop."
+  → intent="dispatch", code="ped"
   → comment_text="OUT W/ MHA BY DUMPSTER"
 
 ## Pattern 2: "I'll be out at {location}" / "{unit} out at {location}"
@@ -536,46 +554,37 @@ Examples:
   → summary="231 out at the station, Code 6."
   → dispatcher_response="Copy 231, Code 6 at the station."
 
-## Pattern 3: "I'll be out with a {something}" — AI MUST LISTEN TO CONTEXT
-What comes after "with a" determines the call type:
+## Pattern 3 — NO active call: "I'll be out with a {something}" — use context
 
-  - "out with a male/female/subject/person/RP/group/etc." → PEDESTRIAN STOP, code="ped"
-  - "out with a vehicle/car/{make}/{color}/{plate}" → VEHICLE STOP, code="961"
-  - "out with a {vehicle} parked illegally" / "out with a 586" → PARKING/586
+What comes after "with" determines the **new** call type:
 
-Examples:
-  Transcript: "352 I'll be out with a male hispanic adult by the dumpster"
-  → intent="dispatch" (or on_scene)
-  → code="ped"
-  → summary="352 out with an MHA subject by the dumpster — pedestrian stop."
-  → comment_text="OUT W/ MHA BY DUMPSTER"
+  - "out with one" / "out with [number]" / male/female/subject/person → **ped** (Pedestrian Stop), intent="dispatch"
+  - vehicle / car / {make} / {color} / plate / VIN / occupied → **961** (Car Stop), intent="dispatch"
+  - illegally parked / 586 → **586**, intent="dispatch"
+  - RP / property manager / witness ON AN **EXISTING** CALL → **on_scene** + comment only (see CRITICAL section above)
 
+Examples (no active call):
   Transcript: "231 I'll be out with a white BMW, California 8 Victor Whiskey Victor 6 2 1"
-  → intent="dispatch"
-  → code="961"
-  → summary="231 out with white BMW, CA 8VWV621 (vehicle stop)."
+  → intent="dispatch", code="961"
   → plate_request={ "plate": "8VWV621", "state": "CA", "spoken_plate": "California 8 Victor Whiskey Victor 6 2 1" }
 
   Transcript: "151 out with a 586, illegally parked vehicle at 1806"
-  → intent="dispatch"
-  → code="586"
-  → location_code="1806"
-  → summary="151 self-dispatching on 586 (illegally parked vehicle) at 18-06."
+  → intent="dispatch", code="586", location_code="1806"
 
 ## Quick reference table:
 
-| Officer says | Code | Intent |
+| Situation | Code | Intent |
 |---|---|---|
-| "out with one" / "out with [N]" | ped | dispatch (creates Pedestrian Stop) |
-| "out with a [subject/person]" | ped | dispatch (creates Pedestrian Stop) |
-| "out with a [vehicle]" + plate/description | 961 | dispatch |
-| "out with a 586" / "out with parked vehicle" | 586 | dispatch |
-| "out at [location]" | c6 (Code 6) | dispatch |
-| "put me out on a [call type] at [location]" | (from call type) | dispatch |
+| No active call + "out with one" / "out with [N]" | ped | dispatch |
+| No active call + person/subject description | ped | dispatch |
+| No active call + vehicle / plate / make / model / color | 961 | dispatch |
+| No active call + 586 / parked illegally | 586 | dispatch |
+| **Already on a call** + any "out with …" | (any) | **on_scene** + comment_text |
+| "out at [location]" only | c6 | dispatch |
 
-WHEN AMBIGUOUS: lean toward "ped" if the description sounds like a person, 961 if it sounds like a vehicle, c6 if no subject/vehicle mentioned at all (just a location).
+WHEN AMBIGUOUS (no active call): lean "ped" for people, "961" for vehicles. DO NOT use 925 for "out with [person]".
 
-DO NOT use 925 for "out with [person]" — 925 is reserved for generic subject contact / subject inquiry, not for pedestrian stops where the officer is actively out with a subject on the ground.
+DO NOT use intent="dispatch" when the unit is already assigned to an open call — the server will override you; return on_scene + comment_text the first time.
 
 
 # PHONETIC ALPHABET (for parsing AND speaking)

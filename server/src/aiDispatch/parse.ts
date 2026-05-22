@@ -37,6 +37,8 @@ export interface AiDispatchParseResult {
   location_code: string | null;
   location_name: string | null;
   info_request: InfoRequestFields | null;
+  /** ALL-CAPS cop-shorthand for 10-8 CAD comment when logging on an open call. */
+  comment_text: string | null;
 }
 
 const VALID_INTENTS = new Set([
@@ -111,6 +113,10 @@ export function normalizeAiDispatchParse(raw: unknown): AiDispatchParseResult | 
     typeof ai.location_name === "string" && ai.location_name.trim()
       ? ai.location_name.trim()
       : null;
+  const comment_text =
+    typeof ai.comment_text === "string" && ai.comment_text.trim()
+      ? ai.comment_text.trim().slice(0, 240)
+      : null;
 
   let info_request: InfoRequestFields | null = null;
   if (ai.info_request && typeof ai.info_request === "object" && !Array.isArray(ai.info_request)) {
@@ -171,6 +177,7 @@ export function normalizeAiDispatchParse(raw: unknown): AiDispatchParseResult | 
     location_code,
     location_name,
     info_request,
+    comment_text,
   };
 }
 
