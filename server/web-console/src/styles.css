@@ -716,7 +716,7 @@ code.mono {
   background: color-mix(in srgb, var(--accent) 8%, var(--bg));
 }
 .channel-dock-empty {
-  flex: 1;
+  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -755,6 +755,46 @@ code.mono {
 }
 .ch-card-name-static {
   cursor: default;
+}
+.channel-card.workspace .ch-card-head.workspace-head {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 0;
+}
+.channel-card.workspace .ch-card-title-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px 6px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-input) 40%, var(--bg-raised));
+  border-radius: 5px 5px 0 0;
+  min-width: 0;
+}
+.channel-card.workspace .ch-card-title-row .ch-card-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+}
+.channel-card.workspace .ch-card-title-row .ch-card-label {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: unset;
+  line-height: 1.25;
+  word-break: break-word;
+}
+.channel-card.workspace .ch-card-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px 8px 8px;
+  min-width: 0;
+}
+.channel-card.workspace .ch-card-toolbar .state-chip {
+  margin-right: auto;
 }
 
 /* Workspace grid: 3×3 on wide command monitors */

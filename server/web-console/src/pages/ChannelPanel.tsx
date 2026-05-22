@@ -423,74 +423,142 @@ export function ChannelPanel({
       className={`channel-card${expanded ? " expanded" : ""}${primary ? " primary" : ""}${workspace ? " workspace" : ""}`}
       style={channel.color ? { borderLeftColor: channel.color, borderLeftWidth: 3 } : undefined}
     >
-      <div className="ch-card-head">
-        <button
-          className="ch-disclosure"
-          onClick={onToggleExpanded}
-          aria-expanded={expanded}
-          title={workspace ? "Remove from workspace" : expanded ? "Collapse channel" : "Expand channel"}
-        >
-          {workspace ? "✕" : expanded ? "▾" : "▸"}
-        </button>
+      <div className={`ch-card-head${workspace ? " workspace-head" : ""}`}>
         {workspace ? (
-          <div className="ch-card-name ch-card-name-static">
-            <IconRadio size={14} />
-            <span className="ch-card-label">{channel.name}</span>
-            {channel.simulcast && <span className="chan-sim-tag">SIM</span>}
-          </div>
+          <>
+            <div className="ch-card-title-row">
+              <button
+                type="button"
+                className="ch-disclosure"
+                onClick={onToggleExpanded}
+                aria-expanded={expanded}
+                title="Remove from workspace"
+              >
+                ✕
+              </button>
+              <div className="ch-card-name ch-card-name-static">
+                <IconRadio size={14} />
+                <span className="ch-card-label">{channel.name}</span>
+                {channel.simulcast && <span className="chan-sim-tag">SIM</span>}
+              </div>
+            </div>
+            <div className="ch-card-toolbar">
+              {monitoring &&
+                (connected ? (
+                  <span
+                    className={`ch-mini-wave${transmitting ? " tx" : receiving ? " rx" : ""}`}
+                    title={transmitting ? "On air" : receiving ? "Receiving" : "Listening"}
+                  >
+                    <Waveform
+                      getLevel={() => clientRef.current?.getLevel() ?? 0}
+                      active={transmitting || receiving}
+                      variant={transmitting ? "tx" : "rx"}
+                      bars={10}
+                      height={18}
+                    />
+                  </span>
+                ) : (
+                  <span className={`state-chip ${voiceState}`}>{STATE_LABEL[voiceState]}</span>
+                ))}
+              {monitoring && receiving && !transmitting && (
+                <span className="state-chip busy">BUSY</span>
+              )}
+              <button
+                type="button"
+                className={monitoring ? "ch-power active" : "ch-power"}
+                onClick={onToggleMonitor}
+                aria-pressed={monitoring}
+                title={monitoring ? "Turn channel off (stop monitoring)" : "Turn channel on (monitor)"}
+              >
+                <IconHeadphones size={16} />
+                <span>{monitoring ? "ON" : "OFF"}</span>
+              </button>
+              <button
+                type="button"
+                className={transmitting ? "ch-quick-ptt active" : "ch-quick-ptt"}
+                disabled={!monitoring || !connected || !canTransmit}
+                onPointerDown={beginTransmit}
+                onPointerUp={stopTx}
+                onPointerCancel={stopTx}
+                title={
+                  !monitoring
+                    ? "Turn the channel on to talk"
+                    : !canTransmit
+                      ? "Listen-only on this channel"
+                      : "Hold to talk"
+                }
+              >
+                <IconBolt size={16} />
+                <span>{transmitting ? "ON AIR" : "PTT"}</span>
+              </button>
+            </div>
+          </>
         ) : (
-          <button type="button" className="ch-card-name" onClick={onToggleExpanded}>
-            <IconRadio size={14} />
-            <span className="ch-card-label">{channel.name}</span>
-            {channel.simulcast && <span className="chan-sim-tag">SIM</span>}
-          </button>
-        )}
-        {monitoring &&
-          (!expanded && connected ? (
-            <span
-              className={`ch-mini-wave${transmitting ? " tx" : receiving ? " rx" : ""}`}
-              title={transmitting ? "On air" : receiving ? "Receiving" : "Listening"}
+          <>
+            <button
+              type="button"
+              className="ch-disclosure"
+              onClick={onToggleExpanded}
+              aria-expanded={expanded}
+              title={expanded ? "Collapse channel" : "Expand channel"}
             >
-              <Waveform
-                getLevel={() => clientRef.current?.getLevel() ?? 0}
-                active={transmitting || receiving}
-                variant={transmitting ? "tx" : "rx"}
-                bars={10}
-                height={18}
-              />
-            </span>
-          ) : (
-            <span className={`state-chip ${voiceState}`}>{STATE_LABEL[voiceState]}</span>
-          ))}
-        {monitoring && expanded && receiving && !transmitting && (
-          <span className="state-chip busy">BUSY</span>
+              {expanded ? "▾" : "▸"}
+            </button>
+            <button type="button" className="ch-card-name" onClick={onToggleExpanded}>
+              <IconRadio size={14} />
+              <span className="ch-card-label">{channel.name}</span>
+              {channel.simulcast && <span className="chan-sim-tag">SIM</span>}
+            </button>
+            {monitoring &&
+              (!expanded && connected ? (
+                <span
+                  className={`ch-mini-wave${transmitting ? " tx" : receiving ? " rx" : ""}`}
+                  title={transmitting ? "On air" : receiving ? "Receiving" : "Listening"}
+                >
+                  <Waveform
+                    getLevel={() => clientRef.current?.getLevel() ?? 0}
+                    active={transmitting || receiving}
+                    variant={transmitting ? "tx" : "rx"}
+                    bars={10}
+                    height={18}
+                  />
+                </span>
+              ) : (
+                <span className={`state-chip ${voiceState}`}>{STATE_LABEL[voiceState]}</span>
+              ))}
+            {monitoring && expanded && receiving && !transmitting && (
+              <span className="state-chip busy">BUSY</span>
+            )}
+            <button
+              type="button"
+              className={monitoring ? "ch-power active" : "ch-power"}
+              onClick={onToggleMonitor}
+              aria-pressed={monitoring}
+              title={monitoring ? "Turn channel off (stop monitoring)" : "Turn channel on (monitor)"}
+            >
+              <IconHeadphones size={16} />
+              <span>{monitoring ? "ON" : "OFF"}</span>
+            </button>
+            <button
+              type="button"
+              className={transmitting ? "ch-quick-ptt active" : "ch-quick-ptt"}
+              disabled={!monitoring || !connected || !canTransmit}
+              onPointerDown={beginTransmit}
+              onPointerUp={stopTx}
+              onPointerCancel={stopTx}
+              title={
+                !monitoring
+                  ? "Turn the channel on to talk"
+                  : !canTransmit
+                    ? "Listen-only on this channel"
+                    : "Hold to talk"
+              }
+            >
+              <IconBolt size={16} />
+              <span>{transmitting ? "ON AIR" : "PTT"}</span>
+            </button>
+          </>
         )}
-        <button
-          className={monitoring ? "ch-power active" : "ch-power"}
-          onClick={onToggleMonitor}
-          aria-pressed={monitoring}
-          title={monitoring ? "Turn channel off (stop monitoring)" : "Turn channel on (monitor)"}
-        >
-          <IconHeadphones size={16} />
-          <span>{monitoring ? "ON" : "OFF"}</span>
-        </button>
-        <button
-          className={transmitting ? "ch-quick-ptt active" : "ch-quick-ptt"}
-          disabled={!monitoring || !connected || !canTransmit}
-          onPointerDown={beginTransmit}
-          onPointerUp={stopTx}
-          onPointerCancel={stopTx}
-          title={
-            !monitoring
-              ? "Turn the channel on to talk"
-              : !canTransmit
-                ? "Listen-only on this channel"
-                : "Hold to talk"
-          }
-        >
-          <IconBolt size={16} />
-          <span>{transmitting ? "ON AIR" : "PTT"}</span>
-        </button>
       </div>
 
       {expanded && (
