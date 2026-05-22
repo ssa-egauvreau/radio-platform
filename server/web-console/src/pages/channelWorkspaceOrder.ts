@@ -20,7 +20,7 @@ export function previewWorkspaceOrder(
     return order;
   }
   const without = order.filter((id) => id !== sourceId);
-  if (insertAtEnd || targetId === sourceId) {
+  if (insertAtEnd || targetId === sourceId || targetId === null) {
     return [...without, sourceId];
   }
   let insertAt = without.indexOf(targetId);

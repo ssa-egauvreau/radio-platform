@@ -30,7 +30,8 @@ export function ChannelRailTile({
   );
   const isDragSource = railDrag?.channelId === channel.id;
 
-  function onDragStart(e: DragEvent) {
+  function onGripDragStart(e: DragEvent) {
+    e.stopPropagation();
     e.dataTransfer.setData("text/channel-id", String(channel.id));
     e.dataTransfer.effectAllowed = "move";
     const { size, colSpan } = workspacePreviewForChannel(channel, docked);
@@ -60,18 +61,24 @@ export function ChannelRailTile({
       className={`channel-rail-tile${docked ? " docked" : ""}${monitoring ? " monitoring" : ""}${
         isDragSource ? " drag-source" : ""
       }`}
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
       style={
         channel.color
           ? { borderLeftColor: channel.color, borderLeftWidth: 3 }
           : undefined
       }
-      title="Tap the name to open it in the workspace, or drag it in"
+      title="Tap the name to open it in the workspace, or drag the ⋮⋮ grip to drag it in"
     >
       <button type="button" className="channel-rail-tile-main" onClick={onDock}>
-        <span className="channel-rail-grip" aria-hidden>
+        <span
+          className="channel-rail-grip"
+          aria-hidden
+          draggable
+          onDragStart={onGripDragStart}
+          onDragEnd={onDragEnd}
+          onClick={(e) => e.stopPropagation()}
+          onPointerDown={(e) => e.stopPropagation()}
+          title="Drag into workspace"
+        >
           ⋮⋮
         </span>
         <IconRadio size={12} />

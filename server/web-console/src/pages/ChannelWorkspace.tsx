@@ -109,6 +109,8 @@ export function ChannelWorkspace({
     null,
   );
   const [cols, setCols] = useState(1);
+  /** Tile the user last clicked — kept above neighbors so it does not look hidden. */
+  const [frontChannelId, setFrontChannelId] = useState<number | null>(null);
 
   const railDrag = useSyncExternalStore(
     subscribeRailDragPreview,
@@ -161,6 +163,20 @@ export function ChannelWorkspace({
   }, []);
 
   useEffect(() => {
+    function clearStuckReorder() {
+      setMoveChannelId(null);
+      setDragLayoutOrder([]);
+      clearDragOver();
+    }
+    window.addEventListener("pointerup", clearStuckReorder);
+    window.addEventListener("pointercancel", clearStuckReorder);
+    return () => {
+      window.removeEventListener("pointerup", clearStuckReorder);
+      window.removeEventListener("pointercancel", clearStuckReorder);
+    };
+  }, []);
+
+  useEffect(() => {
     const root = rootRef.current;
     if (!root || typeof ResizeObserver === "undefined") {
       const c = gridCols(root);
@@ -205,11 +221,15 @@ export function ChannelWorkspace({
     [channelIds, onDockFromRail],
   );
 
+  function bringTileToFront(channelId: number) {
+    setFrontChannelId(channelId);
+    setRailDragPreview(null);
+  }
+
   function beginMove(e: PointerEvent<HTMLDivElement>, channelId: number) {
     if (e.button !== 0) {
       return;
     }
-    e.preventDefault();
     e.stopPropagation();
     const handle = e.currentTarget;
     const startX = e.clientX;
@@ -225,6 +245,7 @@ export function ChannelWorkspace({
           return;
         }
         dragging = true;
+        ev.preventDefault();
         handle.setPointerCapture(ev.pointerId);
         setMoveChannelId(channelId);
         clearDragOver();
@@ -316,17 +337,16 @@ export function ChannelWorkspace({
     const monitoring = open.includes(channel.id);
     const footprint = workspaceTileFootprintLabel(tile);
     const isDragging = moveChannelId === channel.id;
-    const isRailDragSource = railDrag?.channelId === channel.id && !isDragging;
-    const isDragSource = isRailDragSource;
+    const isFront = frontChannelId === channel.id || primary === channel.id;
     const isDropTarget =
-      !isDragSource && dragOverChannelId === channel.id && dropEdge !== null;
+      dragOverChannelId === channel.id && dropEdge !== null;
     return (
       <div
         key={channel.id}
         data-channel-id={channel.id}
         className={`channel-workspace-tile widget-${size}${!monitoring ? " channel-off" : ""}${
-          isDragging ? " moving" : ""
-        }${isDragSource ? " drag-source" : ""}${
+          isFront ? " tile-front" : ""
+        }${isDragging ? " moving" : ""}${
           isDropTarget
             ? ` drag-target drop-${dropEdge}${dropEdge === "after" ? " drop-stack-under" : ""}`
             : ""
@@ -334,7 +354,10 @@ export function ChannelWorkspace({
         style={{ gridColumn: `span ${colSpan}` }}
         title={`${channel.name} · ${footprint}`}
       >
-        <div className="channel-workspace-tile-inner">
+        <div
+          className="channel-workspace-tile-inner"
+          onPointerDown={() => bringTileToFront(channel.id)}
+        >
           <ChannelPanel
             channel={channel}
             layout="workspace"
@@ -451,6 +474,11 @@ export function ChannelWorkspace({
         setRailDragPointer(null);
       }}
       onDrop={handleRailDrop}
+      onPointerDown={() => {
+        if (!dockDragOver) {
+          setRailDragPreview(null);
+        }
+      }}
     >
       {dockedChannels.length === 0 ? (
         <div className="channel-workspace-empty">

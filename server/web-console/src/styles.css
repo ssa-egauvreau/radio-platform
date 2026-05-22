@@ -880,11 +880,8 @@ code.mono {
   border-left-width: 3px;
   border-radius: 4px;
   background: color-mix(in srgb, var(--bg-raised) 92%, var(--bg-input));
-  cursor: grab;
+  cursor: default;
   min-width: 0;
-}
-.channel-rail-tile:active {
-  cursor: grabbing;
 }
 .channel-rail-tile.drag-source {
   opacity: 0.38;
@@ -935,6 +932,14 @@ code.mono {
   color: var(--text-dim);
   letter-spacing: -0.12em;
   user-select: none;
+  cursor: grab;
+  touch-action: none;
+  padding: 2px 4px;
+  margin: -2px 0 -2px -2px;
+  border-radius: 3px;
+}
+.channel-rail-grip:active {
+  cursor: grabbing;
 }
 .channel-rail-label {
   overflow: hidden;
@@ -995,6 +1000,7 @@ code.mono {
 .channel-workspace-tile {
   position: relative;
   z-index: 1;
+  isolation: isolate;
   min-width: 0;
   width: 100%;
   box-sizing: border-box;
@@ -1019,6 +1025,9 @@ code.mono {
 }
 .channel-workspace-tile:focus-within {
   z-index: 14;
+}
+.channel-workspace-tile.tile-front {
+  z-index: 22;
 }
 .channel-workspace-tile.workspace-tile-stacked {
   box-shadow:
@@ -1060,7 +1069,7 @@ code.mono {
   z-index: 7;
 }
 .channel-workspace-tile.moving {
-  opacity: 0.55;
+  opacity: 0.82;
   z-index: 40;
   cursor: grabbing;
   pointer-events: none;
@@ -2026,12 +2035,13 @@ code.mono {
   gap: 4px 6px;
   min-width: 0;
   padding: 5px 52px 5px 8px;
-  cursor: grab;
-  touch-action: none;
+  cursor: default;
+  touch-action: manipulation;
   user-select: none;
 }
 .channel-card.workspace .ch-card-title-row.dragging .ch-card-title-main {
   cursor: grabbing;
+  touch-action: none;
 }
 .channel-card.workspace .ch-card-chrome {
   position: absolute;
