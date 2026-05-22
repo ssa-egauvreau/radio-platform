@@ -63,6 +63,15 @@ interface ChannelPanelProps {
   onToggleMonitor: () => void;
   onToggleExpanded: () => void;
   onMakePrimary: () => void;
+  /** Header chrome for workspace tiles (close, size, drag) — replaces the left ✕ and grey drag bar. */
+  workspaceChrome?: {
+    sizeLabel: string;
+    sizeTitle: string;
+    onCycleSize: () => void;
+    onClose: () => void;
+    onDragPointerDown: (e: PointerEvent<HTMLDivElement>) => void;
+    isDragging?: boolean;
+  };
 }
 
 /**
@@ -83,6 +92,7 @@ export function ChannelPanel({
   onToggleMonitor,
   onToggleExpanded,
   onMakePrimary,
+  workspaceChrome,
 }: ChannelPanelProps) {
   const workspace = layout === "workspace";
   const [voiceState, setVoiceState] = useState<VoiceState>("connecting");
@@ -571,28 +581,66 @@ export function ChannelPanel({
         {workspace ? (
           <>
             <div
-              className={`ch-card-title-row${channel.color ? " has-channel-color" : ""}`}
+              className={`ch-card-title-row${channel.color ? " has-channel-color" : ""}${
+                workspaceChrome?.isDragging ? " dragging" : ""
+              }`}
               style={
                 channel.color
                   ? { background: channel.color, color: "#fff", borderColor: channel.color }
                   : undefined
               }
             >
-              <button
-                type="button"
-                className="ch-disclosure"
-                onClick={onToggleExpanded}
-                aria-expanded={expanded}
-                title="Remove from workspace"
+              <div
+                className="ch-card-title-main"
+                onPointerDown={workspaceChrome?.onDragPointerDown}
+                title={workspaceChrome ? "Drag to reorder" : undefined}
               >
-                ✕
-              </button>
-              <div className="ch-card-name ch-card-name-static">
-                <IconRadio size={14} />
-                <span className="ch-card-label">{channel.name}</span>
-                {channel.simulcast && <span className="chan-sim-tag">SIM</span>}
+                <div className="ch-card-name ch-card-name-static">
+                  <IconRadio size={14} />
+                  <span className="ch-card-label">{channel.name}</span>
+                  {channel.simulcast && <span className="chan-sim-tag">SIM</span>}
+                </div>
+                {showMemberCount && <ChannelMemberCount channelName={channel.name} />}
               </div>
-              {showMemberCount && <ChannelMemberCount channelName={channel.name} />}
+              {workspaceChrome ? (
+                <div className="ch-card-chrome">
+                  <button
+                    type="button"
+                    className="channel-workspace-size-btn"
+                    title={workspaceChrome.sizeTitle}
+                    aria-label={workspaceChrome.sizeTitle}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      workspaceChrome.onCycleSize();
+                    }}
+                  >
+                    {workspaceChrome.sizeLabel}
+                  </button>
+                  <button
+                    type="button"
+                    className="ch-workspace-close"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      workspaceChrome.onClose();
+                    }}
+                    aria-label="Remove from workspace"
+                    title="Remove from workspace"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="ch-disclosure"
+                  onClick={onToggleExpanded}
+                  aria-expanded={expanded}
+                  title="Remove from workspace"
+                >
+                  ✕
+                </button>
+              )}
             </div>
             {volumeInHead && volumeRow}
             {workspaceToolbar}
