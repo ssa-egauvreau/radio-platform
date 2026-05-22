@@ -107,6 +107,8 @@ interface ClientMeta {
   markerToneUntilMs: number;
   /** When true, uplink should be clear PCM so AI dispatch / Whisper can understand speech. */
   aiDispatchListenPcm: boolean;
+  /** Cached from the users table for console accounts (roster / live control). */
+  deviceType: string | null;
 }
 
 /** Throttle for the per-client "channel busy" notice. */
@@ -140,9 +142,16 @@ export interface RosterMember {
   kind: "account" | "legacy" | "bridge";
   /** Client platform reported on join: android, ios, web, desktop, bridge, or unknown. */
   client: string;
+  /** Account device category (unit_radio, phone, dispatch_console, …) when known. */
+  device_type?: string | null;
   connected_ms: number;
   /** Derived from live signals (talker / GPS speed / active emergency); set by the roster route. */
   status?: PresenceStatus;
+  /**
+   * True when Live Channel Control must not move this unit (dispatch console on
+   * multiple channels, or explicit dispatch_console device type).
+   */
+  move_locked?: boolean;
 }
 
 interface RosterRecord {
@@ -153,6 +162,7 @@ interface RosterRecord {
   displayName: string | null;
   kind: "account" | "legacy" | "bridge";
   client: string;
+  deviceType: string | null;
   joinedAt: number;
 }
 
@@ -307,6 +317,7 @@ export function listChannelRoster(agencyId: number, channelRaw: unknown): Roster
         display_name: record.displayName,
         kind: record.kind,
         client: record.client,
+        device_type: record.deviceType,
         connected_ms: now - record.joinedAt,
       });
     }
@@ -339,16 +350,77 @@ export function listAgencyRosters(agencyId: number): AgencyChannelRoster[] {
       display_name: record.displayName,
       kind: record.kind,
       client: record.client,
+      device_type: record.deviceType,
       connected_ms: now - record.joinedAt,
     });
     byChannel.set(record.channelName, list);
   }
+  const counts = unitChannelCounts(agencyId);
   return [...byChannel.entries()]
     .map(([channel, members]) => ({
       channel,
-      members: members.sort((a, b) => b.connected_ms - a.connected_ms),
+      members: withRosterMoveLock(
+        members.sort((a, b) => b.connected_ms - a.connected_ms),
+        counts,
+      ),
     }))
     .sort((a, b) => a.channel.localeCompare(b.channel));
+}
+
+/** How many distinct voice channels each unit is connected to (live control). */
+export function unitChannelCounts(agencyId: number): Map<string, number> {
+  const prefix = `${agencyId} `;
+  const byUnit = new Map<string, Set<string>>();
+  for (const record of voiceRoster.values()) {
+    if (!record.channelKey.startsWith(prefix)) {
+      continue;
+    }
+    const unit = record.unitId.toUpperCase();
+    const set = byUnit.get(unit) ?? new Set<string>();
+    set.add(record.channelName);
+    byUnit.set(unit, set);
+  }
+  const counts = new Map<string, number>();
+  for (const [unit, channels] of byUnit) {
+    counts.set(unit, channels.size);
+  }
+  return counts;
+}
+
+/** Marks console operators who must not be live-moved (multi-channel dispatch). */
+export function withRosterMoveLock(
+  members: RosterMember[],
+  counts: Map<string, number>,
+): RosterMember[] {
+  return members.map((m) => {
+    const n = counts.get(m.unit_id.toUpperCase()) ?? 0;
+    const locked =
+      m.kind === "account" &&
+      (m.device_type === "dispatch_console" || n > 1);
+    return locked ? { ...m, move_locked: true } : m;
+  });
+}
+
+/** True when live channel control must not relocate this unit. */
+export function isUnitMoveLocked(agencyId: number, unitIdRaw: string): boolean {
+  const unit = unitIdRaw.trim().toUpperCase();
+  if (!unit) {
+    return false;
+  }
+  const counts = unitChannelCounts(agencyId);
+  if ((counts.get(unit) ?? 0) > 1) {
+    return true;
+  }
+  const prefix = `${agencyId} `;
+  for (const record of voiceRoster.values()) {
+    if (!record.channelKey.startsWith(prefix) || record.unitId.toUpperCase() !== unit) {
+      continue;
+    }
+    if (record.kind === "account" && record.deviceType === "dispatch_console") {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -698,6 +770,7 @@ export function attachVoiceRelay(
             lastBusyMs: 0,
             markerToneUntilMs: 0,
             aiDispatchListenPcm: false,
+            deviceType: null,
           });
           wss.emit("connection", ws, req);
         });
@@ -770,6 +843,14 @@ export function attachVoiceRelay(
       userId = user.id;
       displayName = user.displayName;
       unitId = (user.unitId ?? user.username).trim().toUpperCase() || "WEB";
+      if (meta.deviceType == null && getPool()) {
+        try {
+          const row = await getUserById(user.id, meta.agencyId);
+          meta.deviceType = row?.device_type ?? null;
+        } catch {
+          meta.deviceType = null;
+        }
+      }
       if (user.role === "admin" || user.role === "dispatcher") {
         permission = "talk_priority";
       } else {
@@ -842,6 +923,7 @@ export function attachVoiceRelay(
       displayName,
       kind: meta.identity.kind,
       client: normalizeClient(json.client),
+      deviceType: meta.deviceType,
       // Keep the original join time across re-joins to the same channel
       // (Android re-sends `join` on the same socket periodically).
       joinedAt: prior && prior.channelKey === chanKey ? prior.joinedAt : Date.now(),

@@ -69,6 +69,11 @@ Nothing — merge Android changes to `main` and the fleet updates itself. The
 commit subject becomes the release notes. `versionCode` is `1000 + run number`
 (monotonic); `versionName` is `0.1.<run number>`.
 
+After the handset downloads a newer APK, the radio LCD shows an amber banner:
+**UPDATE … DOWNLOADED — REBOOT RADIO TO INSTALL** (and the status line
+**REBOOT TO INSTALL UPDATE**). The banner stays until the radio reboots onto the
+new build or the app sees the updated `versionCode`.
+
 ## Manual publish (fallback)
 
 ```bash

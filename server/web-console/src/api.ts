@@ -246,9 +246,13 @@ export interface ChannelMember {
   kind: string;
   /** Client platform: android, ios, web, desktop, bridge, or unknown. */
   client: string;
+  /** Account device category when known (unit_radio, phone, dispatch_console, …). */
+  device_type?: string | null;
   connected_ms: number;
   /** Derived from live signals (talker / GPS speed / active emergency). */
   status?: PresenceStatus;
+  /** Dispatch console on multiple channels — do not live-move. */
+  move_locked?: boolean;
 }
 
 export interface UnitAlias {
@@ -875,6 +879,8 @@ export function describeError(error: unknown): string {
       bad_role: "Unknown role.",
       agency_disabled: "Your agency has been disabled. Contact your platform owner.",
       session_superseded: "Signed in on another device — sign in again here if you want to continue.",
+      unit_move_locked:
+        "That operator has the dispatch console open on multiple channels and cannot be moved.",
     };
     return map[error.message] ?? `Request failed (${error.message}).`;
   }

@@ -1,7 +1,17 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, type ChannelMember } from "../api";
+import { api, ApiError, type ChannelMember } from "../api";
 import { useUnitAliasResolver } from "../unitAliases";
-import { IconRadio, IconRecord, IconUser } from "../icons";
+import { IconCar, IconMobile, IconRadio, IconRecord } from "../icons";
+
+function unitDeviceIcon(deviceType: string | null | undefined) {
+  if (deviceType === "unit_radio") {
+    return <IconCar size={11} />;
+  }
+  if (deviceType === "phone" || deviceType === "handheld") {
+    return <IconMobile size={11} />;
+  }
+  return <IconMobile size={11} />;
+}
 
 const POLL_MS = 4000;
 
@@ -97,7 +107,26 @@ export function LiveControlPanel() {
     });
   }
 
+  function memberByUnit(unitId: string): ChannelMember | undefined {
+    for (const group of channels) {
+      const hit = group.members.find((m) => m.unit_id === unitId);
+      if (hit) {
+        return hit;
+      }
+    }
+    return undefined;
+  }
+
   async function moveMany(units: string[], toChannel: string) {
+    const locked = units.filter((u) => memberByUnit(u)?.move_locked);
+    if (locked.length > 0) {
+      setError(
+        locked.length === 1
+          ? `${aliasFor(locked[0]!)} has the dispatch console open on multiple channels and cannot be moved.`
+          : "One or more selected operators have the dispatch console open and cannot be moved.",
+      );
+      return;
+    }
     const moves = units.filter((u) => unitChannel.get(u) !== toChannel);
     if (moves.length === 0) {
       return;
@@ -121,8 +150,12 @@ export function LiveControlPanel() {
       setSelected(new Set());
       const fresh = await api.channelRosters();
       setRosters(fresh.channels);
-    } catch {
-      setError("Could not complete the move.");
+    } catch (err: unknown) {
+      if (err instanceof ApiError && err.message === "unit_move_locked") {
+        setError("That operator has the dispatch console open on multiple channels and cannot be moved.");
+      } else {
+        setError("Could not complete the move.");
+      }
     }
   }
 
@@ -179,7 +212,8 @@ export function LiveControlPanel() {
       {!collapsed && (
         <>
           <p className="lcc-hint compact">
-            Drag units between channels · click to select several · moves are audit-logged
+            Drag units between channels · dispatch console operators on multiple channels cannot be
+            moved · moves are audit-logged
           </p>
 
           {selected.size > 0 && (
@@ -229,16 +263,26 @@ export function LiveControlPanel() {
                   group.members.map((m) => (
                     <div
                       key={`${m.unit_id}-${m.kind}`}
-                      className={`lcc-unit${selected.has(m.unit_id) ? " selected" : ""}`}
-                      draggable
+                      className={`lcc-unit${selected.has(m.unit_id) ? " selected" : ""}${
+                        m.move_locked ? " locked" : ""
+                      }`}
+                      draggable={!m.move_locked}
                       onClick={() => toggleSelected(m.unit_id)}
                       onDragStart={(e) => {
+                        if (m.move_locked) {
+                          e.preventDefault();
+                          return;
+                        }
                         e.dataTransfer.setData("text/unit", m.unit_id);
                         e.dataTransfer.effectAllowed = "move";
                       }}
-                      title="Click to select · drag to move"
+                      title={
+                        m.move_locked
+                          ? "Dispatch console — connected on multiple channels"
+                          : "Click to select · drag to move"
+                      }
                     >
-                      <IconUser size={11} />
+                      {unitDeviceIcon(m.device_type)}
                       <span className="lcc-unit-name">{m.display_name || aliasFor(m.unit_id)}</span>
                     </div>
                   ))

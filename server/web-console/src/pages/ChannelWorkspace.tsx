@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type DragEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type DragEvent, type PointerEvent } from "react";
 import type { UserChannel } from "../api";
 import { ChannelPanel } from "./ChannelPanel";
 import {
@@ -11,6 +11,7 @@ import {
   defaultWorkspaceTile,
   getWorkspaceTile,
   setWorkspaceTile,
+  workspaceColSpanForViewport,
 } from "../consoleStore";
 
 function snapCol(pixelX: number, gridWidth: number): number {
@@ -57,6 +58,15 @@ export function ChannelWorkspace({
   const [dockDragOver, setDockDragOver] = useState(false);
   const [dragChannelId, setDragChannelId] = useState<number | null>(null);
   const [resizeChannelId, setResizeChannelId] = useState<number | null>(null);
+  const [viewportWide, setViewportWide] = useState(() => workspaceColSpanForViewport());
+
+  useEffect(() => {
+    function onResize() {
+      setViewportWide(workspaceColSpanForViewport());
+    }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
 
   const maxRow = dockedChannels.reduce((m, ch) => {
     const t = getWorkspaceTile(ch.id);
@@ -161,6 +171,7 @@ export function ChannelWorkspace({
       });
     };
     const onUp = () => {
+      setWorkspaceTile(channelId, getWorkspaceTile(channelId), true);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
@@ -173,6 +184,7 @@ export function ChannelWorkspace({
       ref={gridRef}
       className={`channel-workspace-grid${dockDragOver ? " drag-over" : ""}`}
       style={{ gridAutoRows: `${WORKSPACE_ROW_PX}px`, minHeight: maxRow * WORKSPACE_ROW_PX + 48 }}
+      data-workspace-cols={viewportWide}
       aria-label="Channel workspace"
       onDragOver={(e) => {
         e.preventDefault();

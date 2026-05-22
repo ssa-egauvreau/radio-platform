@@ -645,6 +645,21 @@ code.mono {
   max-height: min(78vh, 960px);
   overflow-y: auto;
   padding-right: 4px;
+  min-height: 0;
+}
+.channel-rail-footer {
+  margin-top: auto;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.channel-rail-footer .kbd-hint {
+  margin-top: 0;
+  text-align: left;
+}
+.channel-rail-simulcast {
+  margin-top: 8px;
+  width: 100%;
 }
 .channel-rail > .zone-header {
   margin-top: 4px;
@@ -763,7 +778,9 @@ code.mono {
 .channel-workspace-tile .channel-card.workspace .ch-card-body {
   flex: 1;
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
+  display: flex;
+  flex-direction: column;
 }
 .channel-off-overlay {
   position: absolute;
@@ -862,6 +879,13 @@ code.mono {
   padding: 4px 6px;
   font-size: 11px;
 }
+.lcc-unit.locked {
+  opacity: 0.72;
+  cursor: not-allowed;
+}
+.lcc-unit.locked:active {
+  cursor: not-allowed;
+}
 .mission-control-intro {
   padding: 0.5rem 1rem 0;
   margin: 0;
@@ -871,6 +895,47 @@ code.mono {
 }
 .mission-control-grid .console-col:first-child {
   min-width: 0;
+}
+.mission-control-grid .map-alerts-col {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.map-alerts-column {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  gap: 0;
+}
+.map-alerts-map,
+.map-alerts-alerts {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.map-alerts-map > .map-panel,
+.map-alerts-alerts > .section-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+}
+.map-alerts-splitter {
+  flex: 0 0 8px;
+  margin: 2px 0;
+  border: none;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--border) 70%, var(--accent-2) 30%);
+  cursor: ns-resize;
+  padding: 0;
+}
+.map-alerts-splitter:hover {
+  background: color-mix(in srgb, var(--accent) 35%, var(--border));
 }
 
 .audio-out-row {
@@ -943,8 +1008,10 @@ code.mono {
   min-height: 80px;
 }
 .channel-workspace-tile .channel-card.workspace .roster {
-  max-height: 96px;
-  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow: visible;
 }
 
 .channel-dock {
@@ -2434,6 +2501,7 @@ code.mono {
 .alerts-slot {
   margin-top: 24px;
 }
+/* Legacy layout — map/alerts stack uses .map-alerts-column */
 .section-head {
   display: flex;
   align-items: center;

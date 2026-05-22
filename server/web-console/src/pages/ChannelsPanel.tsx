@@ -168,6 +168,38 @@ export function ChannelsPanel({ variant = "embedded", onPopOut }: SectionProps) 
               </Fragment>
             );
           })}
+
+          {channels.length > 0 && (
+            <div className="channel-rail-footer">
+              <div className="kbd-hint">
+                <button
+                  className={keyboardOn ? "kbd-toggle on" : "kbd-toggle"}
+                  onClick={toggleKeyboard}
+                  title="Enable or disable all keyboard shortcuts"
+                >
+                  Keyboard shortcuts: {keyboardOn ? "On" : "Off"}
+                </button>
+                {keyboardOn && (
+                  <div className="kbd-keys">
+                    Keys 1–9 open · PTT{" "}
+                    <button
+                      className={rebindingPtt ? "key-rebind active" : "key-rebind"}
+                      onClick={() => setRebindingPtt((v) => !v)}
+                      title="Click, then press a key to rebind push-to-talk"
+                    >
+                      {rebindingPtt ? "press a key…" : keyLabel(pttCode)}
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              {canSimulcast && !loading && !listError && (
+                <button className="btn sm channel-rail-simulcast" onClick={() => setSimulcastOpen(true)}>
+                  Manage simulcast
+                </button>
+              )}
+            </div>
+          )}
         </aside>
 
         <ChannelWorkspace
@@ -184,40 +216,6 @@ export function ChannelsPanel({ variant = "embedded", onPopOut }: SectionProps) 
       </div>
 
       <LiveControlPanel />
-
-      {channels.length > 0 && (
-        <div className="kbd-hint">
-          <button
-            className={keyboardOn ? "kbd-toggle on" : "kbd-toggle"}
-            onClick={toggleKeyboard}
-            title="Enable or disable all keyboard shortcuts"
-          >
-            Keyboard shortcuts: {keyboardOn ? "On" : "Off"}
-          </button>
-          {keyboardOn && (
-            <div className="kbd-keys">
-              Keys 1–9 open · PTT{" "}
-              <button
-                className={rebindingPtt ? "key-rebind active" : "key-rebind"}
-                onClick={() => setRebindingPtt((v) => !v)}
-                title="Click, then press a key to rebind push-to-talk"
-              >
-                {rebindingPtt ? "press a key…" : keyLabel(pttCode)}
-              </button>
-            </div>
-          )}
-        </div>
-      )}
-
-      {canSimulcast && !loading && !listError && (
-        <button
-          className="btn sm"
-          style={{ marginTop: 10, width: "100%" }}
-          onClick={() => setSimulcastOpen(true)}
-        >
-          Manage simulcast
-        </button>
-      )}
 
       <TransmissionLog />
 

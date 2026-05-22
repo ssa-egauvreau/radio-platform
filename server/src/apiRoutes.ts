@@ -12,8 +12,11 @@ import {
 import {
   dropAgencyVoiceConnections,
   dropUserVoiceConnections,
+  isUnitMoveLocked,
   listAgencyRosters,
   listChannelRoster,
+  unitChannelCounts,
+  withRosterMoveLock,
   peekVoiceTransmittingUnit,
   sendMoveCommand,
   type PresenceStatus,
@@ -2344,7 +2347,9 @@ export function createApiRouter(): Router {
       const agencyId = req.authUser!.agencyId!;
       const channel = typeof req.query.channel === "string" ? req.query.channel : "";
       const members = listChannelRoster(agencyId, channel);
-      res.json({ members: await annotateRosterStatus(agencyId, channel, members) });
+      const counts = unitChannelCounts(agencyId);
+      const locked = withRosterMoveLock(members, counts);
+      res.json({ members: await annotateRosterStatus(agencyId, channel, locked) });
     } catch (error) {
       fail(res, error);
     }
@@ -2406,6 +2411,14 @@ export function createApiRouter(): Router {
       const channels = await listChannels(agencyId);
       if (!channels.some((c) => c.name === toChannel)) {
         res.status(404).json({ error: "unknown_channel" });
+        return;
+      }
+      if (isUnitMoveLocked(agencyId, unit)) {
+        res.status(409).json({
+          error: "unit_move_locked",
+          message:
+            "This operator has the dispatch console open on multiple channels and cannot be moved.",
+        });
         return;
       }
       const moverName = req.authUser!.displayName.trim() || req.authUser!.username;

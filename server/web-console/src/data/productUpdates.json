@@ -1,5 +1,18 @@
 [
   {
+    "version": "1.17",
+    "date": "2026-05-20",
+    "title": "Mission Control layout and live control",
+    "changes": [
+      "Channel panels grow when you drag the bottom edge — no scroll box inside the panel.",
+      "Wider screens fit three or four channel panels per row automatically.",
+      "Drag the bar between the radio map and alerts to give more room to channels or alerts.",
+      "Keyboard shortcuts and Manage simulcast sit under the channel list on the left.",
+      "Live unit control shows a car or phone icon by device type.",
+      "Operators with the dispatch console open on multiple channels cannot be dragged to another channel."
+    ]
+  },
+  {
     "version": "1.16",
     "date": "2026-05-22",
     "title": "Portal navigation and map calls",

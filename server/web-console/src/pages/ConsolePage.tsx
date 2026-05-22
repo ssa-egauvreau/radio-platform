@@ -1,9 +1,8 @@
 import { useEffect } from "react";
 import { bindLostLinkBusyAlerts, sounds } from "../sounds";
 import { Topbar } from "../Topbar";
-import { MapPanel } from "./MapPanel";
-import { AlertsPanel } from "./AlertsPanel";
 import { ChannelsPanel } from "./ChannelsPanel";
+import { MapAlertsColumn } from "./MapAlertsColumn";
 import { Link } from "react-router-dom";
 import { PopOutSection } from "./PopOutSection";
 
@@ -39,18 +38,8 @@ export function ConsolePage() {
           />
         </div>
 
-        <div className="console-col">
-          <MapPanel />
-          <div className="alerts-slot">
-            <PopOutSection
-              title="Alerts & Paging"
-              route="/console/alerts"
-              windowName="safetConsoleAlerts"
-              width={480}
-              height={820}
-              render={(onPopOut) => <AlertsPanel onPopOut={onPopOut} />}
-            />
-          </div>
+        <div className="console-col map-alerts-col">
+          <MapAlertsColumn />
         </div>
       </div>
     </div>

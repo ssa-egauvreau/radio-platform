@@ -24,7 +24,11 @@ export interface WorkspaceTileLayout {
 
 export const WORKSPACE_COLS = 12;
 export const WORKSPACE_ROW_PX = 28;
+/** Default tile width before viewport-based sizing (2-wide on a 12-column grid). */
 export const WORKSPACE_DEFAULT_COL_SPAN = 6;
+/** Breakpoints aligned with channel-dock 3-wide / 4-wide layout. */
+export const WORKSPACE_BREAK_3_WIDE = 1180;
+export const WORKSPACE_BREAK_4_WIDE = 1580;
 export const WORKSPACE_DEFAULT_ROW_SPAN = 11;
 export const WORKSPACE_MIN_COL_SPAN = 3;
 export const WORKSPACE_MAX_COL_SPAN = 12;
@@ -195,12 +199,48 @@ function layoutKey(id: number): string {
   return String(id);
 }
 
+/** Column span for the workspace grid from the current window width (3- or 4-wide panels). */
+export function workspaceColSpanForViewport(width = typeof window !== "undefined" ? window.innerWidth : 0): number {
+  if (width >= WORKSPACE_BREAK_4_WIDE) {
+    return 3;
+  }
+  if (width >= WORKSPACE_BREAK_3_WIDE) {
+    return 4;
+  }
+  return WORKSPACE_DEFAULT_COL_SPAN;
+}
+
+/** Allowed width snaps for manual resize at the current viewport. */
+export function workspaceColSpanSnaps(width = typeof window !== "undefined" ? window.innerWidth : 0): number[] {
+  if (width >= WORKSPACE_BREAK_4_WIDE) {
+    return [3, 4, 6];
+  }
+  if (width >= WORKSPACE_BREAK_3_WIDE) {
+    return [3, 4, 6];
+  }
+  return [4, 6, 12];
+}
+
+function snapWorkspaceColSpan(colSpan: number, width: number): number {
+  const snaps = workspaceColSpanSnaps(width);
+  let best = snaps[0]!;
+  let bestDist = Math.abs(colSpan - best);
+  for (const s of snaps) {
+    const d = Math.abs(colSpan - s);
+    if (d < bestDist) {
+      best = s;
+      bestDist = d;
+    }
+  }
+  return Math.max(WORKSPACE_MIN_COL_SPAN, Math.min(WORKSPACE_MAX_COL_SPAN, best));
+}
+
 /** First open grid slot that does not overlap existing tiles. */
 export function defaultWorkspaceTile(
   layout: Record<string, WorkspaceTileLayout>,
   preferCol = 0,
 ): WorkspaceTileLayout {
-  const colSpan = WORKSPACE_DEFAULT_COL_SPAN;
+  const colSpan = workspaceColSpanForViewport();
   const rowSpan = WORKSPACE_DEFAULT_ROW_SPAN;
   for (let row = 0; row < 80; row++) {
     for (let col = preferCol; col <= WORKSPACE_COLS - colSpan; col += 3) {
@@ -234,8 +274,11 @@ export function getWorkspaceTile(id: number): WorkspaceTileLayout {
   return state.workspaceLayout[layoutKey(id)] ?? defaultWorkspaceTile(state.workspaceLayout);
 }
 
-export function setWorkspaceTile(id: number, tile: WorkspaceTileLayout): void {
+export function setWorkspaceTile(id: number, tile: WorkspaceTileLayout, snapWidth = false): void {
   const key = layoutKey(id);
+  const colSpan = snapWidth
+    ? snapWorkspaceColSpan(tile.colSpan, typeof window !== "undefined" ? window.innerWidth : 0)
+    : tile.colSpan;
   commit({
     ...state,
     workspaceLayout: {
@@ -243,7 +286,7 @@ export function setWorkspaceTile(id: number, tile: WorkspaceTileLayout): void {
       [key]: {
         col: Math.max(0, Math.min(WORKSPACE_COLS - WORKSPACE_MIN_COL_SPAN, tile.col)),
         row: Math.max(0, tile.row),
-        colSpan: Math.max(WORKSPACE_MIN_COL_SPAN, Math.min(WORKSPACE_MAX_COL_SPAN, tile.colSpan)),
+        colSpan: Math.max(WORKSPACE_MIN_COL_SPAN, Math.min(WORKSPACE_MAX_COL_SPAN, colSpan)),
         rowSpan: Math.max(WORKSPACE_MIN_ROW_SPAN, Math.min(WORKSPACE_MAX_ROW_SPAN, tile.rowSpan)),
       },
     },

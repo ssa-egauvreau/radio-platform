@@ -282,6 +282,20 @@ export function IconAi(props: IconProps) {
   );
 }
 
+/** In-car / cruiser radio unit. */
+export function IconCar(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M3 14.5v-2l2.5-2 3-4.5h7l2.5 4.5 2.5 2v2" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="10" y1="6" x2="10" y2="12" />
+      <rect x="9" y="4.5" width="4" height="2" rx="0.5" />
+      <circle cx="7.5" cy="14.5" r="2" />
+      <circle cx="16.5" cy="14.5" r="2" />
+    </StrokeIcon>
+  );
+}
+
 /** Smartphone — mobile radio app. */
 export function IconMobile(props: IconProps) {
   return (
