@@ -48,6 +48,35 @@ function writeStoredSelection(bridgeId: number, sel: StoredDeviceSelection): voi
   }
 }
 
+/**
+ * Whether this bridge was running, persisted so a full page reload (e.g. the server pushing a new
+ * client build) auto-resumes the feed instead of dropping back to a stopped Start button. Cleared
+ * only when the operator explicitly stops or the relay fatally rejects the bridge.
+ */
+function wantRunningKey(bridgeId: number): string {
+  return `safetPtt.bridgeRunner.running.${bridgeId}`;
+}
+
+function readWantRunning(bridgeId: number): boolean {
+  try {
+    return localStorage.getItem(wantRunningKey(bridgeId)) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeWantRunning(bridgeId: number, running: boolean): void {
+  try {
+    if (running) {
+      localStorage.setItem(wantRunningKey(bridgeId), "1");
+    } else {
+      localStorage.removeItem(wantRunningKey(bridgeId));
+    }
+  } catch {
+    /* private mode or quota */
+  }
+}
+
 /** One runnable audio-device bridge: device selection, start/stop, live status. */
 function BridgeRunnerRow({
   bridge,
@@ -102,6 +131,20 @@ function BridgeRunnerRow({
     writeStoredSelection(bridge.id, { input: inputId, output: outputId });
   }, [bridge.id, inputId, outputId]);
 
+  // Auto-resume after a full page reload (e.g. the server pushed a new client build and the app
+  // refreshed): if this bridge was running, start it again so the feed keeps playing and the button
+  // shows "Stop" instead of resetting to "Start". The device list is loaded before this row mounts,
+  // so inputId is already resolved. Runs once; the ref guards React StrictMode's double-invoke.
+  const autoResumedRef = useRef(false);
+  useEffect(() => {
+    if (autoResumedRef.current) return;
+    autoResumedRef.current = true;
+    if (inputId && readWantRunning(bridge.id)) {
+      start();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const running = runState === "connecting" || runState === "running" || reconnecting;
 
   function start() {
@@ -114,6 +157,7 @@ function BridgeRunnerRow({
     setReconnecting(false);
     clearReconnectTimer();
     wantRunningRef.current = true;
+    writeWantRunning(bridge.id, true);
     const runner = new BridgeRunnerClient(
       {
         bridgeId: bridge.id,
@@ -131,7 +175,13 @@ function BridgeRunnerRow({
             setKeyed(false);
             setReceiving(false);
             setLevel(0);
+            // Release the dying runner's mic + AudioContext before dropping the reference. Without
+            // this each server-reset reconnect would leak a context, and browsers cap them (~6),
+            // so after a few resets a reconnect could no longer build capture and the feed would be
+            // stuck "Reconnecting…" until a manual refresh. stop() won't re-enter (state is closed).
+            const dying = runnerRef.current;
             runnerRef.current = null;
+            dying?.stop();
             if (state === "closed" && wantRunningRef.current) {
               setReconnecting(true);
               clearReconnectTimer();
@@ -144,6 +194,7 @@ function BridgeRunnerRow({
               }, BRIDGE_RECONNECT_DELAY_MS);
             } else if (state === "error") {
               wantRunningRef.current = false;
+              writeWantRunning(bridge.id, false);
               setReconnecting(false);
             }
           }
@@ -159,6 +210,7 @@ function BridgeRunnerRow({
 
   function stop() {
     wantRunningRef.current = false;
+    writeWantRunning(bridge.id, false);
     clearReconnectTimer();
     setReconnecting(false);
     runnerRef.current?.stop();

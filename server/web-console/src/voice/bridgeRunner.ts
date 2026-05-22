@@ -129,7 +129,10 @@ export class BridgeRunnerClient {
         await this.startPlayback();
       }
     } catch {
-      this.setState("error", "Bridge runner failed to start.");
+      // Leave the state set by whatever failed: a relay rejection set a terminal "error"
+      // (handleControl); a socket failure set a retryable "closed" (ws.onerror). stop() keeps an
+      // "error" but otherwise falls back to "closed", so a server redeploy stays retryable and the
+      // runner row reconnects on its own instead of stopping until the page is refreshed.
       this.stop();
       return;
     }
@@ -164,8 +167,12 @@ export class BridgeRunnerClient {
         }
       };
       ws.onerror = () => {
+        // A socket-level failure (server redeploying, network blip) is transient: surface it as a
+        // retryable "closed" so the runner row reconnects on its own instead of giving up. A fatal
+        // rejection (bad bridge config / auth) arrives as a relay control "error" message and is
+        // handled in handleControl, not here.
         if (this.state !== "closed" && this.state !== "error") {
-          this.setState("error", "Voice connection error.");
+          this.setState("closed", "Voice connection lost — reconnecting…");
         }
         reject(new Error("socket"));
       };
@@ -197,6 +204,11 @@ export class BridgeRunnerClient {
 
   private async startCapture(): Promise<void> {
     this.capCtx = new AudioContext({ sampleRate: TARGET_RATE });
+    // After a page reload the context can come up suspended (autoplay policy); a suspended context
+    // never pulls the capture worklet, so resume it so an auto-resumed bridge actually captures.
+    if (this.capCtx.state === "suspended") {
+      await this.capCtx.resume().catch(() => undefined);
+    }
     await this.capCtx.audioWorklet.addModule(CAPTURE_WORKLET_URL);
     this.capSource = this.capCtx.createMediaStreamSource(this.inputStream!);
     this.capNode = new AudioWorkletNode(this.capCtx, "pcm-capture");
@@ -342,7 +354,10 @@ export class BridgeRunnerClient {
     }
     this.keyed = false;
     this.receiving = false;
-    if (this.state !== "error") {
+    // Don't re-announce a state we're already in: stop() can be called from inside the onState
+    // callback (the runner row releases the dying runner on "closed"), and re-emitting would
+    // re-enter that handler and reschedule the reconnect.
+    if (this.state !== "error" && this.state !== "closed") {
       this.setState("closed");
     }
   }
