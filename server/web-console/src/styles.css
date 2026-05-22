@@ -1054,11 +1054,15 @@ code.mono {
   left: 0;
   right: 0;
   bottom: 0;
-  height: 12px;
+  height: 14px;
   border: none;
   background: transparent;
   padding: 0;
   cursor: ns-resize;
+  touch-action: none;
+}
+.channel-workspace-tile.resizing .channel-workspace-resize-h {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
 }
 .channel-workspace-resize-h:hover {
   background: color-mix(in srgb, var(--accent) 25%, transparent);

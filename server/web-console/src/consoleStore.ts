@@ -632,6 +632,7 @@ function fillPrimaryTileHeight(
 export function packWorkspaceLayout(
   expandedIds: number[],
   previous: Record<string, WorkspaceTileLayout>,
+  options?: { fillPrimary?: boolean },
 ): Record<string, WorkspaceTileLayout> {
   const out: Record<string, WorkspaceTileLayout> = {};
   const columnBottom = new Array<number>(WORKSPACE_MAX_PER_ROW).fill(0);
@@ -691,7 +692,9 @@ export function packWorkspaceLayout(
   }
 
   resolveWorkspaceOverlaps(out, expandedIds);
-  fillPrimaryTileHeight(out, expandedIds);
+  if (options?.fillPrimary !== false) {
+    fillPrimaryTileHeight(out, expandedIds);
+  }
   return out;
 }
 
@@ -817,6 +820,15 @@ function withPackedWorkspaceLayout(s: ConsoleState): ConsoleState {
 
 export function getWorkspaceTile(id: number): WorkspaceTileLayout {
   const key = layoutKey(id);
+  const stored = state.workspaceLayout[key];
+  if (stored && tileFitsGrid(stored) && state.expanded.includes(id)) {
+    return {
+      col: stored.col,
+      row: stored.row,
+      colSpan: stored.colSpan,
+      rowSpan: snapWorkspaceRowSpan(stored.rowSpan),
+    };
+  }
   const packed = packWorkspaceLayout(state.expanded, state.workspaceLayout);
   if (packed[key]) {
     return packed[key]!;
@@ -859,7 +871,7 @@ export function setWorkspaceTileRowSpan(id: number, rowSpan: number): void {
       rowSpan: nextSpan,
     },
   };
-  const workspaceLayout = packWorkspaceLayout(state.expanded, merged);
+  const workspaceLayout = packWorkspaceLayout(state.expanded, merged, { fillPrimary: false });
   if (workspaceLayoutEqual(workspaceLayout, state.workspaceLayout)) {
     return;
   }

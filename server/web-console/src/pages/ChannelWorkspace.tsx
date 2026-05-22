@@ -100,6 +100,7 @@ export function ChannelWorkspace({
   const rootRef = useRef<HTMLElement | null>(null);
   const [dockDragOver, setDockDragOver] = useState(false);
   const [resizeChannelId, setResizeChannelId] = useState<number | null>(null);
+  const [resizePreviewRowSpan, setResizePreviewRowSpan] = useState<number | null>(null);
   const [dragOverChannelId, setDragOverChannelId] = useState<number | null>(null);
   const [dropZone, setDropZone] = useState<WorkspaceDropZone | null>(null);
 
@@ -144,12 +145,17 @@ export function ChannelWorkspace({
     const origin = getWorkspaceTile(channelId).rowSpan;
     const startY = e.clientY;
     setResizeChannelId(channelId);
+    setResizePreviewRowSpan(origin);
+    let liveSpan = origin;
     const onMove = (ev: globalThis.PointerEvent) => {
       const deltaRow = Math.round((ev.clientY - startY) / WORKSPACE_ROW_PX);
-      setWorkspaceTileRowSpan(channelId, snapWorkspaceRowSpan(origin + deltaRow));
+      liveSpan = snapWorkspaceRowSpan(origin + deltaRow);
+      setResizePreviewRowSpan(liveSpan);
     };
     const onUp = () => {
+      setWorkspaceTileRowSpan(channelId, liveSpan);
       setResizeChannelId(null);
+      setResizePreviewRowSpan(null);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
@@ -240,9 +246,13 @@ export function ChannelWorkspace({
       ) : (
         dockedChannels.map((channel) => {
           const tile = getWorkspaceTile(channel.id);
+          const rowSpan =
+            resizeChannelId === channel.id && resizePreviewRowSpan !== null
+              ? resizePreviewRowSpan
+              : tile.rowSpan;
           const monitoring = open.includes(channel.id);
           const tileMinHeight =
-            tile.rowSpan * WORKSPACE_ROW_PX + Math.max(0, tile.rowSpan - 1) * WORKSPACE_GRID_GAP_PX;
+            rowSpan * WORKSPACE_ROW_PX + Math.max(0, rowSpan - 1) * WORKSPACE_GRID_GAP_PX;
           const widthClass =
             tile.colSpan >= 12
               ? " workspace-tile-full"
@@ -262,7 +272,7 @@ export function ChannelWorkspace({
               }${dragOverChannelId === channel.id ? " drag-over" : ""}${dropClass}`}
               style={{
                 gridColumn: `${tile.col + 1} / span ${tile.colSpan}`,
-                gridRow: `${tile.row + 1} / span ${tile.rowSpan}`,
+                gridRow: `${tile.row + 1} / span ${rowSpan}`,
                 minHeight: tileMinHeight,
               }}
               onDragOver={(e) => onTileDragOver(e, channel.id)}
@@ -288,7 +298,7 @@ export function ChannelWorkspace({
                 <ChannelPanel
                   channel={channel}
                   layout="workspace"
-                  workspaceTier={workspaceTierFromRowSpan(tile.rowSpan)}
+                  workspaceTier={workspaceTierFromRowSpan(rowSpan)}
                   monitoring={monitoring}
                   expanded
                   primary={primary === channel.id}
