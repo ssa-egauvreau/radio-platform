@@ -10,6 +10,11 @@ const DTYPE = process.env.KB_EMBED_DTYPE?.trim() || "q8";
 const LOAD_RETRY_MS = Number(process.env.KB_EMBED_LOAD_RETRY_MS) || 120_000;
 /** Cap how long a caller waits on the first model load before giving up for now. */
 const LOAD_TIMEOUT_MS = Number(process.env.KB_EMBED_LOAD_TIMEOUT_MS) || 180_000;
+/**
+ * Texts embedded per forward pass. The whole batch becomes one padded tensor, so
+ * a large document embedded all at once can OOM a constrained box — keep it small.
+ */
+const BATCH_SIZE = Math.max(1, Number(process.env.KB_EMBED_BATCH_SIZE) || 16);
 
 type EmbedPipeline = (
   texts: string[],
@@ -92,8 +97,17 @@ async function ensurePipeline(): Promise<EmbedPipeline | null> {
 }
 
 /**
+ * Triggers the model load in the background so the first retrieval at dispatch
+ * time isn't stuck waiting on a cold load. Safe to call once at startup.
+ */
+export function warmEmbeddings(): void {
+  void ensurePipeline().catch(() => undefined);
+}
+
+/**
  * Embeds texts into normalized vectors (cosine similarity == dot product).
- * Returns null when the model cannot be loaded so callers degrade gracefully.
+ * Processes in small batches to bound peak memory. Returns null when the model
+ * cannot be loaded so callers degrade gracefully.
  */
 export async function embedTexts(texts: string[]): Promise<number[][] | null> {
   if (texts.length === 0) {
@@ -104,8 +118,15 @@ export async function embedTexts(texts: string[]): Promise<number[][] | null> {
     return null;
   }
   try {
-    const output = await run(texts, { pooling: "mean", normalize: true });
-    return output.tolist();
+    const vectors: number[][] = [];
+    for (let i = 0; i < texts.length; i += BATCH_SIZE) {
+      const batch = texts.slice(i, i + BATCH_SIZE);
+      const output = await run(batch, { pooling: "mean", normalize: true });
+      for (const vec of output.tolist()) {
+        vectors.push(vec);
+      }
+    }
+    return vectors;
   } catch (error) {
     console.warn("[kb] embedding inference failed", error);
     return null;

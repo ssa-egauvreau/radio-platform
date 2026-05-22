@@ -104,6 +104,7 @@ import {
   listKbDocuments,
   createKbDocument,
   getKbDocumentContent,
+  kbDocumentExists,
   deleteKbDocument,
   resolveAgencyByKey,
   setAgencyLogo,
@@ -1584,9 +1585,7 @@ export function createApiRouter(): Router {
     try {
       const id = Number(req.params.id);
       const agencyId = req.authUser!.agencyId!;
-      // Confirm the document belongs to this agency before kicking off ingest.
-      const doc = await getKbDocumentContent(agencyId, id);
-      if (!doc) {
+      if (!Number.isInteger(id) || !(await kbDocumentExists(agencyId, id))) {
         res.status(404).json({ error: "not_found" });
         return;
       }

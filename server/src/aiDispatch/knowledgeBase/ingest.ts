@@ -4,6 +4,7 @@
 
 import {
   getKbDocumentForIngest,
+  listProcessingKbDocumentIds,
   replaceKbChunks,
   setKbDocumentStatus,
 } from "../../store.js";
@@ -20,6 +21,9 @@ export async function ingestDocument(documentId: number): Promise<void> {
     if (!doc) {
       return;
     }
+    // Reset to processing so a re-index reflects progress in the admin UI (and
+    // its status poll re-engages); a fresh upload is already 'processing'.
+    await setKbDocumentStatus(documentId, "processing", { error: null });
 
     const text = await extractPdfText(doc.content);
     if (!text.trim()) {
@@ -59,9 +63,46 @@ export async function ingestDocument(documentId: number): Promise<void> {
   }
 }
 
+// Serialize ingestion: each document loads the embedding model and runs PDF
+// parsing + inference, so running several at once (e.g. a bulk upload) multiplies
+// peak memory and can OOM a constrained box. One worker at a time, like the
+// transcription queue.
+const queue: number[] = [];
+let working = false;
+
+async function pump(): Promise<void> {
+  if (working) {
+    return;
+  }
+  working = true;
+  try {
+    while (queue.length > 0) {
+      await ingestDocument(queue.shift()!);
+    }
+  } finally {
+    working = false;
+  }
+}
+
 /** Fire-and-forget ingest so the upload request returns immediately. */
 export function enqueueKbIngest(documentId: number): void {
-  void ingestDocument(documentId).catch((error) => {
-    console.warn(`[kb] background ingest threw for document ${documentId}`, error);
-  });
+  queue.push(documentId);
+  void pump();
+}
+
+/** Re-queues documents left in 'processing' by an earlier crash/restart. */
+export async function recoverPendingKbIngests(): Promise<void> {
+  try {
+    const ids = await listProcessingKbDocumentIds();
+    if (ids.length === 0) {
+      return;
+    }
+    for (const id of ids) {
+      queue.push(id);
+    }
+    console.log(`[kb] re-queued ${ids.length} document(s) left processing.`);
+    void pump();
+  } catch (error) {
+    console.warn("[kb] could not recover pending ingests", error);
+  }
 }

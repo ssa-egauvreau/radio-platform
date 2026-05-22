@@ -1977,6 +1977,23 @@ export async function setKbDocumentStatus(
   );
 }
 
+/** Documents left mid-ingest by a crash/restart — re-queued on boot. */
+export async function listProcessingKbDocumentIds(): Promise<number[]> {
+  const res = await requirePool().query<{ id: number }>(
+    `SELECT id FROM agency_kb_documents WHERE status = 'processing' ORDER BY id ASC LIMIT 200;`,
+  );
+  return res.rows.map((r) => r.id);
+}
+
+/** Lightweight agency-scoped existence check (avoids fetching the PDF bytes). */
+export async function kbDocumentExists(agencyId: number, id: number): Promise<boolean> {
+  const res = await requirePool().query(
+    `SELECT 1 FROM agency_kb_documents WHERE id = $1 AND agency_id = $2;`,
+    [id, agencyId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
 export async function deleteKbDocument(agencyId: number, id: number): Promise<boolean> {
   const res = await requirePool().query(
     `DELETE FROM agency_kb_documents WHERE id = $1 AND agency_id = $2;`,

@@ -9,6 +9,13 @@ import { embedTexts } from "./embeddings.js";
 
 const ENABLED = (process.env.KB_ENABLED ?? "on").trim().toLowerCase() !== "off";
 const TOP_K = Number(process.env.KB_RETRIEVE_TOP_K) || 5;
+/**
+ * Hard cap on how long retrieval may delay a dispatch reply. Embedding the query
+ * waits on the model load; on a cold model we'd rather skip the knowledge base
+ * (return "") than make an officer wait on the air. The background load keeps
+ * running, so the next transmission picks it up warm.
+ */
+const RETRIEVE_TIMEOUT_MS = Math.max(250, Number(process.env.KB_RETRIEVE_TIMEOUT_MS) || 2500);
 /** Drop weak matches so unrelated traffic gets no (misleading) context. */
 const MIN_SCORE = Number(process.env.KB_MIN_SCORE) || 0.25;
 /** Added to a chunk's score when it belongs to the property named on the air. */
@@ -115,7 +122,10 @@ export async function retrieveKnowledge(
     if (chunks.length === 0) {
       return "";
     }
-    const embedded = await embedTexts([query]);
+    const embedded = await Promise.race([
+      embedTexts([query]),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), RETRIEVE_TIMEOUT_MS)),
+    ]);
     if (!embedded || !embedded[0]) {
       return "";
     }
