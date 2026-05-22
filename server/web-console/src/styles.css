@@ -633,6 +633,8 @@ code.mono {
 }
 .mission-control-channels .channel-workspace-layout {
   min-height: 320px;
+  min-width: 0;
+  max-width: 100%;
 }
 .console-col h3 {
   margin: 0 0 12px;
@@ -649,6 +651,14 @@ code.mono {
   gap: 8px;
   align-items: start;
   min-height: 280px;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.channel-workspace-layout > .channel-rail,
+.channel-workspace-layout > .channel-workspace-rows {
+  min-width: 0;
 }
 .channel-rail {
   display: flex;
@@ -738,6 +748,11 @@ code.mono {
   flex-direction: column;
   gap: 6px;
   min-height: 320px;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
   padding: 8px;
   border: 2px dashed color-mix(in srgb, var(--border) 85%, var(--accent-2) 15%);
   border-radius: 8px;
