@@ -839,8 +839,8 @@ code.mono {
 .channel-workspace-rows.channel-workspace-grid {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
-  gap: 6px;
-  align-items: stretch;
+  gap: 8px;
+  align-items: start;
   align-content: start;
   min-height: min(72vh, 880px);
   height: 100%;
@@ -850,10 +850,16 @@ code.mono {
   box-sizing: border-box;
   overflow-x: hidden;
   overflow-y: auto;
-  padding: 8px;
-  border: 2px dashed color-mix(in srgb, var(--border) 85%, var(--accent-2) 15%);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg) 62%, var(--bg-raised));
+  padding: 12px;
+  border: 2px dashed color-mix(in srgb, var(--border) 70%, var(--accent-2) 30%);
+  border-radius: 16px;
+  background:
+    radial-gradient(
+      120% 80% at 10% 0%,
+      color-mix(in srgb, var(--accent-2) 14%, transparent),
+      transparent 55%
+    ),
+    color-mix(in srgb, var(--bg) 55%, #3d4f63 45%);
   transition:
     border-color 0.15s ease,
     background 0.15s ease;
@@ -884,10 +890,26 @@ code.mono {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-raised);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--border) 40%, transparent);
+  border: 1px solid color-mix(in srgb, #fff 22%, var(--border));
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-raised) 58%, transparent);
+  backdrop-filter: blur(16px) saturate(1.25);
+  -webkit-backdrop-filter: blur(16px) saturate(1.25);
+  box-shadow:
+    0 10px 28px color-mix(in srgb, #000 32%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 14%, transparent);
+  transition:
+    box-shadow 0.15s ease,
+    transform 0.15s ease;
+}
+.channel-workspace-tile.workspace-tile-stacked {
+  box-shadow:
+    0 14px 34px color-mix(in srgb, #000 38%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 18%, transparent);
+}
+.channel-workspace-tile.workspace-tile-main {
+  align-self: stretch;
+  min-height: 100%;
 }
 .channel-workspace-tile.drag-over {
   outline: 2px solid var(--accent);
@@ -905,13 +927,13 @@ code.mono {
   box-shadow: inset 4px 0 0 var(--accent);
   outline: none;
 }
-.channel-workspace-tile.workspace-tile-full .channel-workspace-tile-inner,
+.channel-workspace-tile.workspace-tile-main .channel-workspace-tile-inner,
 .channel-workspace-tile.workspace-tile-half .channel-workspace-tile-inner {
   flex: 1 1 auto;
   min-height: 100%;
 }
 .channel-workspace-tile.resizing {
-  z-index: 5;
+  z-index: 24;
 }
 .channel-workspace-tile:has(.channel-card.primary) {
   border-color: var(--accent);
@@ -921,13 +943,42 @@ code.mono {
   flex: 0 0 auto;
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 3px 6px;
-  border-bottom: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
-  background: color-mix(in srgb, var(--bg) 55%, var(--bg-raised));
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-bottom: 1px solid color-mix(in srgb, #fff 12%, var(--border));
+  background: color-mix(in srgb, var(--bg) 42%, transparent);
   cursor: grab;
   user-select: none;
   -webkit-user-drag: element;
+}
+.workspace-window-dots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.workspace-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, #000 25%, transparent);
+}
+.workspace-dot-close {
+  background: #ff6b6b;
+}
+.workspace-dot-min {
+  background: #facc15;
+}
+.workspace-dot-grow {
+  background: #4ade80;
+}
+:root[data-theme="day"] .channel-workspace-tile {
+  background: color-mix(in srgb, var(--bg-raised) 78%, transparent);
+  border-color: color-mix(in srgb, #fff 65%, var(--border));
+  box-shadow:
+    0 10px 28px color-mix(in srgb, #000 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #fff 80%, transparent);
 }
 .channel-workspace-drag-handle:active {
   cursor: grabbing;

@@ -15,9 +15,15 @@ import {
 const STATE_KEY = "securityradio.console.state";
 
 /** Bump when workspace layout rules change — triggers one-time localStorage migration. */
-const CURRENT_LAYOUT_VERSION = 6;
+const CURRENT_LAYOUT_VERSION = 7;
 /** Column span for a compact stack tile (right column). */
 export const WORKSPACE_STACK_COL_SPAN = 3;
+/** Main panel width (left); stack lane uses the rest. */
+export const WORKSPACE_MAIN_COL_SPAN = WORKSPACE_COLS - WORKSPACE_STACK_COL_SPAN;
+/** Default row span for new compact stack panels. */
+export const WORKSPACE_STACK_DEFAULT_ROW_SPAN = 6;
+/** First column index for the right-hand stack lane. */
+export const WORKSPACE_STACK_COL_START = WORKSPACE_COLS - WORKSPACE_STACK_COL_SPAN;
 /** Column span for a half-width tile. */
 export const WORKSPACE_HALF_COL_SPAN = 6;
 const MAX_STATE_STORAGE_BYTES = 256 * 1024;
@@ -608,10 +614,13 @@ function fillPrimaryTileHeight(
   }
   const maxBottom = Math.max(...keys.map((k) => layout[k]!.row + layout[k]!.rowSpan));
   let primaryKey = keys[0]!;
-  let maxSpan = layout[primaryKey]!.colSpan;
+  let maxSpan = 0;
   for (const k of keys) {
-    if (layout[k]!.colSpan > maxSpan) {
-      maxSpan = layout[k]!.colSpan;
+    const t = layout[k]!;
+    const isMainLane = t.col <= 0 && t.colSpan >= WORKSPACE_MAIN_COL_SPAN;
+    const spanScore = isMainLane ? t.colSpan + 100 : t.colSpan;
+    if (spanScore > maxSpan) {
+      maxSpan = spanScore;
       primaryKey = k;
     }
   }
@@ -659,7 +668,7 @@ export function packWorkspaceLayout(
   for (let i = 0; i < unplaced.length; i++) {
     const id = unplaced[i]!;
     const key = layoutKey(id);
-    const rowSpan = snapWorkspaceRowSpan(previous[key]?.rowSpan ?? WORKSPACE_DEFAULT_ROW_SPAN);
+    let rowSpan = snapWorkspaceRowSpan(previous[key]?.rowSpan ?? WORKSPACE_DEFAULT_ROW_SPAN);
     let slot = 0;
     for (let s = 1; s < WORKSPACE_MAX_PER_ROW; s++) {
       if (columnBottom[s]! < columnBottom[slot]!) {
@@ -667,28 +676,30 @@ export function packWorkspaceLayout(
       }
     }
     const row = columnBottom[slot]!;
-    const total = expandedIds.length;
-    const isFirst = placed.size === 0 && i === 0;
-    let colSpan = WORKSPACE_STACK_COL_SPAN;
-    let col = slot * WORKSPACE_SLOT_COL_SPAN;
-    if (total === 1 && isFirst) {
+    const isFirstNew = placed.size === 0 && i === 0;
+    const onlyOne = expandedIds.length === 1 && unplaced.length === 1;
+    let colSpan: number;
+    let col: number;
+    let placeSlot = slot;
+    if (onlyOne) {
       colSpan = WORKSPACE_COLS;
       col = 0;
-    } else if (placed.size === 0 && i === 0) {
-      colSpan = WORKSPACE_COLS - WORKSPACE_STACK_COL_SPAN;
+      placeSlot = 0;
+    } else if (isFirstNew) {
+      colSpan = WORKSPACE_MAIN_COL_SPAN;
       col = 0;
+      placeSlot = 0;
+    } else {
+      colSpan = WORKSPACE_STACK_COL_SPAN;
+      col = WORKSPACE_STACK_COL_START;
+      placeSlot = WORKSPACE_MAX_PER_ROW - 1;
+      rowSpan = snapWorkspaceRowSpan(
+        previous[key]?.rowSpan ?? WORKSPACE_STACK_DEFAULT_ROW_SPAN,
+      );
     }
     out[key] = { col, row, colSpan, rowSpan };
-    columnBottom[slot] = row + rowSpan;
+    columnBottom[placeSlot] = row + rowSpan;
     placed.add(key);
-  }
-
-  if (expandedIds.length >= 2) {
-    const firstKey = layoutKey(expandedIds[0]!);
-    const first = out[firstKey];
-    if (first && first.colSpan >= WORKSPACE_COLS) {
-      out[firstKey] = { ...first, colSpan: WORKSPACE_COLS - WORKSPACE_STACK_COL_SPAN };
-    }
   }
 
   resolveWorkspaceOverlaps(out, expandedIds);
@@ -714,9 +725,10 @@ export function stackWorkspaceTileBelow(sourceId: number, targetId: number): voi
   }
   layout[srcKey] = {
     ...src,
-    col: tgt.col,
-    colSpan: Math.min(WORKSPACE_STACK_COL_SPAN, tgt.colSpan, src.colSpan),
+    col: tgt.col >= WORKSPACE_STACK_COL_START ? WORKSPACE_STACK_COL_START : tgt.col,
+    colSpan: WORKSPACE_STACK_COL_SPAN,
     row: tgt.row + tgt.rowSpan,
+    rowSpan: Math.min(src.rowSpan, WORKSPACE_STACK_DEFAULT_ROW_SPAN + 2),
   };
   const workspaceLayout = packWorkspaceLayout(state.expanded, layout);
   commit({ ...state, workspaceLayout });
@@ -787,12 +799,17 @@ export function cycleWorkspaceTileWidth(id: number): void {
     return;
   }
   const layout = { ...state.workspaceLayout };
-  const spans = [WORKSPACE_STACK_COL_SPAN, WORKSPACE_HALF_COL_SPAN, WORKSPACE_COLS];
+  const spans = [
+    WORKSPACE_STACK_COL_SPAN,
+    WORKSPACE_HALF_COL_SPAN,
+    WORKSPACE_MAIN_COL_SPAN,
+    WORKSPACE_COLS,
+  ];
   const idx = spans.indexOf(tile.colSpan);
-  const nextSpan = spans[(idx + 1) % spans.length]!;
+  const nextSpan = spans[((idx >= 0 ? idx : 0) + 1) % spans.length]!;
   layout[key] = {
     ...tile,
-    col: nextSpan === WORKSPACE_COLS ? 0 : tile.col,
+    col: nextSpan >= WORKSPACE_STACK_COL_START ? WORKSPACE_STACK_COL_START : 0,
     colSpan: nextSpan,
   };
   const workspaceLayout = packWorkspaceLayout(state.expanded, layout);

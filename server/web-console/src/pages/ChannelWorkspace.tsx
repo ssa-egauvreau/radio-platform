@@ -3,7 +3,9 @@ import type { UserChannel } from "../api";
 import { ChannelPanel } from "./ChannelPanel";
 import {
   WORKSPACE_GRID_GAP_PX,
+  WORKSPACE_MAIN_COL_SPAN,
   WORKSPACE_ROW_PX,
+  WORKSPACE_STACK_COL_START,
   cycleWorkspaceTileWidth,
   getWorkspaceTile,
   placeWorkspaceTileBeside,
@@ -11,7 +13,9 @@ import {
   setWorkspaceTileRowSpan,
   snapWorkspaceRowSpan,
   stackWorkspaceTileBelow,
+  useConsoleState,
   workspaceTierFromRowSpan,
+  type WorkspaceTileLayout,
 } from "../consoleStore";
 
 export type WorkspaceDropZone = "stack" | "left" | "right" | "reorder";
@@ -76,6 +80,23 @@ function insertIndexFromPointer(
   return channelIds.length;
 }
 
+function stackLayerInColumn(
+  channelId: number,
+  tile: WorkspaceTileLayout,
+  tilesById: Map<number, WorkspaceTileLayout>,
+): number {
+  let layer = 0;
+  for (const [id, other] of tilesById) {
+    if (id === channelId) {
+      continue;
+    }
+    if (other.col === tile.col && other.row < tile.row) {
+      layer += 1;
+    }
+  }
+  return layer;
+}
+
 export function ChannelWorkspace({
   dockedChannels,
   open,
@@ -104,7 +125,17 @@ export function ChannelWorkspace({
   const [dragOverChannelId, setDragOverChannelId] = useState<number | null>(null);
   const [dropZone, setDropZone] = useState<WorkspaceDropZone | null>(null);
 
+  const { workspaceLayout } = useConsoleState();
+
   const channelIds = useMemo(() => dockedChannels.map((c) => c.id), [dockedChannels]);
+
+  const tilesById = useMemo(() => {
+    const map = new Map<number, WorkspaceTileLayout>();
+    for (const channel of dockedChannels) {
+      map.set(channel.id, getWorkspaceTile(channel.id));
+    }
+    return map;
+  }, [dockedChannels, workspaceLayout]);
 
   const handleWorkspaceDrop = useCallback(
     (e: DragEvent) => {
@@ -239,13 +270,13 @@ export function ChannelWorkspace({
         <div className="channel-workspace-empty">
           <p>Drag channels here from the list on the left.</p>
           <p className="muted">
-            Drag ⋮⋮ to move · drop on bottom of a tile to stack · drop on left/right edge for a new column ·
-            double-click ⋮⋮ to change width · drag bottom edge to resize height
+            Large panel on the left · smaller glass panels stack on the right · drag ⋮⋮ to move · drop on
+            bottom edge of a tile to stack · double-click ⋮⋮ for width · drag bottom edge for height
           </p>
         </div>
       ) : (
         dockedChannels.map((channel) => {
-          const tile = getWorkspaceTile(channel.id);
+          const tile = tilesById.get(channel.id) ?? getWorkspaceTile(channel.id);
           const rowSpan =
             resizeChannelId === channel.id && resizePreviewRowSpan !== null
               ? resizePreviewRowSpan
@@ -253,27 +284,42 @@ export function ChannelWorkspace({
           const monitoring = open.includes(channel.id);
           const tileMinHeight =
             rowSpan * WORKSPACE_ROW_PX + Math.max(0, rowSpan - 1) * WORKSPACE_GRID_GAP_PX;
-          const widthClass =
-            tile.colSpan >= 12
-              ? " workspace-tile-full"
-              : tile.colSpan >= 6
-                ? " workspace-tile-half"
-                : " workspace-tile-compact";
+          const isMain =
+            tile.colSpan >= WORKSPACE_MAIN_COL_SPAN || tile.colSpan >= 12;
+          const isStackLane = tile.col >= WORKSPACE_STACK_COL_START;
+          const stackLayer = isStackLane ? stackLayerInColumn(channel.id, tile, tilesById) : 0;
+          const widthClass = isMain
+            ? " workspace-tile-main"
+            : tile.colSpan >= 6
+              ? " workspace-tile-half"
+              : " workspace-tile-compact";
           const dropClass =
             dragOverChannelId === channel.id && dropZone
               ? ` drop-${dropZone}`
               : "";
+          const stackStyle =
+            stackLayer > 0
+              ? {
+                  marginTop: -14,
+                  zIndex: 12 + stackLayer,
+                }
+              : isStackLane
+                ? { zIndex: 11 }
+                : isMain
+                  ? { zIndex: 8 }
+                  : undefined;
           return (
             <div
               key={channel.id}
               data-channel-id={channel.id}
-              className={`channel-workspace-tile${widthClass}${!monitoring ? " channel-off" : ""}${
+              className={`channel-workspace-tile${widthClass}${stackLayer > 0 ? " workspace-tile-stacked" : ""}${!monitoring ? " channel-off" : ""}${
                 resizeChannelId === channel.id ? " resizing" : ""
               }${dragOverChannelId === channel.id ? " drag-over" : ""}${dropClass}`}
               style={{
                 gridColumn: `${tile.col + 1} / span ${tile.colSpan}`,
                 gridRow: `${tile.row + 1} / span ${rowSpan}`,
                 minHeight: tileMinHeight,
+                ...stackStyle,
               }}
               onDragOver={(e) => onTileDragOver(e, channel.id)}
               onDragLeave={() => {
@@ -290,6 +336,11 @@ export function ChannelWorkspace({
                 onDoubleClick={() => cycleWorkspaceTileWidth(channel.id)}
                 title="Drag to move · drop on tile edges to stack or place beside · double-click to change width"
               >
+                <span className="workspace-window-dots" aria-hidden>
+                  <span className="workspace-dot workspace-dot-close" />
+                  <span className="workspace-dot workspace-dot-min" />
+                  <span className="workspace-dot workspace-dot-grow" />
+                </span>
                 <span className="channel-workspace-drag-grip" aria-hidden>
                   ⋮⋮
                 </span>
