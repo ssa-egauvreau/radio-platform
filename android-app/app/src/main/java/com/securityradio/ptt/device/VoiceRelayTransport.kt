@@ -148,9 +148,6 @@ class VoiceRelayTransport(
                 "joined" -> {
                     recordListenPcm = json.optBoolean("record_listen_pcm", false)
                     aiDispatchListenPcm = json.optBoolean("ai_dispatch_listen_pcm", false)
-                    if (recordListenPcm || aiDispatchListenPcm) {
-                        pcmAccLen = 0
-                    }
                     _controlEvents.tryEmit(
                         VoiceControlEvent.Joined(
                             channel = json.optString("channel"),
@@ -162,9 +159,6 @@ class VoiceRelayTransport(
                 }
                 "ai_dispatch_pcm" -> {
                     aiDispatchListenPcm = json.optBoolean("enabled", false)
-                    if (aiDispatchListenPcm) {
-                        pcmAccLen = 0
-                    }
                     _controlEvents.tryEmit(VoiceControlEvent.AiDispatchPcm(enabled = aiDispatchListenPcm))
                 }
                 "error" -> {
