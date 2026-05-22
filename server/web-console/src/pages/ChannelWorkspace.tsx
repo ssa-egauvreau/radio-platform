@@ -11,7 +11,6 @@ import type { UserChannel } from "../api";
 import { ChannelPanel } from "./ChannelPanel";
 import {
   WORKSPACE_GRID_GAP_PX,
-  WORKSPACE_ROW_PX,
   cycleWorkspaceTileSize,
   getWorkspaceTile,
   moveWorkspaceTileToEnd,
@@ -214,7 +213,7 @@ export function ChannelWorkspace({
       aria-label="Channel workspace"
       style={{
         gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-        gridAutoRows: `${WORKSPACE_ROW_PX}px`,
+        gridAutoRows: "auto",
       }}
       onDragOver={(e) => {
         e.preventDefault();
@@ -245,10 +244,7 @@ export function ChannelWorkspace({
               className={`channel-workspace-tile widget-${size}${!monitoring ? " channel-off" : ""}${
                 moveChannelId === channel.id ? " moving" : ""
               }${isOver ? ` drag-over drop-${dropEdge}` : ""}`}
-              style={{
-                gridColumn: `span ${colSpan}`,
-                gridRow: `span ${tile.rowSpan}`,
-              }}
+              style={{ gridColumn: `span ${colSpan}` }}
             >
               <div
                 className="channel-workspace-drag-handle"
