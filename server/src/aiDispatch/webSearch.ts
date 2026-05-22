@@ -62,11 +62,13 @@ Find the street address for: "${query}"
 
 This is for a radio dispatcher reading the address aloud over the radio to a field officer. Keep it short.
 
+Use Google Maps style addressing: numbered street first, then city, then two-letter state and 5-digit ZIP when known.
+
 Respond ONLY with JSON. No prose, no code fences. Use this shape:
-If found: {"found": true, "name": "Official name", "street": "123 Main St", "city": "Garden Grove", "state": "CA", "zip": "92840 or null", "phone": "phone if commonly needed too, else null", "source": "URL"}
+If found: {"found": true, "name": "Official name", "street": "123 N Main St", "city": "Garden Grove", "state": "CA", "zip": "92840", "phone": "phone if commonly needed too, else null", "source": "URL"}
 If not found: {"found": false, "reason": "Brief explanation"}
 
-Only return found:true if HIGH CONFIDENCE.`;
+The combined address for CAD must read like: "123 N Main St, Garden Grove, CA 92840". Only return found:true if HIGH CONFIDENCE.`;
 
     case "legal_code":
       return `${locationCtx}

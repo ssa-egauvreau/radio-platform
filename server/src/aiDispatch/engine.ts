@@ -38,7 +38,7 @@ import {
   ten8CreateIncident,
   ten8NewIncidentConfigured,
 } from "../ten8/client.js";
-import { lookupSsaProperty } from "./ssaProperties.js";
+import { buildTen8NewIncidentBody } from "../ten8/incidentPayload.js";
 import type { PlateLookupResult } from "./plateLookup.js";
 import type { AiDispatchParseResult } from "./parse.js";
 
@@ -181,36 +181,6 @@ function findMatchingOpenIncident(
     }
   }
   return null;
-}
-
-/** Build a 10-8 New Incident API body from a self-dispatch parse. type + summary are required. */
-function buildNewIncidentBody(
-  parsed: AiDispatchParseResult,
-  unit: string,
-  dispatcherName: string,
-): Record<string, unknown> {
-  const type = parsed.code?.trim() || "Officer Initiated";
-  const body: Record<string, unknown> = {
-    type,
-    summary: parsed.summary?.trim() || type,
-    dispatcher: dispatcherName,
-    require_acknowledge: false,
-  };
-  if (unit.trim()) {
-    body.units = unit.trim();
-  }
-  const prop = lookupSsaProperty(parsed.location_code);
-  if (prop) {
-    body.location = [prop.street, prop.city, prop.state, prop.zip].filter(Boolean).join(", ");
-    if (prop.street) body.streetAddress = prop.street;
-    if (prop.city) body.city = prop.city;
-    if (prop.state) body.state = prop.state;
-    if (prop.zip) body.zip = prop.zip;
-    if (prop.locnotes || prop.name) body.locnotes = prop.locnotes || prop.name;
-  } else if (parsed.location_name?.trim()) {
-    body.location = parsed.location_name.trim();
-  }
-  return body;
 }
 
 async function persistAiDispatchLog(opts: {
@@ -362,7 +332,12 @@ async function processTransmission(transmissionId: number): Promise<void> {
           // Self-dispatch is a NEW call — create an incident, never comment on an unrelated one.
           if (await ten8NewIncidentConfigured(tx.agency_id)) {
             const createUnit = (parsed.unit ?? unitId ?? "").trim();
-            const body = buildNewIncidentBody(parsed, createUnit, platform.dispatchUnitId);
+            const body = await buildTen8NewIncidentBody(
+              tx.agency_id,
+              parsed,
+              createUnit,
+              platform.dispatchUnitId,
+            );
             const res = await ten8CreateIncident(tx.agency_id, body);
             ten8Actions.ten8_incident = { request: body, ...res };
           } else {

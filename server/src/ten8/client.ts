@@ -1,4 +1,5 @@
 import { getAgencyIntegrationValue } from "../store.js";
+import { finalizeTen8NewIncidentBody } from "./incidentPayload.js";
 
 const DEFAULT_BASE = "https://ps569km5w9.execute-api.us-gov-west-1.amazonaws.com/prod";
 
@@ -169,7 +170,7 @@ export async function ten8CreateIncident(
     return { ok: false, data: { error: "ten8_new_incident_not_configured" } };
   }
   // Only letters, numbers, spaces, commas, and periods reach 10-8.
-  const safeBody = sanitizeTen8Body(body) as Record<string, unknown>;
+  const safeBody = finalizeTen8NewIncidentBody(sanitizeTen8Body(body) as Record<string, unknown>);
   if (!cfg.live) {
     console.log("[ten8] shadow POST /incidents", safeBody);
     return { ok: true, shadow: true, data: { shadow: true, path: "/incidents", body: safeBody } };

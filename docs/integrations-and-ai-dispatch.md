@@ -139,6 +139,8 @@ Do **not** put plate keys in Railway for normal agency setup. Optional env fallb
 **10-8 New Incident API** — `TEN8_NEW_INCIDENT_API_KEY` / `TEN8_NEW_INCIDENT_API_SECRET`:
 
 - Second key pair from 10-8 support; used only to **create** new calls (not reads/comments).
+- **Self-dispatch (AI `intent=dispatch`)** sends addresses in **Google Maps / 10-8 format**: `street, city, ST ZIP` on the `location` field, plus `streetAddress`, `city`, `state`, `zip`, and `county` when known. SSA account codes (`18-06`, `32-08`, etc.) are expanded from the property database; place names are looked up via web search when needed.
+- **Priority** is always **1–4** (1 = highest). The server never sends priority **0**; routine officer-initiated calls default to **3**, in-progress / alarm types to **2**, emergencies to **1**.
 - If empty, safeT can fall back to the v1.0.8 key pair when creating calls (same as the old server).
 
 ## AI activity log
