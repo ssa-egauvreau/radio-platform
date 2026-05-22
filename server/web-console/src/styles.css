@@ -838,9 +838,12 @@ code.mono {
 /* --- Mission Control: 12-col grid, four slots, vertical packing --- */
 .channel-workspace-rows.channel-workspace-grid {
   display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
+  /* Responsive auto-fill: as many equal tracks as fit (min 300px), collapsing to one column on
+     phones. min(100%, 300px) keeps the track from forcing horizontal overflow on very narrow
+     screens. Tiles flow in docked order and span 1+ tracks; dense flow backfills gaps. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+  grid-auto-flow: row dense;
   gap: 8px;
-  align-items: start;
   align-content: start;
   min-height: min(72vh, 880px);
   height: 100%;
@@ -885,7 +888,8 @@ code.mono {
   min-width: 0;
   width: 100%;
   min-height: 0;
-  align-self: start;
+  /* Fill the row-span area so tile height tracks rowSpan (auto-rows are a fixed pixel height). */
+  align-self: stretch;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -925,16 +929,12 @@ code.mono {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-.channel-workspace-tile.drag-over.drop-stack {
-  box-shadow: inset 0 -4px 0 var(--accent);
-  outline: none;
-}
-.channel-workspace-tile.drag-over.drop-right {
-  box-shadow: inset -4px 0 0 var(--accent);
-  outline: none;
-}
-.channel-workspace-tile.drag-over.drop-left {
+.channel-workspace-tile.drag-over.drop-before {
   box-shadow: inset 4px 0 0 var(--accent);
+  outline: none;
+}
+.channel-workspace-tile.drag-over.drop-after {
+  box-shadow: inset -4px 0 0 var(--accent);
   outline: none;
 }
 .channel-workspace-tile.workspace-tile-main .channel-workspace-tile-inner,
