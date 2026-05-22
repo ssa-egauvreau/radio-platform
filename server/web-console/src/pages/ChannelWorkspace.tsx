@@ -1,37 +1,47 @@
-import { useCallback, useEffect, useRef, useState, type DragEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type PointerEvent } from "react";
 import type { UserChannel } from "../api";
 import { ChannelPanel } from "./ChannelPanel";
 import {
-  WORKSPACE_COLS,
-  WORKSPACE_MAX_COL_SPAN,
-  WORKSPACE_MAX_ROW_SPAN,
-  WORKSPACE_MIN_COL_SPAN,
-  WORKSPACE_MIN_ROW_SPAN,
   WORKSPACE_GRID_GAP_PX,
+  WORKSPACE_MAX_PER_ROW,
+  WORKSPACE_MAX_ROW_SPAN,
+  WORKSPACE_MIN_ROW_SPAN,
   WORKSPACE_ROW_PX,
-  defaultWorkspaceTile,
+  dockChannel,
   getWorkspaceTile,
-  setWorkspaceTile,
-  workspaceColSpanForViewport,
+  reorderDockedChannels,
+  setWorkspaceTileRowSpan,
 } from "../consoleStore";
 
-function snapCol(pixelX: number, gridWidth: number): number {
-  const col = Math.round((pixelX / gridWidth) * WORKSPACE_COLS);
-  return Math.max(0, Math.min(WORKSPACE_COLS - WORKSPACE_MIN_COL_SPAN, col));
+function chunkChannels<T>(items: T[], size: number): T[][] {
+  const rows: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    rows.push(items.slice(i, i + size));
+  }
+  return rows;
 }
 
-function snapRow(pixelY: number): number {
-  return Math.max(0, Math.round(pixelY / WORKSPACE_ROW_PX));
+function tilePixelHeight(rowSpan: number): number {
+  return rowSpan * WORKSPACE_ROW_PX + (rowSpan - 1) * WORKSPACE_GRID_GAP_PX;
 }
 
-function pointerToGrid(
-  clientX: number,
-  clientY: number,
-  rect: DOMRect,
-): { col: number; row: number } {
-  const x = clientX - rect.left;
-  const y = clientY - rect.top;
-  return { col: snapCol(x, rect.width), row: snapRow(y) };
+function insertIndexFromPointer(clientX: number, root: HTMLElement, channelIds: number[]): number {
+  const tiles = [...root.querySelectorAll<HTMLElement>("[data-channel-id]")];
+  if (tiles.length === 0) {
+    return 0;
+  }
+  for (let i = 0; i < tiles.length; i++) {
+    const id = Number(tiles[i]!.dataset.channelId);
+    const idx = channelIds.indexOf(id);
+    if (idx < 0) {
+      continue;
+    }
+    const rect = tiles[i]!.getBoundingClientRect();
+    if (clientX < rect.left + rect.width / 2) {
+      return idx;
+    }
+  }
+  return channelIds.length;
 }
 
 export function ChannelWorkspace({
@@ -53,110 +63,67 @@ export function ChannelWorkspace({
   onToggleMonitor: (id: number) => void;
   onUndock: (id: number) => void;
   onMakePrimary: (id: number) => void;
-  onDockFromRail: (id: number) => void;
+  onDockFromRail: (id: number, insertAt?: number) => void;
 }) {
-  const gridRef = useRef<HTMLElement | null>(null);
+  const rootRef = useRef<HTMLElement | null>(null);
   const [dockDragOver, setDockDragOver] = useState(false);
-  const [dragChannelId, setDragChannelId] = useState<number | null>(null);
   const [resizeChannelId, setResizeChannelId] = useState<number | null>(null);
-  const [viewportWide, setViewportWide] = useState(() => workspaceColSpanForViewport());
+  const [dragOverChannelId, setDragOverChannelId] = useState<number | null>(null);
+
+  const channelIds = useMemo(() => dockedChannels.map((c) => c.id), [dockedChannels]);
+  const rows = useMemo(() => chunkChannels(dockedChannels, WORKSPACE_MAX_PER_ROW), [dockedChannels]);
+
+  const maxRowSpan = dockedChannels.reduce((m, ch) => {
+    return Math.max(m, getWorkspaceTile(ch.id).rowSpan);
+  }, WORKSPACE_MIN_ROW_SPAN);
 
   useEffect(() => {
-    function onResize() {
-      setViewportWide(workspaceColSpanForViewport());
+    if (channelIds.length === 0) {
+      return;
     }
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
+    reorderDockedChannels(channelIds);
+  }, [channelIds.join(",")]);
 
-  const maxRow = dockedChannels.reduce((m, ch) => {
-    const t = getWorkspaceTile(ch.id);
-    return Math.max(m, t.row + t.rowSpan);
-  }, 10);
-  const gridMinHeight = Math.max(
-    360,
-    maxRow * WORKSPACE_ROW_PX + (maxRow - 1) * WORKSPACE_GRID_GAP_PX + 48,
-  );
-
-  const handleDockDrop = useCallback(
+  const handleWorkspaceDrop = useCallback(
     (e: DragEvent) => {
       e.preventDefault();
       setDockDragOver(false);
+      setDragOverChannelId(null);
       const raw = e.dataTransfer.getData("text/channel-id");
       const id = Number(raw);
-      if (!Number.isFinite(id) || id <= 0 || !gridRef.current) {
+      if (!Number.isFinite(id) || id <= 0 || !rootRef.current) {
         return;
       }
-      onDockFromRail(id);
-      const rect = gridRef.current.getBoundingClientRect();
-      const { col, row } = pointerToGrid(e.clientX, e.clientY, rect);
-      const tile = defaultWorkspaceTile(
-        Object.fromEntries(
-          dockedChannels
-            .filter((c) => c.id !== id)
-            .map((c) => [String(c.id), getWorkspaceTile(c.id)]),
-        ),
-        col,
-      );
-      setWorkspaceTile(id, { ...tile, col, row });
+      const insertAt = insertIndexFromPointer(e.clientX, rootRef.current, channelIds);
+      if (channelIds.includes(id)) {
+        const next = [...channelIds];
+        const from = next.indexOf(id);
+        next.splice(from, 1);
+        let to = insertAt;
+        if (from < to) {
+          to -= 1;
+        }
+        next.splice(Math.max(0, to), 0, id);
+        reorderDockedChannels(next);
+      } else {
+        onDockFromRail(id, insertAt);
+      }
     },
-    [dockedChannels, onDockFromRail],
+    [channelIds, onDockFromRail],
   );
 
-  function tilePixelHeight(rowSpan: number): number {
-    return rowSpan * WORKSPACE_ROW_PX + (rowSpan - 1) * WORKSPACE_GRID_GAP_PX;
-  }
-
-  function beginMove(e: PointerEvent<HTMLDivElement>, channelId: number) {
-    if (
-      (e.target as HTMLElement).closest(
-        "button, input, select, a, .tx-button, .vol-slider, .channel-workspace-resize-h, .channel-workspace-resize-w",
-      )
-    ) {
-      return;
-    }
-    const tile = getWorkspaceTile(channelId);
-    const origin = { ...tile };
-    const startX = e.clientX;
-    const startY = e.clientY;
-    setDragChannelId(channelId);
-    const onMove = (ev: globalThis.PointerEvent) => {
-      if (!gridRef.current) {
-        return;
-      }
-      const colW = gridRef.current.getBoundingClientRect().width / WORKSPACE_COLS;
-      const deltaCol = Math.round((ev.clientX - startX) / colW);
-      const deltaRow = Math.round((ev.clientY - startY) / WORKSPACE_ROW_PX);
-      setWorkspaceTile(channelId, {
-        ...origin,
-        col: Math.max(0, Math.min(WORKSPACE_COLS - origin.colSpan, origin.col + deltaCol)),
-        row: Math.max(0, origin.row + deltaRow),
-      });
-    };
-    const onUp = () => {
-      setDragChannelId(null);
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
-  }
-
-  function beginResize(e: PointerEvent<HTMLButtonElement>, channelId: number) {
+  function beginResizeHeight(e: PointerEvent<HTMLButtonElement>, channelId: number) {
     e.preventDefault();
     e.stopPropagation();
-    const origin = getWorkspaceTile(channelId);
+    const origin = getWorkspaceTile(channelId).rowSpan;
     const startY = e.clientY;
     setResizeChannelId(channelId);
     const onMove = (ev: globalThis.PointerEvent) => {
       const deltaRow = Math.round((ev.clientY - startY) / WORKSPACE_ROW_PX);
-      setWorkspaceTile(channelId, {
-        ...origin,
-        rowSpan: Math.max(
-          WORKSPACE_MIN_ROW_SPAN,
-          Math.min(WORKSPACE_MAX_ROW_SPAN, origin.rowSpan + deltaRow),
-        ),
-      });
+      setWorkspaceTileRowSpan(
+        channelId,
+        Math.max(WORKSPACE_MIN_ROW_SPAN, Math.min(WORKSPACE_MAX_ROW_SPAN, origin + deltaRow)),
+      );
     };
     const onUp = () => {
       setResizeChannelId(null);
@@ -167,43 +134,51 @@ export function ChannelWorkspace({
     window.addEventListener("pointerup", onUp);
   }
 
-  function beginResizeWidth(e: PointerEvent<HTMLButtonElement>, channelId: number) {
-    e.preventDefault();
-    e.stopPropagation();
-    if (!gridRef.current) {
+  function onTileDragStart(e: DragEvent<HTMLDivElement>, channelId: number) {
+    if (
+      (e.target as HTMLElement).closest(
+        "button, input, select, a, .tx-button, .vol-slider, .channel-workspace-resize-h",
+      )
+    ) {
+      e.preventDefault();
       return;
     }
-    const origin = getWorkspaceTile(channelId);
-    const colW = gridRef.current.getBoundingClientRect().width / WORKSPACE_COLS;
-    const onMove = (ev: globalThis.PointerEvent) => {
-      const delta = Math.round((ev.clientX - e.clientX) / colW);
-      setWorkspaceTile(channelId, {
-        ...origin,
-        colSpan: Math.max(
-          WORKSPACE_MIN_COL_SPAN,
-          Math.min(WORKSPACE_MAX_COL_SPAN, origin.colSpan + delta),
-        ),
-      });
-    };
-    const onUp = () => {
-      setWorkspaceTile(channelId, getWorkspaceTile(channelId), true);
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    e.dataTransfer.setData("text/channel-id", String(channelId));
+    e.dataTransfer.effectAllowed = "move";
   }
+
+  function onTileDragOver(e: DragEvent<HTMLDivElement>, channelId: number) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setDragOverChannelId(channelId);
+  }
+
+  function onTileDrop(e: DragEvent<HTMLDivElement>, targetId: number) {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverChannelId(null);
+    const raw = e.dataTransfer.getData("text/channel-id");
+    const sourceId = Number(raw);
+    if (!Number.isFinite(sourceId) || sourceId === targetId) {
+      return;
+    }
+    const from = channelIds.indexOf(sourceId);
+    const to = channelIds.indexOf(targetId);
+    if (from < 0 || to < 0) {
+      return;
+    }
+    const next = [...channelIds];
+    next.splice(from, 1);
+    next.splice(to, 0, sourceId);
+    reorderDockedChannels(next);
+  }
+
+  const rowMinHeight = tilePixelHeight(maxRowSpan);
 
   return (
     <section
-      ref={gridRef}
-      className={`channel-workspace-grid${dockDragOver ? " drag-over" : ""}`}
-      style={{
-        gridAutoRows: `${WORKSPACE_ROW_PX}px`,
-        gap: `${WORKSPACE_GRID_GAP_PX}px`,
-        minHeight: gridMinHeight,
-      }}
-      data-workspace-cols={viewportWide}
+      ref={rootRef}
+      className={`channel-workspace-rows${dockDragOver ? " drag-over" : ""}`}
       aria-label="Channel workspace"
       onDragOver={(e) => {
         e.preventDefault();
@@ -211,64 +186,67 @@ export function ChannelWorkspace({
         setDockDragOver(true);
       }}
       onDragLeave={() => setDockDragOver(false)}
-      onDrop={handleDockDrop}
+      onDrop={handleWorkspaceDrop}
     >
       {dockedChannels.length === 0 ? (
         <div className="channel-workspace-empty">
           <p>Drag channels here from the list on the left.</p>
           <p className="muted">
-            Snap next to other channels · drag the bottom edge to resize taller · right edge for width
+            Up to four per row, equal width · drag left or right to reorder · bottom edge resizes height
           </p>
         </div>
       ) : (
-        dockedChannels.map((channel) => {
-          const tile = getWorkspaceTile(channel.id);
-          const monitoring = open.includes(channel.id);
-          return (
-            <div
-              key={channel.id}
-              className={`channel-workspace-tile${!monitoring ? " channel-off" : ""}${
-                dragChannelId === channel.id ? " dragging" : ""
-              }${resizeChannelId === channel.id ? " resizing" : ""}`}
-              style={{
-                gridColumn: `${tile.col + 1} / span ${tile.colSpan}`,
-                gridRow: `${tile.row + 1} / span ${tile.rowSpan}`,
-                minHeight: tilePixelHeight(tile.rowSpan),
-              }}
-            >
-              <div
-                className="channel-workspace-tile-inner"
-                onPointerDown={(e) => beginMove(e, channel.id)}
-              >
-                <ChannelPanel
-                  channel={channel}
-                  layout="workspace"
-                  monitoring={monitoring}
-                  expanded
-                  primary={primary === channel.id}
-                  pttCode={pttCode}
-                  keyboardOn={keyboardOn}
-                  onToggleMonitor={() => onToggleMonitor(channel.id)}
-                  onToggleExpanded={() => onUndock(channel.id)}
-                  onMakePrimary={() => onMakePrimary(channel.id)}
-                />
-                {!monitoring && <div className="channel-off-overlay" aria-hidden />}
-              </div>
-              <button
-                type="button"
-                className="channel-workspace-resize-w"
-                aria-label="Resize width"
-                onPointerDown={(e) => beginResizeWidth(e, channel.id)}
-              />
-              <button
-                type="button"
-                className="channel-workspace-resize-h"
-                aria-label="Resize height"
-                onPointerDown={(e) => beginResize(e, channel.id)}
-              />
-            </div>
-          );
-        })
+        rows.map((rowChannels) => (
+          <div
+            key={rowChannels.map((c) => c.id).join("-")}
+            className="channel-workspace-row"
+            style={{ minHeight: rowMinHeight }}
+          >
+            {rowChannels.map((channel) => {
+              const tile = getWorkspaceTile(channel.id);
+              const monitoring = open.includes(channel.id);
+              return (
+                <div
+                  key={channel.id}
+                  data-channel-id={channel.id}
+                  className={`channel-workspace-tile${!monitoring ? " channel-off" : ""}${
+                    resizeChannelId === channel.id ? " resizing" : ""
+                  }${dragOverChannelId === channel.id ? " drag-over" : ""}`}
+                  style={{ minHeight: tilePixelHeight(tile.rowSpan) }}
+                  draggable
+                  onDragStart={(e) => onTileDragStart(e, channel.id)}
+                  onDragOver={(e) => onTileDragOver(e, channel.id)}
+                  onDragLeave={() =>
+                    setDragOverChannelId((id) => (id === channel.id ? null : id))
+                  }
+                  onDrop={(e) => onTileDrop(e, channel.id)}
+                >
+                  <div className="channel-workspace-tile-inner">
+                    <ChannelPanel
+                      channel={channel}
+                      layout="workspace"
+                      monitoring={monitoring}
+                      expanded
+                      primary={primary === channel.id}
+                      pttCode={pttCode}
+                      keyboardOn={keyboardOn}
+                      onToggleMonitor={() => onToggleMonitor(channel.id)}
+                      onToggleExpanded={() => onUndock(channel.id)}
+                      onMakePrimary={() => onMakePrimary(channel.id)}
+                    />
+                    {!monitoring && <div className="channel-off-overlay" aria-hidden />}
+                  </div>
+                  <button
+                    type="button"
+                    className="channel-workspace-resize-h"
+                    aria-label="Resize height"
+                    onPointerDown={(e) => beginResizeHeight(e, channel.id)}
+                  />
+                </div>
+              );
+            })}
+          </div>
+        ))
       )}
     </section>
   );

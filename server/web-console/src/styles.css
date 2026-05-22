@@ -732,16 +732,13 @@ code.mono {
   font-size: 9px;
 }
 
-/* --- Mission Control: free-form channel workspace grid --- */
-.channel-workspace-grid {
-  display: grid;
-  grid-template-columns: repeat(12, minmax(0, 1fr));
+/* --- Mission Control: equal-width channel rows (max 4 per row) --- */
+.channel-workspace-rows {
+  display: flex;
+  flex-direction: column;
   gap: 6px;
-  align-content: start;
-  align-items: stretch;
   min-height: 320px;
-  padding: 8px 8px 14px;
-  overflow: visible;
+  padding: 8px;
   border: 2px dashed color-mix(in srgb, var(--border) 85%, var(--accent-2) 15%);
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg) 62%, var(--bg-raised));
@@ -749,12 +746,18 @@ code.mono {
     border-color 0.15s ease,
     background 0.15s ease;
 }
-.channel-workspace-grid.drag-over {
+.channel-workspace-rows.drag-over {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, var(--bg));
 }
+.channel-workspace-row {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 6px;
+  min-width: 0;
+}
 .channel-workspace-empty {
-  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -767,11 +770,18 @@ code.mono {
 }
 .channel-workspace-tile {
   position: relative;
+  flex: 1 1 0;
   min-width: 0;
+  max-width: 100%;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: visible;
+  overflow: hidden;
+  border-radius: 6px;
+}
+.channel-workspace-tile.drag-over {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 .channel-workspace-tile.resizing {
   z-index: 5;
@@ -781,9 +791,9 @@ code.mono {
   flex: 1 1 auto;
   height: 100%;
   min-height: 0;
+  min-width: 0;
   padding-bottom: 12px;
-  cursor: grab;
-  overflow: visible;
+  overflow: hidden;
 }
 .channel-workspace-tile-inner:active {
   cursor: grabbing;
@@ -794,19 +804,30 @@ code.mono {
 }
 .channel-workspace-tile .channel-card.workspace {
   height: 100%;
-  min-height: 100%;
+  min-height: 0;
+  width: 100%;
+  max-width: 100%;
   display: flex;
   flex-direction: column;
-  overflow: visible;
+  overflow: hidden;
+  box-sizing: border-box;
 }
 .channel-workspace-tile .channel-card.workspace .ch-card-head.workspace-head {
   flex: 0 0 auto;
+  min-width: 0;
+}
+.channel-workspace-tile .channel-card.workspace .ch-card-toolbar {
+  flex-wrap: wrap;
+  min-width: 0;
 }
 .channel-workspace-tile .channel-card.workspace .ch-card-body {
   flex: 1 1 auto;
   min-height: 0;
-  overflow: visible;
+  min-width: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   display: grid;
+  box-sizing: border-box;
 }
 .channel-off-overlay {
   position: absolute;
@@ -817,32 +838,19 @@ code.mono {
   opacity: 0.72;
   pointer-events: none;
 }
-.channel-workspace-resize-h,
-.channel-workspace-resize-w {
-  position: absolute;
-  z-index: 8;
-  border: none;
-  background: transparent;
-  padding: 0;
-}
 .channel-workspace-resize-h {
+  position: absolute;
+  z-index: 12;
   left: 8px;
   right: 8px;
   bottom: 0;
   height: 14px;
+  border: none;
+  background: transparent;
+  padding: 0;
   cursor: ns-resize;
-  z-index: 12;
 }
-.channel-workspace-resize-w {
-  top: 8px;
-  bottom: 20px;
-  right: 0;
-  width: 12px;
-  cursor: ew-resize;
-  z-index: 12;
-}
-.channel-workspace-resize-h:hover,
-.channel-workspace-resize-w:hover {
+.channel-workspace-resize-h:hover {
   background: color-mix(in srgb, var(--accent) 25%, transparent);
 }
 
@@ -1047,14 +1055,26 @@ code.mono {
   padding: 6px 8px 10px;
   align-content: start;
 }
+.channel-workspace-tile .channel-card.workspace .ch-card-body > * {
+  min-width: 0;
+  max-width: 100%;
+}
 .channel-workspace-tile .channel-card.workspace .ch-actions-grid,
 .channel-workspace-tile .channel-card.workspace .ch-actions-stack {
   gap: 4px;
+  width: 100%;
 }
 .channel-workspace-tile .channel-card.workspace .ch-action-cell {
   min-width: 0;
+  max-width: 100%;
   font-size: 10px;
-  padding: 6px 5px;
+  padding: 6px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.channel-workspace-tile .channel-card.workspace .ch-card-toolbar .ch-power,
+.channel-workspace-tile .channel-card.workspace .ch-card-toolbar .ch-quick-ptt {
+  flex-shrink: 0;
 }
 .channel-workspace-tile .channel-card.workspace .ch-card-body > .tx-button,
 .channel-workspace-tile .channel-card.workspace .ch-card-body > .live-tx,

@@ -42,8 +42,8 @@ export function ChannelsPanel({ variant = "embedded", onPopOut }: SectionProps) 
     .filter((c): c is UserChannel => !!c);
   const dockedIdSet = new Set(expanded);
 
-  function dockFromRail(id: number) {
-    dockChannel(id);
+  function dockFromRail(id: number, insertAt?: number) {
+    dockChannel(id, insertAt);
     if (!open.includes(id)) {
       setChannelMonitoring(id, true);
     }

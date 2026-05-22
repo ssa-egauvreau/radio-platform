@@ -36,6 +36,8 @@ export const WORKSPACE_MIN_COL_SPAN = 3;
 export const WORKSPACE_MAX_COL_SPAN = 12;
 export const WORKSPACE_MIN_ROW_SPAN = 8;
 export const WORKSPACE_MAX_ROW_SPAN = 36;
+/** Maximum channel panels side-by-side in one row (equal width, full row). */
+export const WORKSPACE_MAX_PER_ROW = 4;
 
 export interface ConsoleState {
   /** Channel ids with live voice connected ("on" / monitoring). */
@@ -237,72 +239,96 @@ function snapWorkspaceColSpan(colSpan: number, width: number): number {
   return Math.max(WORKSPACE_MIN_COL_SPAN, Math.min(WORKSPACE_MAX_COL_SPAN, best));
 }
 
-/** First open grid slot that does not overlap existing tiles. */
-export function defaultWorkspaceTile(
-  layout: Record<string, WorkspaceTileLayout>,
-  preferCol = 0,
-): WorkspaceTileLayout {
-  const colSpan = workspaceColSpanForViewport();
-  const rowSpan = WORKSPACE_DEFAULT_ROW_SPAN;
-  for (let row = 0; row < 80; row++) {
-    for (let col = preferCol; col <= WORKSPACE_COLS - colSpan; col += 3) {
-      const candidate = { col, row, colSpan, rowSpan };
-      const overlaps = Object.values(layout).some((t) => tilesOverlap(t, candidate));
-      if (!overlaps) {
-        return candidate;
-      }
-    }
-    for (let col = 0; col < WORKSPACE_COLS - colSpan; col += 3) {
-      const candidate = { col, row, colSpan, rowSpan };
-      const overlaps = Object.values(layout).some((t) => tilesOverlap(t, candidate));
-      if (!overlaps) {
-        return candidate;
-      }
-    }
-  }
-  return { col: 0, row: 0, colSpan, rowSpan };
-}
-
-function tilesOverlap(a: WorkspaceTileLayout, b: WorkspaceTileLayout): boolean {
-  return (
-    a.col < b.col + b.colSpan &&
-    a.col + a.colSpan > b.col &&
-    a.row < b.row + b.rowSpan &&
-    a.row + a.rowSpan > b.row
-  );
+/**
+ * Assigns equal-width tiles per row (max 4). One channel fills the row; two split 50/50, etc.
+ */
+export function relayoutWorkspace(
+  expandedIds: number[],
+  previous: Record<string, WorkspaceTileLayout>,
+): Record<string, WorkspaceTileLayout> {
+  const out: Record<string, WorkspaceTileLayout> = {};
+  expandedIds.forEach((id, index) => {
+    const row = Math.floor(index / WORKSPACE_MAX_PER_ROW);
+    const indexInRow = index % WORKSPACE_MAX_PER_ROW;
+    const countInRow = Math.min(
+      WORKSPACE_MAX_PER_ROW,
+      expandedIds.length - row * WORKSPACE_MAX_PER_ROW,
+    );
+    const colSpan = Math.floor(WORKSPACE_COLS / countInRow);
+    const prev = previous[layoutKey(id)];
+    out[layoutKey(id)] = {
+      col: indexInRow * colSpan,
+      row,
+      colSpan,
+      rowSpan: prev?.rowSpan ?? WORKSPACE_DEFAULT_ROW_SPAN,
+    };
+  });
+  return out;
 }
 
 export function getWorkspaceTile(id: number): WorkspaceTileLayout {
-  return state.workspaceLayout[layoutKey(id)] ?? defaultWorkspaceTile(state.workspaceLayout);
+  const key = layoutKey(id);
+  if (state.workspaceLayout[key]) {
+    return state.workspaceLayout[key]!;
+  }
+  const index = state.expanded.indexOf(id);
+  if (index < 0) {
+    return {
+      col: 0,
+      row: 0,
+      colSpan: WORKSPACE_COLS,
+      rowSpan: WORKSPACE_DEFAULT_ROW_SPAN,
+    };
+  }
+  return relayoutWorkspace(state.expanded, state.workspaceLayout)[key]!;
 }
 
-export function setWorkspaceTile(id: number, tile: WorkspaceTileLayout, snapWidth = false): void {
+export function setWorkspaceTileRowSpan(id: number, rowSpan: number): void {
   const key = layoutKey(id);
-  const colSpan = snapWidth
-    ? snapWorkspaceColSpan(tile.colSpan, typeof window !== "undefined" ? window.innerWidth : 0)
-    : tile.colSpan;
+  const prev = state.workspaceLayout[key];
+  if (!prev) {
+    return;
+  }
   commit({
     ...state,
-    workspaceLayout: {
+    workspaceLayout: relayoutWorkspace(state.expanded, {
       ...state.workspaceLayout,
       [key]: {
-        col: Math.max(0, Math.min(WORKSPACE_COLS - WORKSPACE_MIN_COL_SPAN, tile.col)),
-        row: Math.max(0, tile.row),
-        colSpan: Math.max(WORKSPACE_MIN_COL_SPAN, Math.min(WORKSPACE_MAX_COL_SPAN, colSpan)),
-        rowSpan: Math.max(WORKSPACE_MIN_ROW_SPAN, Math.min(WORKSPACE_MAX_ROW_SPAN, tile.rowSpan)),
+        ...prev,
+        rowSpan: Math.max(WORKSPACE_MIN_ROW_SPAN, Math.min(WORKSPACE_MAX_ROW_SPAN, rowSpan)),
       },
-    },
+    }),
   });
 }
 
-/** Dock a channel on the workspace (full-size panel on the right). */
-export function dockChannel(id: number): void {
-  const expanded = state.expanded.includes(id) ? state.expanded : [...state.expanded, id];
-  const key = layoutKey(id);
-  const workspaceLayout = { ...state.workspaceLayout };
-  if (!workspaceLayout[key]) {
-    workspaceLayout[key] = defaultWorkspaceTile(workspaceLayout);
+/** Dock a channel on the workspace; optional insert index (left-to-right order). */
+export function dockChannel(id: number, insertAt?: number): void {
+  let expanded = [...state.expanded];
+  if (!expanded.includes(id)) {
+    const at =
+      typeof insertAt === "number" && insertAt >= 0
+        ? Math.min(insertAt, expanded.length)
+        : expanded.length;
+    expanded.splice(at, 0, id);
   }
+  const workspaceLayout = relayoutWorkspace(expanded, state.workspaceLayout);
+  commit({ ...state, expanded, workspaceLayout });
+}
+
+/** Reorder docked channels (e.g. drag left/right); widths reflow to fill each row. */
+export function reorderDockedChannels(orderedIds: number[]): void {
+  const expanded: number[] = [];
+  for (const id of orderedIds) {
+    if (state.expanded.includes(id) && !expanded.includes(id)) {
+      expanded.push(id);
+    }
+  }
+  for (const id of state.expanded) {
+    if (!expanded.includes(id)) {
+      expanded.push(id);
+    }
+  }
+  const workspaceLayout = relayoutWorkspace(expanded, state.workspaceLayout);
   commit({ ...state, expanded, workspaceLayout });
 }
 
@@ -311,10 +337,9 @@ export function undockChannel(id: number): void {
   if (!state.expanded.includes(id)) {
     return;
   }
-  const key = layoutKey(id);
-  const workspaceLayout = { ...state.workspaceLayout };
-  delete workspaceLayout[key];
-  commit({ ...state, expanded: state.expanded.filter((x) => x !== id), workspaceLayout });
+  const expanded = state.expanded.filter((x) => x !== id);
+  const workspaceLayout = relayoutWorkspace(expanded, state.workspaceLayout);
+  commit({ ...state, expanded, workspaceLayout });
 }
 
 /** Toggle workspace dock (full panel on the right). */
@@ -330,14 +355,10 @@ export function toggleChannelExpanded(id: number): void {
 export function focusChannel(id: number): void {
   const open = state.open.includes(id) ? state.open : [...state.open, id];
   let expanded = state.expanded;
-  let workspaceLayout = state.workspaceLayout;
   if (!expanded.includes(id)) {
     expanded = [...expanded, id];
-    const key = layoutKey(id);
-    if (!workspaceLayout[key]) {
-      workspaceLayout = { ...workspaceLayout, [key]: defaultWorkspaceTile(workspaceLayout) };
-    }
   }
+  const workspaceLayout = relayoutWorkspace(expanded, state.workspaceLayout);
   commit({ ...state, open, expanded, workspaceLayout, primary: id });
 }
 
@@ -357,16 +378,11 @@ export function reconcileChannels(availableIds: number[]): void {
   const allowed = new Set(availableIds);
   const open = state.open.filter((id) => allowed.has(id));
   const expanded = state.expanded.filter((id) => allowed.has(id));
-  const workspaceLayout: Record<string, WorkspaceTileLayout> = {};
-  for (const [key, tile] of Object.entries(state.workspaceLayout)) {
-    if (allowed.has(Number(key))) {
-      workspaceLayout[key] = tile;
-    }
-  }
+  const workspaceLayout = relayoutWorkspace(expanded, state.workspaceLayout);
   if (
     open.length === state.open.length &&
     expanded.length === state.expanded.length &&
-    Object.keys(workspaceLayout).length === Object.keys(state.workspaceLayout).length
+    JSON.stringify(workspaceLayout) === JSON.stringify(state.workspaceLayout)
   ) {
     return;
   }
