@@ -109,9 +109,14 @@ class InboundVoicePlayer(
                         // USAGE_MEDIA, not USAGE_VOICE_COMMUNICATION: the voice-communication
                         // route is inaudible on the loudspeaker of many rugged LTE handsets,
                         // which left received voice silent. The media path is reliably audible.
+                        //
+                        // CONTENT_TYPE_MUSIC, not _SPEECH: a SPEECH content type makes some OEM
+                        // audio HALs run speech post-processing (noise reduction) on the OUTPUT,
+                        // which mangled received radio audio. MUSIC opts the received stream out of
+                        // that device-side enhancement; the mic-side NoiseSuppressor is unaffected.
                         AudioAttributes.Builder()
                             .setUsage(AudioAttributes.USAGE_MEDIA)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                            .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
                             .build(),
                     )
                     .setAudioFormat(
