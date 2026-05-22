@@ -13,8 +13,6 @@ export function buildPrecachePhraseList(): string[] {
     "10-4",
     "Standby",
     "Negative",
-    "Affirm",
-    "That's affirm",
     "Received",
     "I copy",
     "Roger",
@@ -28,6 +26,10 @@ export function buildPrecachePhraseList(): string[] {
 
   for (const u of RADIO_UNITS) {
     phrases.add(`${u}, 913`);
+  }
+
+  for (const u of RADIO_UNITS) {
+    phrases.add(`${u}, 10-2`);
   }
 
   for (const u of RADIO_UNITS) {

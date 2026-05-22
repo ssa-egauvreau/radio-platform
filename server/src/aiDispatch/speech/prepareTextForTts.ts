@@ -51,6 +51,31 @@ function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * Drops leading "Affirm" / "That's affirm" and redundant "you're" before status answers.
+ * e.g. "Affirm, you're 10-2." → "10-2."
+ */
+export function stripRedundantAffirm(text: string): string {
+  let out = text.trim();
+  if (!out) {
+    return out;
+  }
+  for (let pass = 0; pass < 4; pass++) {
+    const prev = out;
+    out = out.replace(/^(?:that\s+is|that'?s)\s+affirm[,.\s]+/i, "");
+    out = out.replace(/^affirm[,.\s]+/i, "");
+    out = out.trim();
+    if (out === prev) {
+      break;
+    }
+  }
+  out = out.replace(
+    /^you(?:'re| are)\s+(?=10-|copy\b|10-4\b|negative\b|standby\b|received\b|\d)/i,
+    "",
+  );
+  return out.trim();
+}
+
 function replaceWordBounded(text: string, pattern: string, replacement: string, flags = "gi"): string {
   const re = new RegExp(`\\b${escapeRegExp(pattern)}\\b`, flags);
   return text.replace(re, replacement);
@@ -244,7 +269,8 @@ function addSpeechPacing(text: string): string {
 
 /** Full pipeline before ElevenLabs (matches legacy 10-8 dispatcher server). */
 export function prepareTextForTts(text: string): string {
-  let out = normalizeUnitWordForSpeech(text);
+  let out = stripRedundantAffirm(text);
+  out = normalizeUnitWordForSpeech(out);
   out = expandUSStatesForSpeech(out);
   out = spokenizeEmbeddedAddresses(out);
   out = expandAbbreviationsForSpeech(out);
