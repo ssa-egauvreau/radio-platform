@@ -27,6 +27,11 @@ Set these on the **safeT PTT** service in Railway (not in the Integrations page)
 | `AI_DISPATCH_SYSTEM_PROMPT` | No | **Fallback** dispatcher prompt if the agency leaves Integrations prompt empty |
 | `AI_DISPATCH_UNIT_ID` | No | Unit id on the radio when AI keys up (default `AI-DISPATCH`) |
 | `AI_DISPATCH_YIELDS_DEFAULT` | No | Default `1` — AI yields to live units on a channel |
+| `KB_ENABLED` | No | Knowledge-base retrieval on/off. Default **on**; set `off` to disable RAG. |
+| `KB_EMBED_MODEL` | No | transformers.js embedding model (default `Xenova/all-MiniLM-L6-v2`, 384-dim). |
+| `KB_EMBED_DTYPE` | No | Embedding quantization (default `q8`; same memory trade-off as `WHISPER_DTYPE`). |
+| `KB_RETRIEVE_TOP_K` | No | Max passages injected per transmission (default `5`). |
+| `KB_MAX_DOC_BYTES` | No | Upload size cap (default `10mb`). |
 
 Example:
 
@@ -88,10 +93,32 @@ Server logs are tagged `[ai-dispatch]`.
 
 ---
 
+## Knowledge base (RAG) — Admin → Knowledge Base
+
+Give the AI dispatcher agency reference material — **post orders, route sheets, policies** — without stuffing it all into the cached system prompt.
+
+**Why not just put it in the prompt?** Prompt caching only makes *re-sending* the same prompt cheaper; it does not raise the context ceiling or help the model find the one relevant paragraph. A handful of documents already overflows it. Instead, the knowledge base uses **retrieval-augmented generation (RAG)**:
+
+1. **Upload (Admin → Knowledge Base):** an admin uploads a PDF, tagging it with a category (post order / route sheet / policy / other) and an optional **property code**.
+2. **Index (once, in the background):** the server extracts the PDF text (`pdfjs-dist`), splits it into ~800-character passages, and embeds each one into a 384-dim vector using a local transformers.js model (no per-token API cost). Vectors are stored in Postgres. The document shows **Processing → Ready** (with a chunk count) in the admin table.
+3. **Retrieve (at dispatch time):** the transmission transcript is embedded and compared (cosine similarity, in Node) against that agency's passages. Only the top few matches are injected — into the **user turn, not the cached system prompt**, so the prompt cache hit rate is unaffected. A passage tagged to a property mentioned on the air is boosted.
+
+This is the practical meaning of the AI "learning" the agency's material: the corpus can grow to hundreds of documents while each LLM call stays small. **Fine-tuning is not used** (the hosted Claude/OpenAI models are not fine-tunable this way, and it would go stale on every document edit).
+
+**Graceful degradation:** if `KB_ENABLED=off`, the embedding model can't load (Railway OOM — same risk as Whisper), or no passage is relevant, retrieval returns nothing and the dispatcher behaves exactly as before. Scanned-image PDFs with no extractable text are marked **Failed** (OCR is out of scope); re-upload a text PDF.
+
+**Changing the embedding model:** each document records the `KB_EMBED_MODEL` it was indexed with. If you change that env var, existing documents are flagged **Re-index needed** in the admin table and are skipped at dispatch time (their old vectors live in a different space) until you re-index them.
+
+> Scope today: **PDF only**, in-Node cosine search (no `pgvector`), per-agency isolation. The retrieval interface is narrow so `pgvector` or a hosted embedder can replace the in-Node path later without touching callers.
+
+---
+
 ## Database tables
 
 - `agency_integrations` — `(agency_id, integration_key)` → value
 - `channel_ai_dispatch` — `(agency_id, channel_name)` → `enabled`, `yields_to_units`
+- `agency_kb_documents` — uploaded knowledge-base PDFs (metadata, original bytes, status)
+- `agency_kb_chunks` — embedded passages (`embedding REAL[]`) retrieved at dispatch time
 
 ---
 

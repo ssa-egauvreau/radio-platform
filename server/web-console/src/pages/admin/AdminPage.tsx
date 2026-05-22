@@ -8,6 +8,7 @@ import { ToneOutsPanel } from "./ToneOutsPanel";
 import { BrandingPanel } from "./BrandingPanel";
 import { AuditPanel } from "./AuditPanel";
 import { IntegrationsPanel } from "./IntegrationsPanel";
+import { KnowledgeBasePanel } from "./KnowledgeBasePanel";
 import { AndroidAppPanel } from "./AndroidAppPanel";
 
 type TabId =
@@ -15,6 +16,7 @@ type TabId =
   | "channels"
   | "aliases"
   | "integrations"
+  | "knowledge"
   | "android"
   | "sounds"
   | "soundboard"
@@ -26,6 +28,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "channels", label: "Channels" },
   { id: "aliases", label: "Unit Aliases" },
   { id: "integrations", label: "Integrations" },
+  { id: "knowledge", label: "Knowledge Base" },
   { id: "android", label: "Android App" },
   { id: "sounds", label: "Sounds" },
   { id: "soundboard", label: "Soundboard" },
@@ -57,6 +60,7 @@ export function AdminPage() {
           {tab === "channels" && <ChannelsPanel />}
           {tab === "aliases" && <UnitAliasesPanel />}
           {tab === "integrations" && <IntegrationsPanel />}
+          {tab === "knowledge" && <KnowledgeBasePanel />}
           {tab === "android" && <AndroidAppPanel />}
           {tab === "sounds" && <SoundsPanel />}
           {tab === "soundboard" && <ToneOutsPanel />}

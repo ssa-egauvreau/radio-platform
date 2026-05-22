@@ -32,6 +32,8 @@ import {
   stopTen33MarkerLoop,
 } from "./ten33Marker.js";
 import { shouldSkipDuplicateAiDispatch } from "./dedupe.js";
+import { retrieveKnowledge } from "./knowledgeBase/retrieve.js";
+import { lookupSsaProperty } from "./ssaProperties.js";
 import { listTen8ActiveIncidents } from "../ten8/store.js";
 import {
   ten8AddComment,
@@ -138,6 +140,24 @@ function isEmergencyClear(
 
 function defaultTen33Callout(channelName: string): string {
   return `All units 10-33 on ${channelName}, all units 10-33 on ${channelName}.`;
+}
+
+/**
+ * First 3-5 digit token in a transcript that matches a known SSA property code,
+ * used to bias knowledge-base retrieval toward documents tagged to that property.
+ * Returns null when no token resolves.
+ */
+function detectPropertyCode(transcript: string): string | null {
+  const tokens = transcript.match(/\b\d{3,5}\b/g);
+  if (!tokens) {
+    return null;
+  }
+  for (const token of tokens) {
+    if (lookupSsaProperty(token)) {
+      return token;
+    }
+  }
+  return null;
 }
 
 /** When the model returns chitchat with no script but the officer asked a question. */
@@ -370,11 +390,15 @@ async function processTransmission(transmissionId: number): Promise<void> {
 
     const emergencyRegex = detectEmergencyCodeFromTranscript(transcript);
     const systemPrompt = await resolveAiDispatchSystemPrompt(tx.agency_id);
+    const knowledgeContext = await retrieveKnowledge(tx.agency_id, transcript, {
+      propertyCode: detectPropertyCode(transcript),
+    });
     parsed = await parseDispatcherTransmission({
       systemPrompt,
       unitId,
       channelName: tx.channel_name,
       transcript,
+      knowledgeContext,
     });
 
     let activeIncidents: Ten8ActiveIncident[] = [];

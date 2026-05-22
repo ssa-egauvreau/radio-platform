@@ -418,6 +418,53 @@ export async function ensureSchema(): Promise<void> {
   `);
   await p.query(`ALTER TABLE ai_dispatch_log ADD COLUMN IF NOT EXISTS outcome TEXT;`);
 
+  // AI dispatcher knowledge base — admin-uploaded reference documents (post
+  // orders, route sheets, policies). Original PDF kept in `content`; the
+  // extracted text is split into embedded chunks (agency_kb_chunks) that the
+  // dispatcher retrieves from at call time (RAG) instead of stuffing every
+  // document into the cached system prompt.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS agency_kb_documents (
+      id SERIAL PRIMARY KEY,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'other',
+      property_code TEXT,
+      filename TEXT,
+      mime TEXT NOT NULL DEFAULT 'application/pdf',
+      byte_size INT NOT NULL DEFAULT 0,
+      content BYTEA NOT NULL,
+      extracted_text TEXT,
+      status TEXT NOT NULL DEFAULT 'processing',
+      error TEXT,
+      chunk_count INT NOT NULL DEFAULT 0,
+      uploaded_by_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_kb_docs_agency ON agency_kb_documents (agency_id, created_at DESC);
+  `);
+  // The embedding model used to index this document's chunks. A model swap
+  // leaves old vectors at a different dimension/space, so retrieval ignores
+  // mismatched chunks and the admin UI flags the document for re-indexing.
+  await p.query(`ALTER TABLE agency_kb_documents ADD COLUMN IF NOT EXISTS embed_model TEXT;`);
+
+  // One embedded passage of a knowledge-base document. Similarity search runs in
+  // Node (cosine over the REAL[] vector) — no pgvector extension required at this
+  // scale. Chunks cascade-delete with their document.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS agency_kb_chunks (
+      id BIGSERIAL PRIMARY KEY,
+      document_id INT NOT NULL REFERENCES agency_kb_documents(id) ON DELETE CASCADE,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      chunk_index INT NOT NULL,
+      content TEXT NOT NULL,
+      embedding REAL[] NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_kb_chunks_agency ON agency_kb_chunks (agency_id);
+  `);
+
   await p.query(`
     CREATE TABLE IF NOT EXISTS ten8_incidents (
       agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,

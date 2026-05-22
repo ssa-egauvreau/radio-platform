@@ -23,7 +23,12 @@ import { backfillAiDispatchActivityLog, configureAiDispatchEngine } from "./aiDi
 import { getAiDispatchPlatformStatus } from "./aiDispatch/platformConfig.js";
 import { scheduleAllAgencyTtsPrecache } from "./aiDispatch/ttsPrecache.js";
 import { getTranscriptionDiagnostics } from "./transcribe.js";
+import { getEmbeddingDiagnostics, warmEmbeddings } from "./aiDispatch/knowledgeBase/embeddings.js";
+import { recoverPendingKbIngests } from "./aiDispatch/knowledgeBase/ingest.js";
 import { startBridgeWorker } from "./bridgeWorker.js";
+
+/** Knowledge-base retrieval is on unless explicitly disabled (mirrors KB_ENABLED in retrieve.ts). */
+const KB_ENABLED = (process.env.KB_ENABLED ?? "on").trim().toLowerCase() !== "off";
 
 const app = express();
 // Tiny info-leak (and a few free bytes per response) — Express ships this header by default.
@@ -143,6 +148,7 @@ app.get("/health", (_req, res) => {
       llm_configured: ai.llmConfigured,
       provider: ai.llmProvider,
     },
+    knowledge_base: { enabled: KB_ENABLED, embeddings: getEmbeddingDiagnostics() },
   });
 });
 
@@ -284,6 +290,13 @@ async function main(): Promise<void> {
   startRecorder();
   void recoverPendingTranscriptions();
   void initServerImbe();
+  // Load the KB embedding model in the background so the first retrieval at
+  // dispatch time isn't stuck waiting on a cold load, and re-queue any documents
+  // left mid-ingest by a previous crash/restart.
+  if (KB_ENABLED) {
+    warmEmbeddings();
+    void recoverPendingKbIngests();
+  }
   void (async () => {
     try {
       const { warmAiDispatchChannelCache } = await import("./aiDispatch/channelCache.js");
