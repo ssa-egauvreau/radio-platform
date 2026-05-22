@@ -21,6 +21,10 @@ type EmbedPipeline = (
   options?: { pooling?: "mean" | "cls" | "none"; normalize?: boolean },
 ) => Promise<{ tolist: () => number[][] }>;
 
+interface EmbedTextsOptions {
+  signal?: AbortSignal;
+}
+
 let pipelineFn: EmbedPipeline | null = null;
 let loadPromise: Promise<EmbedPipeline | null> | null = null;
 let state: "idle" | "loading" | "ready" | "broken" = "idle";
@@ -114,25 +118,40 @@ export function warmEmbeddings(): void {
  * Processes in small batches to bound peak memory. Returns null when the model
  * cannot be loaded so callers degrade gracefully.
  */
-export async function embedTexts(texts: string[]): Promise<number[][] | null> {
+export async function embedTexts(
+  texts: string[],
+  options: EmbedTextsOptions = {},
+): Promise<number[][] | null> {
   if (texts.length === 0) {
     return [];
   }
+  if (options.signal?.aborted) {
+    return null;
+  }
   const run = await ensurePipeline();
-  if (!run) {
+  if (!run || options.signal?.aborted) {
     return null;
   }
   try {
     const vectors: number[][] = [];
     for (let i = 0; i < texts.length; i += BATCH_SIZE) {
+      if (options.signal?.aborted) {
+        return null;
+      }
       const batch = texts.slice(i, i + BATCH_SIZE);
       const output = await run(batch, { pooling: "mean", normalize: true });
+      if (options.signal?.aborted) {
+        return null;
+      }
       for (const vec of output.tolist()) {
         vectors.push(vec);
       }
     }
     return vectors;
   } catch (error) {
+    if (options.signal?.aborted) {
+      return null;
+    }
     console.warn("[kb] embedding inference failed", error);
     return null;
   }

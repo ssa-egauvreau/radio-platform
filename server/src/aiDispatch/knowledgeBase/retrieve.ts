@@ -23,6 +23,11 @@ const PROPERTY_BOOST = Number(process.env.KB_PROPERTY_BOOST) || 0.15;
 /** Cap injected characters so a big corpus can't blow up the (uncached) user turn. */
 const MAX_CONTEXT_CHARS = Number(process.env.KB_MAX_CONTEXT_CHARS) || 4000;
 
+// transformers.js does not expose reliable cancellation once an ONNX forward pass
+// starts, so retrieval embeds are gated to one in-flight query. Timed-out cold
+// loads can then be aborted before inference instead of piling up stale work.
+let retrievalEmbedInFlight: Promise<number[][] | null> | null = null;
+
 const CATEGORY_LABELS: Record<string, string> = {
   post_order: "Post order",
   route_sheet: "Route sheet",
@@ -101,6 +106,22 @@ export function formatKnowledgeContext(chunks: RetrievedChunk[]): string {
   return lines.join("\n\n");
 }
 
+function startRetrievalEmbed(query: string, signal: AbortSignal): Promise<number[][] | null> | null {
+  if (retrievalEmbedInFlight) {
+    console.warn("[kb] retrieval query embed already in flight; skipping this request.");
+    return null;
+  }
+
+  let trackedPromise: Promise<number[][] | null>;
+  trackedPromise = embedTexts([query], { signal }).finally(() => {
+    if (retrievalEmbedInFlight === trackedPromise) {
+      retrievalEmbedInFlight = null;
+    }
+  });
+  retrievalEmbedInFlight = trackedPromise;
+  return trackedPromise;
+}
+
 /**
  * Returns relevant agency knowledge for a transcript as a context string, or ""
  * when KB is disabled, the model can't load, or nothing scores above threshold.
@@ -122,10 +143,26 @@ export async function retrieveKnowledge(
     if (chunks.length === 0) {
       return "";
     }
+    const abortController = new AbortController();
+    const embedPromise = startRetrievalEmbed(query, abortController.signal);
+    if (!embedPromise) {
+      return "";
+    }
+    let timer: NodeJS.Timeout | undefined;
     const embedded = await Promise.race([
-      embedTexts([query]),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), RETRIEVE_TIMEOUT_MS)),
-    ]);
+      embedPromise,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          abortController.abort();
+          console.warn(`[kb] retrieval query embed exceeded ${RETRIEVE_TIMEOUT_MS}ms; skipping.`);
+          resolve(null);
+        }, RETRIEVE_TIMEOUT_MS);
+      }),
+    ]).finally(() => {
+      if (timer) {
+        clearTimeout(timer);
+      }
+    });
     if (!embedded || !embedded[0]) {
       return "";
     }
