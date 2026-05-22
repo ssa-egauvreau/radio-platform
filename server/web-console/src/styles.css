@@ -766,16 +766,42 @@ code.mono {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 10px 6px;
-  border-bottom: 1px solid var(--border);
-  background: color-mix(in srgb, var(--bg-input) 40%, var(--bg-raised));
-  border-radius: 5px 5px 0 0;
+  padding: 8px 10px;
   min-width: 0;
+  border: 1px solid var(--text);
+  border-radius: 5px 5px 0 0;
+  background: var(--text);
+  color: var(--bg);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--bg) 18%, transparent);
+}
+.channel-card.workspace .ch-card-title-row.has-channel-color {
+  border-color: color-mix(in srgb, currentColor 55%, var(--text));
+  color: #fff;
+}
+.channel-card.workspace .ch-card-title-row .ch-card-name,
+.channel-card.workspace .ch-card-title-row .ch-card-name svg {
+  color: inherit;
+}
+.channel-card.workspace .ch-card-title-row .ch-disclosure {
+  color: inherit;
+  opacity: 0.9;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: 4px;
+}
+.channel-card.workspace .ch-card-title-row .ch-disclosure:hover {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+}
+.channel-card.workspace .ch-card-title-row .chan-sim-tag {
+  color: inherit;
+  border-color: color-mix(in srgb, currentColor 40%, transparent);
+  background: color-mix(in srgb, #000 18%, transparent);
 }
 .channel-card.workspace .ch-card-title-row .ch-card-name {
   flex: 1 1 auto;
   min-width: 0;
   font-size: 13px;
+  font-weight: 700;
 }
 .channel-card.workspace .ch-card-title-row .ch-card-label {
   white-space: normal;

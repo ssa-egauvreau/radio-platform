@@ -426,7 +426,14 @@ export function ChannelPanel({
       <div className={`ch-card-head${workspace ? " workspace-head" : ""}`}>
         {workspace ? (
           <>
-            <div className="ch-card-title-row">
+            <div
+              className={`ch-card-title-row${channel.color ? " has-channel-color" : ""}`}
+              style={
+                channel.color
+                  ? { background: channel.color, color: "#fff", borderColor: channel.color }
+                  : undefined
+              }
+            >
               <button
                 type="button"
                 className="ch-disclosure"
