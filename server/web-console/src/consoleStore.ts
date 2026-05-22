@@ -534,18 +534,18 @@ export function workspaceColSpanForViewport(width = typeof window !== "undefined
   return WORKSPACE_DEFAULT_COL_SPAN;
 }
 
-/** Allowed width snaps for manual resize at the current viewport. */
-export function workspaceColSpanSnaps(width = typeof window !== "undefined" ? window.innerWidth : 0): number[] {
-  if (width >= WORKSPACE_BREAK_4_WIDE) {
-    return [3, 4, 6];
-  }
-  if (width >= WORKSPACE_BREAK_3_WIDE) {
-    return [3, 4, 6];
-  }
-  return [4, 6, 12];
+/** Allowed width snaps for manual resize (stack → half → main → full). */
+export function workspaceColSpanSnaps(_width = typeof window !== "undefined" ? window.innerWidth : 0): number[] {
+  return [
+    WORKSPACE_STACK_COL_SPAN,
+    WORKSPACE_HALF_COL_SPAN,
+    WORKSPACE_MAIN_COL_SPAN,
+    WORKSPACE_COLS,
+  ];
 }
 
-function snapWorkspaceColSpan(colSpan: number, width: number): number {
+/** Snap width to allowed column spans for the current viewport. */
+export function snapWorkspaceColSpan(colSpan: number, width?: number): number {
   const snaps = workspaceColSpanSnaps(width);
   let best = snaps[0]!;
   let bestDist = Math.abs(colSpan - best);
@@ -888,6 +888,38 @@ export function setWorkspaceTileRowSpan(id: number, rowSpan: number): void {
     [key]: {
       ...prev,
       rowSpan: nextSpan,
+    },
+  };
+  const workspaceLayout = packWorkspaceLayout(state.expanded, merged, { fillPrimary: false });
+  if (workspaceLayoutEqual(workspaceLayout, state.workspaceLayout)) {
+    return;
+  }
+  commit({ ...state, workspaceLayout });
+}
+
+export function setWorkspaceTileColSpan(id: number, colSpan: number): void {
+  if (!state.expanded.includes(id)) {
+    return;
+  }
+  const key = layoutKey(id);
+  const prev =
+    state.workspaceLayout[key] ??
+    packWorkspaceLayout(state.expanded, state.workspaceLayout)[key];
+  if (!prev) {
+    return;
+  }
+  const viewport = typeof window !== "undefined" ? window.innerWidth : 0;
+  const nextColSpan = snapWorkspaceColSpan(colSpan, viewport);
+  const nextCol = Math.max(0, Math.min(prev.col, WORKSPACE_COLS - nextColSpan));
+  if (prev.colSpan === nextColSpan && prev.col === nextCol) {
+    return;
+  }
+  const merged = {
+    ...state.workspaceLayout,
+    [key]: {
+      ...prev,
+      col: nextCol,
+      colSpan: nextColSpan,
     },
   };
   const workspaceLayout = packWorkspaceLayout(state.expanded, merged, { fillPrimary: false });

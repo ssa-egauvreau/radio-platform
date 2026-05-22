@@ -2,15 +2,17 @@ import { useCallback, useMemo, useRef, useState, type DragEvent, type PointerEve
 import type { UserChannel } from "../api";
 import { ChannelPanel } from "./ChannelPanel";
 import {
+  WORKSPACE_COLS,
   WORKSPACE_GRID_GAP_PX,
   WORKSPACE_MAIN_COL_SPAN,
   WORKSPACE_ROW_PX,
   WORKSPACE_STACK_COL_START,
-  cycleWorkspaceTileWidth,
   getWorkspaceTile,
   placeWorkspaceTileBeside,
   reorderDockedChannels,
+  setWorkspaceTileColSpan,
   setWorkspaceTileRowSpan,
+  snapWorkspaceColSpan,
   snapWorkspaceRowSpan,
   stackWorkspaceTileBelow,
   useConsoleState,
@@ -121,7 +123,10 @@ export function ChannelWorkspace({
   const rootRef = useRef<HTMLElement | null>(null);
   const [dockDragOver, setDockDragOver] = useState(false);
   const [resizeChannelId, setResizeChannelId] = useState<number | null>(null);
-  const [resizePreviewRowSpan, setResizePreviewRowSpan] = useState<number | null>(null);
+  const [resizePreview, setResizePreview] = useState<{
+    rowSpan: number;
+    colSpan: number;
+  } | null>(null);
   const [dragOverChannelId, setDragOverChannelId] = useState<number | null>(null);
   const [dropZone, setDropZone] = useState<WorkspaceDropZone | null>(null);
 
@@ -170,23 +175,51 @@ export function ChannelWorkspace({
     [channelIds, onDockFromRail],
   );
 
-  function beginResizeHeight(e: PointerEvent<HTMLButtonElement>, channelId: number) {
+  function gridColWidthPx(): number {
+    const root = rootRef.current;
+    if (!root) {
+      return 40;
+    }
+    const style = getComputedStyle(root);
+    const gap = Number.parseFloat(style.columnGap || "6") || 6;
+    const pad =
+      (Number.parseFloat(style.paddingLeft || "0") || 0) +
+      (Number.parseFloat(style.paddingRight || "0") || 0);
+    return (root.clientWidth - pad - gap * (WORKSPACE_COLS - 1)) / WORKSPACE_COLS;
+  }
+
+  function beginResize(
+    e: PointerEvent<HTMLButtonElement>,
+    channelId: number,
+    axis: "height" | "width" | "both",
+  ) {
     e.preventDefault();
     e.stopPropagation();
-    const origin = getWorkspaceTile(channelId).rowSpan;
+    const origin = getWorkspaceTile(channelId);
+    const startX = e.clientX;
     const startY = e.clientY;
+    const colPx = gridColWidthPx();
     setResizeChannelId(channelId);
-    setResizePreviewRowSpan(origin);
-    let liveSpan = origin;
+    setResizePreview({ rowSpan: origin.rowSpan, colSpan: origin.colSpan });
+    let liveRowSpan = origin.rowSpan;
+    let liveColSpan = origin.colSpan;
+
     const onMove = (ev: globalThis.PointerEvent) => {
-      const deltaRow = Math.round((ev.clientY - startY) / WORKSPACE_ROW_PX);
-      liveSpan = snapWorkspaceRowSpan(origin + deltaRow);
-      setResizePreviewRowSpan(liveSpan);
+      if (axis === "height" || axis === "both") {
+        const deltaRow = Math.round((ev.clientY - startY) / WORKSPACE_ROW_PX);
+        liveRowSpan = snapWorkspaceRowSpan(origin.rowSpan + deltaRow);
+      }
+      if (axis === "width" || axis === "both") {
+        const deltaCol = Math.round((ev.clientX - startX) / colPx);
+        liveColSpan = snapWorkspaceColSpan(origin.colSpan + deltaCol);
+      }
+      setResizePreview({ rowSpan: liveRowSpan, colSpan: liveColSpan });
     };
     const onUp = () => {
-      setWorkspaceTileRowSpan(channelId, liveSpan);
+      setWorkspaceTileRowSpan(channelId, liveRowSpan);
+      setWorkspaceTileColSpan(channelId, liveColSpan);
       setResizeChannelId(null);
-      setResizePreviewRowSpan(null);
+      setResizePreview(null);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
     };
@@ -270,27 +303,25 @@ export function ChannelWorkspace({
         <div className="channel-workspace-empty">
           <p>Drag channels here from the list on the left.</p>
           <p className="muted">
-            Large panel on the left · smaller glass panels stack on the right · drag ⋮⋮ to move · drop on
-            bottom edge of a tile to stack · double-click ⋮⋮ for width · drag bottom edge for height
+            Drag ⋮⋮ to move · drop on bottom of a tile to stack · drag bottom or right edge to resize ·
+            drag corner for both
           </p>
         </div>
       ) : (
         dockedChannels.map((channel) => {
           const tile = tilesById.get(channel.id) ?? getWorkspaceTile(channel.id);
-          const rowSpan =
-            resizeChannelId === channel.id && resizePreviewRowSpan !== null
-              ? resizePreviewRowSpan
-              : tile.rowSpan;
+          const resizing = resizeChannelId === channel.id && resizePreview !== null;
+          const rowSpan = resizing ? resizePreview.rowSpan : tile.rowSpan;
+          const colSpan = resizing ? resizePreview.colSpan : tile.colSpan;
           const monitoring = open.includes(channel.id);
           const tileMinHeight =
             rowSpan * WORKSPACE_ROW_PX + Math.max(0, rowSpan - 1) * WORKSPACE_GRID_GAP_PX;
-          const isMain =
-            tile.colSpan >= WORKSPACE_MAIN_COL_SPAN || tile.colSpan >= 12;
+          const isMain = colSpan >= WORKSPACE_MAIN_COL_SPAN || colSpan >= 12;
           const isStackLane = tile.col >= WORKSPACE_STACK_COL_START;
           const stackLayer = isStackLane ? stackLayerInColumn(channel.id, tile, tilesById) : 0;
           const widthClass = isMain
             ? " workspace-tile-main"
-            : tile.colSpan >= 6
+            : colSpan >= 6
               ? " workspace-tile-half"
               : " workspace-tile-compact";
           const dropClass =
@@ -316,7 +347,7 @@ export function ChannelWorkspace({
                 resizeChannelId === channel.id ? " resizing" : ""
               }${dragOverChannelId === channel.id ? " drag-over" : ""}${dropClass}`}
               style={{
-                gridColumn: `${tile.col + 1} / span ${tile.colSpan}`,
+                gridColumn: `${tile.col + 1} / span ${colSpan}`,
                 gridRow: `${tile.row + 1} / span ${rowSpan}`,
                 minHeight: tileMinHeight,
                 ...stackStyle,
@@ -333,14 +364,8 @@ export function ChannelWorkspace({
                 className="channel-workspace-drag-handle"
                 draggable
                 onDragStart={(e) => onTileDragStart(e, channel.id)}
-                onDoubleClick={() => cycleWorkspaceTileWidth(channel.id)}
-                title="Drag to move · drop on tile edges to stack or place beside · double-click to change width"
+                title="Drag to move · drop on tile edges to stack"
               >
-                <span className="workspace-window-dots" aria-hidden>
-                  <span className="workspace-dot workspace-dot-close" />
-                  <span className="workspace-dot workspace-dot-min" />
-                  <span className="workspace-dot workspace-dot-grow" />
-                </span>
                 <span className="channel-workspace-drag-grip" aria-hidden>
                   ⋮⋮
                 </span>
@@ -363,9 +388,21 @@ export function ChannelWorkspace({
               </div>
               <button
                 type="button"
+                className="channel-workspace-resize-w"
+                aria-label="Resize width"
+                onPointerDown={(e) => beginResize(e, channel.id, "width")}
+              />
+              <button
+                type="button"
                 className="channel-workspace-resize-h"
-                aria-label="Resize height (snaps to each control section)"
-                onPointerDown={(e) => beginResizeHeight(e, channel.id)}
+                aria-label="Resize height"
+                onPointerDown={(e) => beginResize(e, channel.id, "height")}
+              />
+              <button
+                type="button"
+                className="channel-workspace-resize-corner"
+                aria-label="Resize width and height"
+                onPointerDown={(e) => beginResize(e, channel.id, "both")}
               />
             </div>
           );

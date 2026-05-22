@@ -952,27 +952,6 @@ code.mono {
   user-select: none;
   -webkit-user-drag: element;
 }
-.workspace-window-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  flex-shrink: 0;
-}
-.workspace-dot {
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  box-shadow: inset 0 -1px 0 color-mix(in srgb, #000 25%, transparent);
-}
-.workspace-dot-close {
-  background: #ff6b6b;
-}
-.workspace-dot-min {
-  background: #facc15;
-}
-.workspace-dot-grow {
-  background: #4ade80;
-}
 :root[data-theme="day"] .channel-workspace-tile {
   background: color-mix(in srgb, var(--bg-raised) 78%, transparent);
   border-color: color-mix(in srgb, #fff 65%, var(--border));
@@ -1117,6 +1096,44 @@ code.mono {
 }
 .channel-workspace-resize-h:hover {
   background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.channel-workspace-resize-w {
+  position: absolute;
+  z-index: 12;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: ew-resize;
+  touch-action: none;
+}
+.channel-workspace-tile.resizing .channel-workspace-resize-w {
+  background: color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.channel-workspace-resize-w:hover {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.channel-workspace-resize-corner {
+  position: absolute;
+  z-index: 13;
+  right: 0;
+  bottom: 0;
+  width: 18px;
+  height: 18px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+.channel-workspace-tile.resizing .channel-workspace-resize-corner {
+  background: color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.channel-workspace-resize-corner:hover {
+  background: color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 .live-control-embed {
