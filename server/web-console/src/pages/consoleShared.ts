@@ -5,7 +5,7 @@ import type { VoiceState } from "../voice/voiceClient";
 
 export const PERMISSION_LABEL: Record<Permission, string> = {
   talk_priority: "Talk priority",
-  talk: "Talk",
+  talk: "Normal",
   listen_only: "Listen only",
 };
 

@@ -1594,6 +1594,17 @@ code.mono {
   text-overflow: ellipsis;
   white-space: nowrap;
   vertical-align: bottom;
+  border-bottom: 2px solid var(--border);
+}
+.users-assignments-table .channel-col-head.has-channel-color {
+  font-weight: 700;
+  text-shadow: 0 1px 2px color-mix(in srgb, #000 35%, transparent);
+}
+.users-assignments-table .channel-assign-cell {
+  vertical-align: middle;
+}
+.users-assignments-table .channel-assign-cell.has-channel-color select {
+  background: color-mix(in srgb, var(--bg-input) 88%, transparent);
 }
 .users-assignments-table select {
   font-size: 11px;

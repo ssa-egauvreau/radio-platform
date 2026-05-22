@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import {
   api,
   describeError,
@@ -15,9 +15,9 @@ const ROLES: Role[] = ["admin", "dispatcher", "radio"];
 type CellValue = Permission | "none";
 
 const PERM_OPTIONS: { value: CellValue; label: string }[] = [
-  { value: "none", label: "— none —" },
+  { value: "none", label: "Disabled" },
   { value: "listen_only", label: "Listen only" },
-  { value: "talk", label: "Talk" },
+  { value: "talk", label: "Normal" },
   { value: "talk_priority", label: "Talk priority" },
 ];
 
@@ -34,13 +34,53 @@ function compareText(a: string, b: string, dir: SortDir): number {
   return dir === "asc" ? cmp : -cmp;
 }
 
+function sortActiveSuffix(key: UserSortKey, dir: SortDir): string {
+  switch (key) {
+    case "username":
+    case "display_name":
+    case "unit_id":
+      return dir === "asc" ? " A→Z" : " Z→A";
+    case "role":
+      return dir === "asc" ? " · role ↑" : " · role ↓";
+    case "device_type":
+      return dir === "asc" ? " · device ↑" : " · device ↓";
+    case "status":
+      return dir === "asc" ? " · status ↑" : " · status ↓";
+    default:
+      return dir === "asc" ? " A→Z" : " Z→A";
+  }
+}
+
+function channelHeaderStyle(color: string | null): CSSProperties | undefined {
+  if (!color) {
+    return undefined;
+  }
+  return {
+    background: color,
+    color: "#fff",
+    borderBottomColor: color,
+  };
+}
+
+function channelCellStyle(color: string | null): CSSProperties | undefined {
+  if (!color) {
+    return undefined;
+  }
+  return {
+    borderLeft: `3px solid ${color}`,
+    background: `color-mix(in srgb, ${color} 20%, var(--bg-raised))`,
+  };
+}
+
 function SortableTh({
   label,
+  sortKey,
   active,
   dir,
   onClick,
 }: {
   label: string;
+  sortKey: UserSortKey;
   active: boolean;
   dir: SortDir;
   onClick: () => void;
@@ -49,7 +89,7 @@ function SortableTh({
     <th>
       <button type="button" className={`th-sort${active ? " active" : ""}`} onClick={onClick}>
         {label}
-        {active ? (dir === "asc" ? " A→Z" : " Z→A") : ""}
+        {active ? sortActiveSuffix(sortKey, dir) : ""}
       </button>
     </th>
   );
@@ -71,7 +111,7 @@ export function UsersAndAssignmentsPanel() {
   const [deviceType, setDeviceType] = useState("");
   const [creating, setCreating] = useState(false);
 
-  const [userSortKey, setUserSortKey] = useState<UserSortKey>("display_name");
+  const [userSortKey, setUserSortKey] = useState<UserSortKey>("username");
   const [userSortDir, setUserSortDir] = useState<SortDir>("asc");
   const [channelSortDir, setChannelSortDir] = useState<SortDir>("asc");
 
@@ -228,7 +268,8 @@ export function UsersAndAssignmentsPanel() {
       </div>
       <p className="panel-desc">
         One row per account: edit login details, unit, device, and channel permissions together.
-        Click a column heading to sort A→Z or Z→A.
+        Click a column heading to sort (username and unit ID use A→Z; role, device, and status sort by
+        that field).
       </p>
 
       {error && <div className="banner error">{error}</div>}
@@ -289,43 +330,54 @@ export function UsersAndAssignmentsPanel() {
               <tr>
                 <SortableTh
                   label="Username"
+                  sortKey="username"
                   active={userSortKey === "username"}
                   dir={userSortDir}
                   onClick={() => toggleUserSort("username")}
                 />
                 <SortableTh
                   label="Display name"
+                  sortKey="display_name"
                   active={userSortKey === "display_name"}
                   dir={userSortDir}
                   onClick={() => toggleUserSort("display_name")}
                 />
                 <SortableTh
                   label="Role"
+                  sortKey="role"
                   active={userSortKey === "role"}
                   dir={userSortDir}
                   onClick={() => toggleUserSort("role")}
                 />
                 <SortableTh
                   label="Unit ID"
+                  sortKey="unit_id"
                   active={userSortKey === "unit_id"}
                   dir={userSortDir}
                   onClick={() => toggleUserSort("unit_id")}
                 />
                 <SortableTh
                   label="Device"
+                  sortKey="device_type"
                   active={userSortKey === "device_type"}
                   dir={userSortDir}
                   onClick={() => toggleUserSort("device_type")}
                 />
                 <SortableTh
                   label="Status"
+                  sortKey="status"
                   active={userSortKey === "status"}
                   dir={userSortDir}
                   onClick={() => toggleUserSort("status")}
                 />
                 <th className="sticky-actions">Actions</th>
                 {sortedChannels.map((channel) => (
-                  <th key={channel.id} className="channel-col-head" title={channel.name}>
+                  <th
+                    key={channel.id}
+                    className={`channel-col-head${channel.color ? " has-channel-color" : ""}`}
+                    title={channel.name}
+                    style={channelHeaderStyle(channel.color)}
+                  >
                     {channel.name}
                   </th>
                 ))}
@@ -431,7 +483,11 @@ export function UsersAndAssignmentsPanel() {
                   {sortedChannels.map((channel) => {
                     const value: CellValue = grid.get(membershipKey(user.id, channel.id)) ?? "none";
                     return (
-                      <td key={channel.id}>
+                      <td
+                        key={channel.id}
+                        className={`channel-assign-cell${channel.color ? " has-channel-color" : ""}`}
+                        style={channelCellStyle(channel.color)}
+                      >
                         <select
                           value={value}
                           onChange={(e) =>

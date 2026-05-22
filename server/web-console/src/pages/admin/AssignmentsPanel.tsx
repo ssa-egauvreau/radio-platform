@@ -4,9 +4,9 @@ import { api, describeError, type AdminUser, type Channel, type Membership, type
 type CellValue = Permission | "none";
 
 const OPTIONS: { value: CellValue; label: string }[] = [
-  { value: "none", label: "— none —" },
+  { value: "none", label: "Disabled" },
   { value: "listen_only", label: "Listen only" },
-  { value: "talk", label: "Talk" },
+  { value: "talk", label: "Normal" },
   { value: "talk_priority", label: "Talk priority" },
 ];
 
