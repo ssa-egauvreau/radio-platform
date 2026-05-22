@@ -59,14 +59,14 @@ export function formatLocationForTen8(parts: {
   };
 }
 
-/** SSA account property — exact name and property number for 10-8 locnotes. */
+/** SSA account property — property number then name for 10-8 locnotes (no dashes, no word "property"). */
 export function buildSsaPropertyLocnotes(accountCode: string, prop: { name: string }): string {
   const name = prop.name.trim();
   const acct = accountCodeLocnotesForm(accountCode).trim();
-  if (name && acct) {
-    return `${name}, property ${acct}`;
+  if (acct && name) {
+    return `${acct} ${name}`;
   }
-  return name || (acct ? `property ${acct}` : "");
+  return acct || name;
 }
 
 function looksLikeBareAccountCode(text: string): boolean {

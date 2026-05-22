@@ -95,6 +95,21 @@ function sanitizeTen8Body(value: unknown): unknown {
   return value;
 }
 
+export async function ten8AddVehicle(
+  agencyId: number,
+  callId: string,
+  body: Record<string, unknown>,
+): Promise<{ ok: boolean; shadow?: boolean; status?: number; data?: unknown }> {
+  const lookup = encodeURIComponent(callId);
+  const res = await ten8Fetch(agencyId, "POST", `/v1/incidents/${lookup}/vehicles`, body);
+  return {
+    ok: res.ok,
+    shadow: (res.data as { shadow?: boolean })?.shadow === true,
+    status: res.status,
+    data: res.data,
+  };
+}
+
 export async function ten8AddComment(
   agencyId: number,
   callId: string,

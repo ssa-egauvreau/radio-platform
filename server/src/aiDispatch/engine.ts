@@ -34,6 +34,7 @@ import { shouldSkipDuplicateAiDispatch } from "./dedupe.js";
 import { listTen8ActiveIncidents } from "../ten8/store.js";
 import {
   ten8AddComment,
+  ten8AddVehicle,
   ten8Configured,
   ten8CreateIncident,
   ten8NewIncidentConfigured,
@@ -44,6 +45,10 @@ import {
   formatTen8RadioComment,
   isVerifiedOpenCallId,
 } from "../ten8/cadComments.js";
+import {
+  buildTen8AddVehicleBody,
+  formatTen8VehicleLookupComment,
+} from "../ten8/vehicles.js";
 import type { PlateLookupResult } from "./plateLookup.js";
 import type { AiDispatchParseResult } from "./parse.js";
 
@@ -217,6 +222,51 @@ async function postTen8RadioCommentIfVerified(opts: {
   return { call_id: callId, comment: note, ...res };
 }
 
+/**
+ * Post plate/VIN decode to 10-8 vehicles API and duplicate the same facts as a CAD comment.
+ */
+async function postTen8PlateLookupToCall(opts: {
+  agencyId: number;
+  callId: string;
+  active: Ten8ActiveIncident[];
+  callsign: string;
+  lookup: PlateLookupResult;
+  trustedFromCreate: boolean;
+}): Promise<Record<string, unknown>> {
+  const callId = opts.callId.trim();
+  if (!callId) {
+    return { skipped: "empty_call_id" };
+  }
+  if (!opts.trustedFromCreate && !isVerifiedOpenCallId(callId, opts.active)) {
+    console.warn(`[ten8] skip plate vehicle — call ${callId} not in open incident list`);
+    return { skipped: "call_not_verified_open" };
+  }
+
+  const out: Record<string, unknown> = { call_id: callId };
+  const vehicleBody = buildTen8AddVehicleBody(opts.lookup);
+  if (vehicleBody) {
+    const vehicleRes = await ten8AddVehicle(
+      opts.agencyId,
+      callId,
+      vehicleBody as unknown as Record<string, unknown>,
+    );
+    out.vehicle_request = vehicleBody;
+    Object.assign(out, vehicleRes);
+  }
+
+  const vehicleComment = formatTen8VehicleLookupComment(opts.callsign, opts.lookup);
+  if (vehicleComment) {
+    const commentRes = await ten8AddComment(opts.agencyId, callId, vehicleComment);
+    out.vehicle_comment = { comment: vehicleComment, ...commentRes };
+  }
+
+  if (!vehicleBody && !vehicleComment) {
+    return { skipped: "no_vehicle_data", call_id: callId };
+  }
+
+  return out;
+}
+
 async function persistAiDispatchLog(opts: {
   agencyId: number;
   transmissionId: number;
@@ -367,6 +417,8 @@ async function processTransmission(transmissionId: number): Promise<void> {
           .map((i) => i.incident_type)
           .filter((t): t is string => !!t?.trim());
 
+        let newCallIdFromCreate: string | null = null;
+
         if (parsed.intent === "dispatch") {
           // Self-dispatch is a NEW call — create only; never comment on an unrelated open call.
           if (await ten8NewIncidentConfigured(tx.agency_id)) {
@@ -383,6 +435,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
             if (res.ok && !res.shadow) {
               const newCallId = extractCallIdFromCreateResponse(res.data);
               if (newCallId) {
+                newCallIdFromCreate = newCallId;
                 const note = formatTen8RadioComment(callsign, transcript);
                 if (note) {
                   const commentRes = await ten8AddComment(tx.agency_id, newCallId, note);
@@ -413,6 +466,27 @@ async function processTransmission(transmissionId: number): Promise<void> {
                 transcript,
               });
             }
+          }
+        }
+
+        if (plate.lookup && (plate.lookup.plate || plate.lookup.vin)) {
+          let plateCallId = newCallIdFromCreate;
+          let trustedFromCreate = !!plateCallId;
+          if (!plateCallId) {
+            const match = findMatchingOpenIncident(active, parsed, unitId);
+            plateCallId = match?.call_id?.trim() || null;
+          }
+          if (plateCallId) {
+            ten8Actions.ten8_plate_vehicle = await postTen8PlateLookupToCall({
+              agencyId: tx.agency_id,
+              callId: plateCallId,
+              active,
+              callsign,
+              lookup: plate.lookup,
+              trustedFromCreate,
+            });
+          } else {
+            ten8Actions.ten8_plate_vehicle = { skipped: "no_matching_open_call_for_plate" };
           }
         }
       }
