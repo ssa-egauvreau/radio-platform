@@ -68,6 +68,14 @@ function sanitizeForTen8(text: string): string {
     .trim();
 }
 
+/** Strictest: letters, numbers, and spaces only — used for free-text comments. */
+function sanitizeForTen8Strict(text: string): string {
+  return text
+    .replace(/[^A-Za-z0-9 ]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** Recursively sanitize every string value in a request body before it is sent to 10-8. */
 function sanitizeTen8Body(value: unknown): unknown {
   if (typeof value === "string") {
@@ -92,10 +100,10 @@ export async function ten8AddComment(
   comment: string,
 ): Promise<{ ok: boolean; shadow?: boolean; data?: unknown }> {
   const lookup = encodeURIComponent(callId);
-  // ten8Fetch sanitizes all string fields before sending.
+  // Comments are restricted to letters, numbers, and spaces only (no commas/periods either).
   const res = await ten8Fetch(agencyId, "POST", `/v1/incidents/${lookup}/comments`, {
     officer: "AI Dispatch",
-    comment: comment.slice(0, 4000),
+    comment: sanitizeForTen8Strict(comment).slice(0, 4000),
     type: "comment",
   });
   return { ok: res.ok, shadow: (res.data as { shadow?: boolean })?.shadow === true, data: res.data };
