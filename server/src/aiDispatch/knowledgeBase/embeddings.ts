@@ -26,6 +26,11 @@ let loadPromise: Promise<EmbedPipeline | null> | null = null;
 let state: "idle" | "loading" | "ready" | "broken" = "idle";
 let lastLoadFailedAt = 0;
 
+/** The model chunks are currently embedded with — stamped on each indexed document. */
+export function getEmbeddingModelName(): string {
+  return MODEL;
+}
+
 export function getEmbeddingDiagnostics(): {
   model: string;
   state: string;

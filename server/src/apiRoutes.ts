@@ -137,6 +137,7 @@ import {
 import { applyChannelTen33Marker } from "./aiDispatch/ten33Marker.js";
 import { listAiDispatchLog } from "./aiDispatch/activityLog.js";
 import { enqueueKbIngest } from "./aiDispatch/knowledgeBase/ingest.js";
+import { getEmbeddingModelName } from "./aiDispatch/knowledgeBase/embeddings.js";
 import { handleTen8Webhook, handleTen8WebhookGet } from "./ten8/webhook.js";
 import {
   handleAndroidUpdateApk,
@@ -1496,6 +1497,7 @@ export function createApiRouter(): Router {
       res.json({
         documents: await listKbDocuments(req.authUser!.agencyId!),
         categories: KB_CATEGORIES,
+        embed_model: getEmbeddingModelName(),
       });
     } catch (error) {
       fail(res, error);

@@ -279,6 +279,7 @@ export interface KbDocument {
   status: string;
   error: string | null;
   chunk_count: number;
+  embed_model: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -724,7 +725,10 @@ export const api = {
 
   // --- AI dispatcher knowledge base --------------------------------------
   listKbDocuments: () =>
-    request<{ documents: KbDocument[]; categories: string[] }>("GET", "/v1/admin/kb/documents"),
+    request<{ documents: KbDocument[]; categories: string[]; embed_model: string }>(
+      "GET",
+      "/v1/admin/kb/documents",
+    ),
   deleteKbDocument: (id: number) =>
     request<{ ok: boolean }>("DELETE", `/v1/admin/kb/documents/${id}`),
   reindexKbDocument: (id: number) =>

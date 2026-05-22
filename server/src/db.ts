@@ -444,6 +444,10 @@ export async function ensureSchema(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_kb_docs_agency ON agency_kb_documents (agency_id, created_at DESC);
   `);
+  // The embedding model used to index this document's chunks. A model swap
+  // leaves old vectors at a different dimension/space, so retrieval ignores
+  // mismatched chunks and the admin UI flags the document for re-indexing.
+  await p.query(`ALTER TABLE agency_kb_documents ADD COLUMN IF NOT EXISTS embed_model TEXT;`);
 
   // One embedded passage of a knowledge-base document. Similarity search runs in
   // Node (cosine over the REAL[] vector) — no pgvector extension required at this

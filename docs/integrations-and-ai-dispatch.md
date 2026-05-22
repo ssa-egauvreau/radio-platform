@@ -107,6 +107,8 @@ This is the practical meaning of the AI "learning" the agency's material: the co
 
 **Graceful degradation:** if `KB_ENABLED=off`, the embedding model can't load (Railway OOM — same risk as Whisper), or no passage is relevant, retrieval returns nothing and the dispatcher behaves exactly as before. Scanned-image PDFs with no extractable text are marked **Failed** (OCR is out of scope); re-upload a text PDF.
 
+**Changing the embedding model:** each document records the `KB_EMBED_MODEL` it was indexed with. If you change that env var, existing documents are flagged **Re-index needed** in the admin table and are skipped at dispatch time (their old vectors live in a different space) until you re-index them.
+
 > Scope today: **PDF only**, in-Node cosine search (no `pgvector`), per-agency isolation. The retrieval interface is narrow so `pgvector` or a hosted embedder can replace the in-Node path later without touching callers.
 
 ---

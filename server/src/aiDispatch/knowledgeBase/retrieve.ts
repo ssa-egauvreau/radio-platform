@@ -5,7 +5,7 @@
 // without a knowledge base.
 
 import { listKbChunksForAgency, type KbChunkRow } from "../../store.js";
-import { embedTexts } from "./embeddings.js";
+import { embedTexts, getEmbeddingModelName } from "./embeddings.js";
 
 const ENABLED = (process.env.KB_ENABLED ?? "on").trim().toLowerCase() !== "off";
 const TOP_K = Number(process.env.KB_RETRIEVE_TOP_K) || 5;
@@ -118,7 +118,7 @@ export async function retrieveKnowledge(
     return "";
   }
   try {
-    const chunks = await listKbChunksForAgency(agencyId);
+    const chunks = await listKbChunksForAgency(agencyId, getEmbeddingModelName());
     if (chunks.length === 0) {
       return "";
     }

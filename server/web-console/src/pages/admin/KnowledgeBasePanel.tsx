@@ -22,12 +22,22 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function StatusPill({ doc }: { doc: KbDocument }) {
-  if (doc.status === "ready") {
-    return <span className="pill on">Ready · {doc.chunk_count} chunks</span>;
-  }
+function StatusPill({ doc, stale }: { doc: KbDocument; stale: boolean }) {
   if (doc.status === "failed") {
     return <span className="pill off" title={doc.error ?? undefined}>Failed</span>;
+  }
+  if (doc.status === "ready") {
+    if (stale) {
+      return (
+        <span
+          className="pill off"
+          title={`Indexed with ${doc.embed_model}; the embedding model has changed. Re-index to use this document.`}
+        >
+          Re-index needed
+        </span>
+      );
+    }
+    return <span className="pill on">Ready · {doc.chunk_count} chunks</span>;
   }
   return <span className="pill">Processing…</span>;
 }
@@ -35,6 +45,7 @@ function StatusPill({ doc }: { doc: KbDocument }) {
 /** Admin panel to upload reference documents the AI dispatcher retrieves from (RAG). */
 export function KnowledgeBasePanel() {
   const [docs, setDocs] = useState<KbDocument[]>([]);
+  const [embedModel, setEmbedModel] = useState<string>("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,6 +59,7 @@ export function KnowledgeBasePanel() {
     try {
       const res = await api.listKbDocuments();
       setDocs(res.documents);
+      setEmbedModel(res.embed_model);
       setError(null);
     } catch (err) {
       setError(describeError(err));
@@ -232,7 +244,10 @@ export function KnowledgeBasePanel() {
                 <td>{doc.property_code ?? "—"}</td>
                 <td>{formatBytes(doc.byte_size)}</td>
                 <td>
-                  <StatusPill doc={doc} />
+                  <StatusPill
+                    doc={doc}
+                    stale={!!doc.embed_model && !!embedModel && doc.embed_model !== embedModel}
+                  />
                 </td>
                 <td>
                   <div className="cell-actions">

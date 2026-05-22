@@ -1889,12 +1889,13 @@ export interface KbDocumentMeta {
   status: string;
   error: string | null;
   chunk_count: number;
+  embed_model: string | null;
   created_at: string;
   updated_at: string;
 }
 
 const KB_DOC_META_COLS =
-  "id, title, category, property_code, filename, mime, byte_size, status, error, chunk_count, created_at, updated_at";
+  "id, title, category, property_code, filename, mime, byte_size, status, error, chunk_count, embed_model, created_at, updated_at";
 
 export async function listKbDocuments(agencyId: number): Promise<KbDocumentMeta[]> {
   const res = await requirePool().query<KbDocumentMeta>(
@@ -1963,7 +1964,12 @@ export async function getKbDocumentForIngest(
 export async function setKbDocumentStatus(
   id: number,
   status: string,
-  patch: { error?: string | null; chunkCount?: number; extractedText?: string | null } = {},
+  patch: {
+    error?: string | null;
+    chunkCount?: number;
+    extractedText?: string | null;
+    embedModel?: string | null;
+  } = {},
 ): Promise<void> {
   await requirePool().query(
     `UPDATE agency_kb_documents
@@ -1971,9 +1977,17 @@ export async function setKbDocumentStatus(
             error = $3,
             chunk_count = COALESCE($4, chunk_count),
             extracted_text = COALESCE($5, extracted_text),
+            embed_model = COALESCE($6, embed_model),
             updated_at = now()
       WHERE id = $1;`,
-    [id, status, patch.error ?? null, patch.chunkCount ?? null, patch.extractedText ?? null],
+    [
+      id,
+      status,
+      patch.error ?? null,
+      patch.chunkCount ?? null,
+      patch.extractedText ?? null,
+      patch.embedModel ?? null,
+    ],
   );
 }
 
@@ -2040,15 +2054,26 @@ export interface KbChunkRow {
   embedding: number[];
 }
 
-/** All ready chunks for an agency, joined to their document for source labelling. */
-export async function listKbChunksForAgency(agencyId: number): Promise<KbChunkRow[]> {
+/**
+ * Ready chunks for an agency, joined to their document for source labelling.
+ * Only chunks embedded with the current model are returned: a model swap leaves
+ * old vectors in a different space/dimension, so they must not be ranked against
+ * a query embedded with the new model (the document is flagged for re-index in
+ * the admin UI instead). Legacy rows with a NULL stamp are assumed current.
+ */
+export async function listKbChunksForAgency(
+  agencyId: number,
+  embedModel: string,
+): Promise<KbChunkRow[]> {
   const res = await requirePool().query<KbChunkRow>(
     `SELECT c.id::text AS id, c.document_id, d.title, d.category, d.property_code,
             c.content, c.embedding
        FROM agency_kb_chunks c
        JOIN agency_kb_documents d ON d.id = c.document_id
-      WHERE c.agency_id = $1 AND d.status = 'ready';`,
-    [agencyId],
+      WHERE c.agency_id = $1
+        AND d.status = 'ready'
+        AND (d.embed_model = $2 OR d.embed_model IS NULL);`,
+    [agencyId, embedModel],
   );
   return res.rows;
 }

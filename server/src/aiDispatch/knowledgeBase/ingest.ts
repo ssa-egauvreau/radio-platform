@@ -9,7 +9,7 @@ import {
   setKbDocumentStatus,
 } from "../../store.js";
 import { chunkText } from "./chunk.js";
-import { embedTexts } from "./embeddings.js";
+import { embedTexts, getEmbeddingModelName } from "./embeddings.js";
 import { extractPdfText } from "./pdfText.js";
 
 const MAX_CHUNKS = Number(process.env.KB_MAX_CHUNKS_PER_DOC) || 400;
@@ -53,6 +53,7 @@ export async function ingestDocument(documentId: number): Promise<void> {
       error: null,
       chunkCount: chunks.length,
       extractedText: text,
+      embedModel: getEmbeddingModelName(),
     });
     console.log(`[kb] ingested document ${documentId}: ${chunks.length} chunk(s).`);
   } catch (error) {
