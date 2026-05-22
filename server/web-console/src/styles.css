@@ -3463,9 +3463,16 @@ code.mono {
 
 /* --- mobile / narrow screens --- */
 @media (max-width: 880px) {
+  /* Belt-and-suspenders: never let a too-wide child make the whole page scroll sideways and leave a
+     dead strip down the right edge on phones. */
+  html,
+  body {
+    overflow-x: hidden;
+  }
   .app-shell {
     height: auto;
     min-height: 100%;
+    overflow-x: hidden;
   }
   .topbar {
     height: auto;
@@ -3473,6 +3480,13 @@ code.mono {
     flex-wrap: wrap;
     gap: 6px 14px;
     padding: 8px 12px;
+  }
+  /* The nav tabs must wrap on a phone instead of overflowing the viewport width (which widened the
+     document and left the menu bar floating in a sea of empty space). */
+  .topnav {
+    flex-wrap: wrap;
+    flex-basis: 100%;
+    gap: 4px 6px;
   }
   .who {
     margin-left: 0;
