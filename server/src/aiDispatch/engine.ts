@@ -375,7 +375,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
               parsed,
               callsign,
               platform.dispatchUnitId,
-              { knownIncidentTypes },
+              { knownIncidentTypes, transcript },
             );
             const res = await ten8CreateIncident(tx.agency_id, body);
             ten8Actions.ten8_incident = { request: body, ...res };

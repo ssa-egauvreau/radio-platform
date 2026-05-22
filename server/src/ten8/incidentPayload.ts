@@ -1,4 +1,5 @@
 import type { AiDispatchParseResult } from "../aiDispatch/parse.js";
+import { accountCodeDashForm } from "../aiDispatch/speech/numbers.js";
 import { lookupSsaProperty } from "../aiDispatch/ssaProperties.js";
 import { isWebSearchConfigured, webSearchAnswer } from "../aiDispatch/webSearch.js";
 import { resolveTen8IncidentType, resolveTen8PriorityForCode, clampPriority } from "./callTypes.js";
@@ -39,8 +40,6 @@ export function formatLocationForTen8(parts: {
     state = state.slice(0, 2);
   }
   const zip = (parts.zip?.trim() || "").replace(/\D/g, "").slice(0, 5);
-  const name = parts.name?.trim() || "";
-  const locnotes = parts.locnotes?.trim() || name || undefined;
 
   if (!street && !city) {
     return null;
@@ -56,8 +55,99 @@ export function formatLocationForTen8(parts: {
     state,
     ...(zip ? { zip } : {}),
     ...(parts.county?.trim() ? { county: parts.county.trim() } : state === "CA" ? { county: "Orange County" } : {}),
-    ...(locnotes ? { locnotes } : {}),
+    ...(parts.locnotes?.trim() ? { locnotes: parts.locnotes.trim() } : {}),
   };
+}
+
+/** SSA account property — exact name and property number for 10-8 locnotes. */
+export function buildSsaPropertyLocnotes(accountCode: string, prop: { name: string }): string {
+  const name = prop.name.trim();
+  const acct = accountCodeDashForm(accountCode).trim();
+  if (name && acct) {
+    return `${name}, property ${acct}`;
+  }
+  return name || (acct ? `property ${acct}` : "");
+}
+
+function looksLikeBareAccountCode(text: string): boolean {
+  const t = text.trim();
+  return /^\d{3,5}$/.test(t) || /^\d{2}-\d{2}$/.test(t);
+}
+
+/** Free-text place the officer said (not in SSA property DB) — for Google Maps lookup. */
+export function buildExternalLocationSearchQuery(
+  parsed: AiDispatchParseResult,
+  transcript?: string,
+): string | null {
+  const name = parsed.location_name?.trim();
+  if (name && !looksLikeBareAccountCode(name)) {
+    return name;
+  }
+
+  const summary = parsed.summary?.trim() ?? "";
+  if (summary) {
+    const atInSummary = summary.match(/\bat\s+(.+?)(?:\.|,|;|$)/i);
+    if (atInSummary?.[1]?.trim()) {
+      return atInSummary[1].trim();
+    }
+    if (!looksLikeBareAccountCode(summary) && summary.length <= 200) {
+      return summary;
+    }
+  }
+
+  const tx = transcript?.trim() ?? "";
+  if (tx) {
+    const atInTx = tx.match(/\bat\s+(.+)/i);
+    if (atInTx?.[1]?.trim()) {
+      return atInTx[1].trim().slice(0, 220);
+    }
+  }
+
+  return name || null;
+}
+
+function buildExternalLocnotes(searchQuery: string, resolvedPlaceName?: string): string {
+  const q = searchQuery.trim();
+  const place = resolvedPlaceName?.trim();
+  if (place && place.toLowerCase() !== q.toLowerCase()) {
+    return `${q}; ${place}`;
+  }
+  return q;
+}
+
+async function resolveAddressViaGoogleSearch(
+  searchQuery: string,
+): Promise<Ten8LocationFields | null> {
+  if (!isWebSearchConfigured()) {
+    console.warn("[ten8] external location needs web search but Anthropic web_search is not configured");
+    return null;
+  }
+
+  const web = await webSearchAnswer(searchQuery, "external_address");
+  const raw = web.raw;
+  if (!web.ok || !raw || raw.found !== true) {
+    return null;
+  }
+
+  const street = typeof raw.street === "string" ? raw.street.trim() : "";
+  const city = typeof raw.city === "string" ? raw.city.trim() : "";
+  const state = typeof raw.state === "string" ? raw.state.trim() : "CA";
+  const zip = typeof raw.zip === "string" ? raw.zip.trim() : "";
+  const placeName = typeof raw.name === "string" ? raw.name.trim() : "";
+
+  if (!street && !city) {
+    return null;
+  }
+
+  return (
+    formatLocationForTen8({
+      street: street || searchQuery,
+      city: city || "Orange",
+      state,
+      zip,
+      locnotes: buildExternalLocnotes(searchQuery, placeName || undefined),
+    }) ?? null
+  );
 }
 
 /** Try to split "123 Main St, Anaheim, CA 92805" into structured fields. */
@@ -90,58 +180,48 @@ function applyLocationFields(body: Record<string, unknown>, loc: Ten8LocationFie
 }
 
 async function resolveLocationFields(
-  agencyId: number,
+  _agencyId: number,
   parsed: AiDispatchParseResult,
+  opts?: { transcript?: string },
 ): Promise<Ten8LocationFields | null> {
-  const prop = lookupSsaProperty(parsed.location_code);
-  if (prop) {
+  const accountCode = parsed.location_code?.trim() ?? "";
+  const prop = lookupSsaProperty(accountCode);
+  if (prop && accountCode) {
     return formatLocationForTen8({
       street: prop.street,
       city: prop.city,
       state: prop.state,
       zip: prop.zip,
-      name: prop.name,
-      locnotes: prop.locnotes || prop.name,
+      locnotes: buildSsaPropertyLocnotes(accountCode, prop),
     });
   }
 
-  const name = parsed.location_name?.trim();
-  if (!name) {
+  const searchQuery = buildExternalLocationSearchQuery(parsed, opts?.transcript);
+  if (!searchQuery) {
     return null;
   }
 
-  const parsedLine = parseUsAddressLine(name);
+  const fromGoogle = await resolveAddressViaGoogleSearch(searchQuery);
+  if (fromGoogle) {
+    return fromGoogle;
+  }
+
+  const parsedLine = parseUsAddressLine(searchQuery);
   if (parsedLine?.streetAddress && parsedLine.city) {
-    return parsedLine;
+    return {
+      ...parsedLine,
+      locnotes: buildExternalLocnotes(searchQuery),
+    };
   }
 
-  if (!isWebSearchConfigured()) {
-    return parseUsAddressLine(name) ?? formatLocationForTen8({ street: name, city: "Orange", state: "CA" });
-  }
-
-  const web = await webSearchAnswer(name, "external_address");
-  const raw = web.raw;
-  if (web.ok && raw && raw.found === true) {
-    const street = typeof raw.street === "string" ? raw.street.trim() : "";
-    const city = typeof raw.city === "string" ? raw.city.trim() : "";
-    const state = typeof raw.state === "string" ? raw.state.trim() : "CA";
-    const zip = typeof raw.zip === "string" ? raw.zip.trim() : "";
-    const placeName = typeof raw.name === "string" ? raw.name.trim() : name;
-    const formatted =
-      formatLocationForTen8({
-        street: street || name,
-        city,
-        state,
-        zip,
-        name: placeName,
-        locnotes: placeName,
-      }) ?? null;
-    if (formatted) {
-      return formatted;
-    }
-  }
-
-  return parseUsAddressLine(name) ?? formatLocationForTen8({ street: name, city: "Orange", state: "CA" });
+  return (
+    formatLocationForTen8({
+      street: searchQuery,
+      city: "Orange",
+      state: "CA",
+      locnotes: buildExternalLocnotes(searchQuery),
+    }) ?? null
+  );
 }
 
 /** Build POST /incidents body with Google-style location + valid priority 1–4. */
@@ -150,7 +230,7 @@ export async function buildTen8NewIncidentBody(
   parsed: AiDispatchParseResult,
   unit: string,
   dispatcherName: string,
-  opts?: { knownIncidentTypes?: string[] },
+  opts?: { knownIncidentTypes?: string[]; transcript?: string },
 ): Promise<Record<string, unknown>> {
   const type = resolveTen8IncidentType(parsed.code, {
     knownTypes: opts?.knownIncidentTypes,
@@ -166,7 +246,7 @@ export async function buildTen8NewIncidentBody(
     body.units = unit.trim();
   }
 
-  const loc = await resolveLocationFields(agencyId, parsed);
+  const loc = await resolveLocationFields(agencyId, parsed, { transcript: opts?.transcript });
   if (loc) {
     applyLocationFields(body, loc);
   }

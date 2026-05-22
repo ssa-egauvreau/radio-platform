@@ -58,17 +58,17 @@ Only return found:true if HIGH CONFIDENCE the number is correct and current. Avo
     case "external_address":
       return `${locationCtx}
 
-Find the street address for: "${query}"
+Find the Google Maps listing and street address for: "${query}"
 
-This is for a radio dispatcher reading the address aloud over the radio to a field officer. Keep it short.
+This is for CAD geocoding — the officer may only say a business and street (example: "McDonalds on Main Street" or "Citizen Assist at Walgreens on Chapman"). Resolve to the actual storefront street address with number in Orange County CA when possible.
 
 Use Google Maps style addressing: numbered street first, then city, then two-letter state and 5-digit ZIP when known.
 
 Respond ONLY with JSON. No prose, no code fences. Use this shape:
-If found: {"found": true, "name": "Official name", "street": "123 N Main St", "city": "Garden Grove", "state": "CA", "zip": "92840", "phone": "phone if commonly needed too, else null", "source": "URL"}
+If found: {"found": true, "name": "Official business or place name", "street": "123 N Main St", "city": "Santa Ana", "state": "CA", "zip": "92701", "phone": null, "source": "URL"}
 If not found: {"found": false, "reason": "Brief explanation"}
 
-The combined address for CAD must read like: "123 N Main St, Garden Grove, CA 92840". Only return found:true if HIGH CONFIDENCE.`;
+The combined address for CAD must read like: "123 N Main St, Santa Ana, CA 92701". Only return found:true if HIGH CONFIDENCE.`;
 
     case "legal_code":
       return `${locationCtx}
