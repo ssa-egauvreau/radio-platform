@@ -1,5 +1,15 @@
 [
   {
+    "version": "1.13",
+    "date": "2026-05-22",
+    "title": "Clearer AI dispatcher voice",
+    "changes": [
+      "The dispatcher says the word unit (not U-N-I-T) when giving a unit's location.",
+      "California and other states are read by full name, not mistaken for call codes.",
+      "Street addresses are read with numbers and street types phrased for the radio."
+    ]
+  },
+  {
     "version": "1.12",
     "date": "2026-05-22",
     "title": "AI dispatcher listens to clear speech",
