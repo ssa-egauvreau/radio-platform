@@ -259,7 +259,12 @@ export function ChannelWorkspace({
       ref={rootRef}
       className={`channel-workspace-rows channel-workspace-grid${dockDragOver ? " drag-over" : ""}`}
       aria-label="Channel workspace"
-      style={{ gridAutoRows: `${WORKSPACE_ROW_PX}px` }}
+      style={{
+        // Drive the column count from the measured width so it always matches the span clamp — auto-fit
+        // could create more tracks than tiles span, leaving phantom empty columns on the right.
+        gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
+        gridAutoRows: `${WORKSPACE_ROW_PX}px`,
+      }}
       onDragOver={(e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
