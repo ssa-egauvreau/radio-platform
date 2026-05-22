@@ -871,6 +871,7 @@ code.mono {
   margin-top: 4px;
 }
 .channel-rail-tile {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 3px;
@@ -884,6 +885,25 @@ code.mono {
 }
 .channel-rail-tile:active {
   cursor: grabbing;
+}
+.channel-rail-tile.drag-source {
+  opacity: 0.38;
+  filter: grayscale(0.7) saturate(0.45);
+  transform: scale(0.97);
+  transition:
+    opacity 0.15s ease,
+    filter 0.15s ease,
+    transform 0.15s ease;
+}
+.channel-rail-tile.drag-source::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--bg) 35%, #6a7280 65%);
+  opacity: 0.72;
+  pointer-events: none;
+  z-index: 2;
 }
 .channel-rail-tile.docked {
   border-color: var(--accent-2);
@@ -1016,11 +1036,30 @@ code.mono {
 .channel-workspace-rows.reordering .channel-workspace-tile:not(.moving) {
   transition: transform 0.15s ease, box-shadow 0.15s ease;
 }
+.channel-workspace-tile.drag-source {
+  opacity: 0.4;
+  filter: grayscale(0.72) saturate(0.4) brightness(0.9);
+  transition:
+    opacity 0.15s ease,
+    filter 0.15s ease;
+}
+.channel-workspace-tile.drag-source::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--bg) 30%, #7a8494 70%);
+  opacity: 0.65;
+  pointer-events: none;
+  z-index: 7;
+}
 .channel-workspace-tile.moving {
-  opacity: 0.78;
+  opacity: 0.4;
   z-index: 30;
   cursor: grabbing;
   pointer-events: none;
+  filter: grayscale(0.72) saturate(0.4) brightness(0.9);
+  transform: scale(0.985);
   box-shadow:
     0 18px 42px color-mix(in srgb, #000 45%, transparent),
     0 0 0 2px var(--accent);
@@ -1028,6 +1067,9 @@ code.mono {
 .channel-workspace-tile.moving .ch-card-chrome,
 .channel-workspace-tile.moving .ch-card-title-main {
   pointer-events: none;
+}
+.channel-workspace-tile.moving.channel-off .channel-off-overlay {
+  opacity: 0.35;
 }
 .channel-workspace-tile.drag-target {
   outline: 2px solid var(--accent);
@@ -1249,10 +1291,6 @@ code.mono {
 .channel-workspace-tile.workspace-tile-half .channel-workspace-tile-inner {
   flex: 1 1 auto;
   min-height: 0;
-}
-.channel-workspace-tile.moving {
-  opacity: 0.88;
-  z-index: 22;
 }
 .channel-workspace-tile.resizing {
   z-index: 24;

@@ -290,15 +290,17 @@ export function ChannelWorkspace({
     const monitoring = open.includes(channel.id);
     const footprint = workspaceTileFootprintLabel(tile);
     const isDragging = moveChannelId === channel.id;
+    const isRailDragSource = railDrag?.channelId === channel.id && !isDragging;
+    const isDragSource = isDragging || isRailDragSource;
     const isDropTarget =
-      !isDragging && dragOverChannelId === channel.id && dropEdge !== null;
+      !isDragSource && dragOverChannelId === channel.id && dropEdge !== null;
     return (
       <div
         key={channel.id}
         data-channel-id={channel.id}
         className={`channel-workspace-tile widget-${size}${!monitoring ? " channel-off" : ""}${
           isDragging ? " moving" : ""
-        }${
+        }${isDragSource ? " drag-source" : ""}${
           isDropTarget
             ? ` drag-target drop-${dropEdge}${dropEdge === "after" ? " drop-stack-under" : ""}`
             : ""

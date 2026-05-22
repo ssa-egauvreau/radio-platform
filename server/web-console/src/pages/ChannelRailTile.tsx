@@ -1,9 +1,11 @@
-import { useRef, type DragEvent } from "react";
+import { useRef, useSyncExternalStore, type DragEvent } from "react";
 import type { UserChannel } from "../api";
 import { IconHeadphones, IconRadio } from "../icons";
 import {
   createRailDragGhostElement,
+  getRailDragPreview,
   setRailDragPreview,
+  subscribeRailDragPreview,
   workspacePreviewForChannel,
 } from "./workspaceRailDrag";
 
@@ -21,6 +23,12 @@ export function ChannelRailTile({
   onToggleMonitor: () => void;
 }) {
   const ghostRef = useRef<HTMLElement | null>(null);
+  const railDrag = useSyncExternalStore(
+    subscribeRailDragPreview,
+    getRailDragPreview,
+    () => null,
+  );
+  const isDragSource = railDrag?.channelId === channel.id;
 
   function onDragStart(e: DragEvent) {
     e.dataTransfer.setData("text/channel-id", String(channel.id));
@@ -49,7 +57,9 @@ export function ChannelRailTile({
 
   return (
     <div
-      className={`channel-rail-tile${docked ? " docked" : ""}${monitoring ? " monitoring" : ""}`}
+      className={`channel-rail-tile${docked ? " docked" : ""}${monitoring ? " monitoring" : ""}${
+        isDragSource ? " drag-source" : ""
+      }`}
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
