@@ -997,6 +997,8 @@ code.mono {
   min-height: 0;
   min-width: 0;
   overflow: hidden;
+  /* Keep a scroll gesture started inside a tile from chaining out to the page mid-scroll. */
+  overscroll-behavior: contain;
   -webkit-user-drag: none;
 }
 .channel-workspace-tile-inner input,
@@ -1035,6 +1037,7 @@ code.mono {
   min-width: 0;
   overflow-x: hidden;
   overflow-y: hidden;
+  overscroll-behavior: contain;
   display: grid;
   box-sizing: border-box;
 }
@@ -1241,7 +1244,10 @@ code.mono {
 .mission-control-channels {
   min-width: 280px;
   min-height: 0;
-  overflow: auto;
+  /* Scroll vertically only — clip the x-axis so a slightly-too-wide child can't add a stray
+     left/right scrollbar (and shove the map column off-screen). */
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .mission-control-col-splitter {
   flex: 0 0 8px;
@@ -3495,6 +3501,14 @@ code.mono {
     flex: 1 1 auto !important;
     min-width: 0;
     width: 100%;
+  }
+  /* Stacked under the channels, the map/alerts column has no row height to inherit, so the map
+     (flex-sized) collapses to nothing and looks blank. Give it a real height on phones. */
+  .mission-control-map-alerts {
+    min-height: 70vh;
+  }
+  .map-alerts-map {
+    min-height: 320px;
   }
   .console-col {
     overflow: visible;
