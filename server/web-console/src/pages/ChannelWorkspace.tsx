@@ -10,7 +10,12 @@ import {
 } from "react";
 import type { UserChannel } from "../api";
 import { ChannelPanel } from "./ChannelPanel";
-import { previewWorkspaceOrder, type WorkspaceDropEdge } from "./channelWorkspaceOrder";
+import { previewWorkspaceOrder } from "./channelWorkspaceOrder";
+import {
+  findWorkspaceDropTarget,
+  insertIndexFromPointer,
+  workspaceGridRowSlots,
+} from "./channelWorkspaceDrag";
 import {
   WORKSPACE_GRID_GAP_PX,
   WORKSPACE_MIN_COL_PX,
@@ -58,40 +63,6 @@ function gridCols(root: HTMLElement | null): number {
   const padR = Number.parseFloat(style.paddingRight || "0") || 0;
   const inner = Math.max(0, root.clientWidth - padL - padR);
   return workspaceColsForWidth(inner, gap);
-}
-
-function edgeFromPointer(clientX: number, tileEl: HTMLElement): WorkspaceDropEdge {
-  const rect = tileEl.getBoundingClientRect();
-  return clientX - rect.left < rect.width / 2 ? "before" : "after";
-}
-
-/** Reading-order insert index for a rail channel dropped on the workspace. */
-function insertIndexFromPointer(
-  clientX: number,
-  clientY: number,
-  root: HTMLElement,
-  channelIds: number[],
-): number {
-  type Entry = { idx: number; midX: number; midY: number; top: number };
-  const entries: Entry[] = [];
-  channelIds.forEach((id, idx) => {
-    const el = root.querySelector<HTMLElement>(`[data-channel-id="${id}"]`);
-    if (!el) {
-      return;
-    }
-    const r = el.getBoundingClientRect();
-    entries.push({ idx, midX: r.left + r.width / 2, midY: r.top + r.height / 2, top: r.top });
-  });
-  entries.sort((a, b) => a.top - b.top || a.midX - b.midX);
-  for (const e of entries) {
-    if (clientY < e.midY && clientX < e.midX) {
-      return e.idx;
-    }
-    if (clientY < e.top) {
-      return e.idx;
-    }
-  }
-  return channelIds.length;
 }
 
 export function ChannelWorkspace({
@@ -158,6 +129,11 @@ export function ChannelWorkspace({
   const placeholderIndex =
     moveChannelId !== null ? previewIds.indexOf(moveChannelId) : -1;
 
+  const gridRowSlots = useMemo(
+    () => workspaceGridRowSlots(dockedChannels.length, cols),
+    [dockedChannels.length, cols],
+  );
+
   useEffect(() => {
     const root = rootRef.current;
     if (!root || typeof ResizeObserver === "undefined") {
@@ -214,30 +190,49 @@ export function ChannelWorkspace({
 
     const onMove = (ev: globalThis.PointerEvent) => {
       const root = rootRef.current;
-      const hit = document.elementFromPoint(ev.clientX, ev.clientY);
-      const tile = hit?.closest<HTMLElement>("[data-channel-id]");
-      const id = tile ? Number(tile.dataset.channelId) : NaN;
-      if (tile && Number.isFinite(id) && id !== channelId) {
+      if (!root) {
+        return;
+      }
+      const drop = findWorkspaceDropTarget(root, ev.clientX, ev.clientY, channelId);
+      if (drop) {
         setInsertAtEnd(false);
-        setDragOverChannelId(id);
-        setDropEdge(edgeFromPointer(ev.clientX, tile));
-      } else if (root && hit && root.contains(hit)) {
-        clearDragOver();
-        setInsertAtEnd(true);
+        setDragOverChannelId(drop.targetId);
+        setDropEdge(drop.edge);
       } else {
+        const rootRect = root.getBoundingClientRect();
+        const inRoot =
+          ev.clientX >= rootRect.left &&
+          ev.clientX <= rootRect.right &&
+          ev.clientY >= rootRect.top &&
+          ev.clientY <= rootRect.bottom;
         clearDragOver();
+        if (inRoot) {
+          setInsertAtEnd(true);
+        }
       }
     };
 
     const onEnd = (ev: globalThis.PointerEvent) => {
       handle.releasePointerCapture(ev.pointerId);
-      const hit = document.elementFromPoint(ev.clientX, ev.clientY);
-      const tile = hit?.closest<HTMLElement>("[data-channel-id]");
-      const targetId = tile ? Number(tile.dataset.channelId) : NaN;
-      if (tile && Number.isFinite(targetId) && targetId !== channelId) {
-        reorderWorkspaceTile(channelId, targetId, edgeFromPointer(ev.clientX, tile));
-      } else if (rootRef.current && hit && rootRef.current.contains(hit)) {
-        moveWorkspaceTileToEnd(channelId);
+      const root = rootRef.current;
+      if (!root) {
+        setMoveChannelId(null);
+        clearDragOver();
+        return;
+      }
+      const drop = findWorkspaceDropTarget(root, ev.clientX, ev.clientY, channelId);
+      if (drop) {
+        reorderWorkspaceTile(channelId, drop.targetId, drop.edge);
+      } else {
+        const rootRect = root.getBoundingClientRect();
+        const inRoot =
+          ev.clientX >= rootRect.left &&
+          ev.clientX <= rootRect.right &&
+          ev.clientY >= rootRect.top &&
+          ev.clientY <= rootRect.bottom;
+        if (inRoot) {
+          moveWorkspaceTileToEnd(channelId);
+        }
       }
       setMoveChannelId(null);
       clearDragOver();
@@ -337,7 +332,8 @@ export function ChannelWorkspace({
       }${moveChannelId !== null ? " reordering" : ""}`}
       aria-label="Channel workspace"
       style={{
-        gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${WORKSPACE_MIN_COL_PX}px), 1fr))`,
+        gridTemplateColumns: `repeat(auto-fill, minmax(${WORKSPACE_MIN_COL_PX}px, 1fr))`,
+        gridTemplateRows: `repeat(${gridRowSlots}, minmax(min-content, auto))`,
       }}
       onDragOver={(e) => {
         e.preventDefault();
