@@ -605,7 +605,7 @@ code.mono {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 420px;
+  grid-template-columns: minmax(0, 1.35fr) 400px;
   gap: 1px;
   background: var(--border);
 }
@@ -622,15 +622,147 @@ code.mono {
   color: var(--text-dim);
 }
 
-/* --- console: channel accordion --- */
-.channel-accordion {
+/* --- console: channel rail + workspace dock --- */
+.channel-workspace-layout {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 8px;
+  grid-template-columns: minmax(148px, 188px) minmax(0, 1fr);
+  gap: 12px;
   align-items: start;
+  min-height: 320px;
+}
+.channel-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: min(72vh, 920px);
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.channel-rail > .zone-header {
+  margin-top: 4px;
+}
+.channel-rail-tile {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px 4px 4px;
+  border: 1px solid var(--border);
+  border-left-width: 3px;
+  border-radius: 5px;
+  background: var(--bg-raised);
+  cursor: grab;
+  min-width: 0;
+}
+.channel-rail-tile:active {
+  cursor: grabbing;
+}
+.channel-rail-tile.docked {
+  border-color: var(--accent-2);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.channel-rail-tile.monitoring .channel-rail-label {
+  color: var(--green);
+}
+.channel-rail-tile-main {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  text-align: left;
+  padding: 2px 0;
+}
+.channel-rail-grip {
+  flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 1;
+  color: var(--text-dim);
+  letter-spacing: -0.12em;
+  user-select: none;
+}
+.channel-rail-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.channel-rail-tile .ch-power {
+  padding: 3px 6px;
+  font-size: 9px;
+}
+.channel-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 280px;
+  padding: 12px;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-raised) 55%, var(--bg));
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.channel-dock.drag-over {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+}
+.channel-dock-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 200px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.channel-dock-empty .muted {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.channel-dock .channel-card.workspace {
+  width: 100%;
+  max-width: none;
+}
+.channel-dock .channel-card.workspace .ch-card-body {
+  grid-template-columns: 1fr;
+  gap: 8px;
+  padding: 10px 12px 14px;
+}
+.channel-dock .channel-card.workspace .ch-card-body > .tx-button,
+.channel-dock .channel-card.workspace .ch-card-body > .waveform-strip {
+  grid-column: 1 / -1;
+}
+.channel-dock .channel-card.workspace .tx-button {
+  padding: 14px 12px;
+}
+.channel-dock .channel-card.workspace .tx-main {
+  font-size: 18px;
+}
+.channel-dock .channel-card.workspace .roster {
+  max-height: 180px;
+}
+.ch-card-name-static {
+  cursor: default;
+}
+/* Legacy pop-out / fallback */
+.channel-accordion {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
 }
 .channel-accordion > .zone-header {
-  grid-column: 1 / -1;
+  margin-top: 4px;
 }
 .channel-card {
   border: 1px solid var(--border);
@@ -2309,8 +2441,21 @@ code.mono {
   .console-col {
     overflow: visible;
   }
-  .channel-accordion {
+  .channel-workspace-layout {
     grid-template-columns: 1fr;
+  }
+  .channel-rail {
+    max-height: 220px;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-content: flex-start;
+  }
+  .channel-rail > .zone-header {
+    width: 100%;
+  }
+  .channel-rail-tile {
+    flex: 1 1 140px;
+    max-width: 200px;
   }
   .admin-body {
     flex-direction: column;

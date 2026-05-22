@@ -139,15 +139,30 @@ export function setChannelMonitoring(id: number, on: boolean): void {
   }
 }
 
-/** Expands or collapses a channel's full control surface. */
-export function toggleChannelExpanded(id: number): void {
-  const expanded = state.expanded.includes(id)
-    ? state.expanded.filter((x) => x !== id)
-    : [...state.expanded, id];
+/** Dock a channel on the workspace (full-size panel on the right). */
+export function dockChannel(id: number): void {
+  const expanded = state.expanded.includes(id) ? state.expanded : [...state.expanded, id];
   commit({ ...state, expanded });
 }
 
-/** Keyboard/quick action: turn the channel on, expand it, and make it primary. */
+/** Remove a channel from the workspace (returns to the left rail only). */
+export function undockChannel(id: number): void {
+  if (!state.expanded.includes(id)) {
+    return;
+  }
+  commit({ ...state, expanded: state.expanded.filter((x) => x !== id) });
+}
+
+/** Toggle workspace dock (full panel on the right). */
+export function toggleChannelExpanded(id: number): void {
+  if (state.expanded.includes(id)) {
+    undockChannel(id);
+  } else {
+    dockChannel(id);
+  }
+}
+
+/** Keyboard/quick action: turn the channel on, dock it, and make it primary. */
 export function focusChannel(id: number): void {
   const open = state.open.includes(id) ? state.open : [...state.open, id];
   const expanded = state.expanded.includes(id) ? state.expanded : [...state.expanded, id];

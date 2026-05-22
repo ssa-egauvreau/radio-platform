@@ -42,6 +42,8 @@ const VOICE_RECONNECT_DELAY_MS = 3000;
 
 interface ChannelPanelProps {
   channel: UserChannel;
+  /** `workspace` = full panel in the dock; `accordion` = legacy inline card. */
+  layout?: "workspace" | "accordion";
   /** Whether live voice is connected for this channel ("on"). */
   monitoring: boolean;
   /** Whether the full control surface is revealed. */
@@ -62,6 +64,7 @@ interface ChannelPanelProps {
  */
 export function ChannelPanel({
   channel,
+  layout = "accordion",
   monitoring,
   expanded,
   primary,
@@ -71,6 +74,7 @@ export function ChannelPanel({
   onToggleExpanded,
   onMakePrimary,
 }: ChannelPanelProps) {
+  const workspace = layout === "workspace";
   const [voiceState, setVoiceState] = useState<VoiceState>("connecting");
   const [voiceDetail, setVoiceDetail] = useState<string | null>(null);
   const [permission, setPermission] = useState<Permission>(channel.permission);
@@ -416,7 +420,7 @@ export function ChannelPanel({
 
   return (
     <div
-      className={`channel-card${expanded ? " expanded" : ""}${primary ? " primary" : ""}`}
+      className={`channel-card${expanded ? " expanded" : ""}${primary ? " primary" : ""}${workspace ? " workspace" : ""}`}
       style={channel.color ? { borderLeftColor: channel.color, borderLeftWidth: 3 } : undefined}
     >
       <div className="ch-card-head">
@@ -424,15 +428,23 @@ export function ChannelPanel({
           className="ch-disclosure"
           onClick={onToggleExpanded}
           aria-expanded={expanded}
-          title={expanded ? "Collapse channel" : "Expand channel"}
+          title={workspace ? "Remove from workspace" : expanded ? "Collapse channel" : "Expand channel"}
         >
-          {expanded ? "▾" : "▸"}
+          {workspace ? "✕" : expanded ? "▾" : "▸"}
         </button>
-        <button className="ch-card-name" onClick={onToggleExpanded}>
-          <IconRadio size={14} />
-          <span className="ch-card-label">{channel.name}</span>
-          {channel.simulcast && <span className="chan-sim-tag">SIM</span>}
-        </button>
+        {workspace ? (
+          <div className="ch-card-name ch-card-name-static">
+            <IconRadio size={14} />
+            <span className="ch-card-label">{channel.name}</span>
+            {channel.simulcast && <span className="chan-sim-tag">SIM</span>}
+          </div>
+        ) : (
+          <button type="button" className="ch-card-name" onClick={onToggleExpanded}>
+            <IconRadio size={14} />
+            <span className="ch-card-label">{channel.name}</span>
+            {channel.simulcast && <span className="chan-sim-tag">SIM</span>}
+          </button>
+        )}
         {monitoring &&
           (!expanded && connected ? (
             <span

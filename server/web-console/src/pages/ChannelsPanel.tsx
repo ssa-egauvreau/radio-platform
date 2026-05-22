@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent } from "react";
 import { api, describeError, type UserChannel } from "../api";
 import { useAuth } from "../auth";
 import { sounds } from "../sounds";
@@ -9,15 +9,17 @@ import { SimulcastManager } from "./SimulcastManager";
 import { SectionHeader, type SectionProps } from "./PopOutSection";
 import { keyLabel } from "./consoleShared";
 import {
+  dockChannel,
   focusChannel,
   reconcileChannels,
   setChannelMonitoring,
   setKeyboardOn,
   setPrimaryChannel,
   setPttCode,
-  toggleChannelExpanded,
+  undockChannel,
   useConsoleState,
 } from "../consoleStore";
+import { ChannelRailTile } from "./ChannelRailTile";
 
 /**
  * The "Channels" section — every channel the account may use, each as a
@@ -32,7 +34,38 @@ export function ChannelsPanel({ variant = "embedded", onPopOut }: SectionProps) 
   const [loading, setLoading] = useState(true);
   const [simulcastOpen, setSimulcastOpen] = useState(false);
   const [rebindingPtt, setRebindingPtt] = useState(false);
+  const [dockDragOver, setDockDragOver] = useState(false);
   const canSimulcast = user?.role === "admin" || user?.role === "dispatcher";
+
+  const dockedChannels = expanded
+    .map((id) => channels.find((c) => c.id === id))
+    .filter((c): c is UserChannel => !!c);
+  const dockedIdSet = new Set(expanded);
+
+  function handleDockDrop(e: DragEvent) {
+    e.preventDefault();
+    setDockDragOver(false);
+    const raw = e.dataTransfer.getData("text/channel-id");
+    const id = Number(raw);
+    if (!Number.isFinite(id) || id <= 0) {
+      return;
+    }
+    dockChannel(id);
+    if (!open.includes(id)) {
+      setChannelMonitoring(id, true);
+    }
+    setPrimaryChannel(id);
+  }
+
+  function toggleMonitorFromRail(channelId: number) {
+    if (open.includes(channelId)) {
+      setChannelMonitoring(channelId, false);
+      return;
+    }
+    setChannelMonitoring(channelId, true);
+    dockChannel(channelId);
+    setPrimaryChannel(channelId);
+  }
 
   const refreshChannels = useCallback(() => {
     api
@@ -119,28 +152,67 @@ export function ChannelsPanel({ variant = "embedded", onPopOut }: SectionProps) 
         <div className="empty">No channels assigned to this account.</div>
       )}
 
-      <div className="channel-accordion">
-        {channels.map((channel, index) => {
-          const showZone = !!channel.zone && channel.zone !== (channels[index - 1]?.zone ?? null);
-          return (
-            <Fragment key={channel.id}>
-              {showZone && <div className="zone-header">{channel.zone}</div>}
+      <div className="channel-workspace-layout">
+        <aside className="channel-rail" aria-label="Channel list">
+          {channels.map((channel, index) => {
+            const showZone = !!channel.zone && channel.zone !== (channels[index - 1]?.zone ?? null);
+            return (
+              <Fragment key={channel.id}>
+                {showZone && <div className="zone-header">{channel.zone}</div>}
+                <ChannelRailTile
+                  channel={channel}
+                  monitoring={open.includes(channel.id)}
+                  docked={dockedIdSet.has(channel.id)}
+                  onDock={() => {
+                    dockChannel(channel.id);
+                    if (!open.includes(channel.id)) {
+                      setChannelMonitoring(channel.id, true);
+                    }
+                    setPrimaryChannel(channel.id);
+                  }}
+                  onToggleMonitor={() => toggleMonitorFromRail(channel.id)}
+                />
+              </Fragment>
+            );
+          })}
+        </aside>
+
+        <section
+          className={`channel-dock${dockDragOver ? " drag-over" : ""}`}
+          aria-label="Channel workspace"
+          onDragOver={(e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = "move";
+            setDockDragOver(true);
+          }}
+          onDragLeave={() => setDockDragOver(false)}
+          onDrop={handleDockDrop}
+        >
+          {dockedChannels.length === 0 ? (
+            <div className="channel-dock-empty">
+              <p>Drag channels here from the list on the left.</p>
+              <p className="muted">Or click a channel name to open it at full size.</p>
+            </div>
+          ) : (
+            dockedChannels.map((channel) => (
               <ChannelPanel
+                key={channel.id}
                 channel={channel}
+                layout="workspace"
                 monitoring={open.includes(channel.id)}
-                expanded={expanded.includes(channel.id)}
+                expanded
                 primary={primary === channel.id}
                 pttCode={pttCode}
                 keyboardOn={keyboardOn}
                 onToggleMonitor={() =>
                   setChannelMonitoring(channel.id, !open.includes(channel.id))
                 }
-                onToggleExpanded={() => toggleChannelExpanded(channel.id)}
+                onToggleExpanded={() => undockChannel(channel.id)}
                 onMakePrimary={() => setPrimaryChannel(channel.id)}
               />
-            </Fragment>
-          );
-        })}
+            ))
+          )}
+        </section>
       </div>
 
       {channels.length > 0 && (
