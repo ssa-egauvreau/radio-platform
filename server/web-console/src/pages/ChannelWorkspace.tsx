@@ -11,13 +11,11 @@ import type { UserChannel } from "../api";
 import { ChannelPanel } from "./ChannelPanel";
 import {
   WORKSPACE_GRID_GAP_PX,
-  WORKSPACE_GRID_UNIT_ROW_PX,
   WORKSPACE_MIN_COL_PX,
   cycleWorkspaceTileSize,
   getWorkspaceTile,
   moveWorkspaceTileToEnd,
   reorderWorkspaceTile,
-  setWorkspaceTileRosterRows,
   syncWorkspaceTilesForViewport,
   useConsoleState,
   workspaceColsForWidth,
@@ -228,7 +226,6 @@ export function ChannelWorkspace({
       aria-label="Channel workspace"
       style={{
         gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${WORKSPACE_MIN_COL_PX}px), 1fr))`,
-        gridAutoRows: `${WORKSPACE_GRID_UNIT_ROW_PX}px`,
       }}
       onDragOver={(e) => {
         e.preventDefault();
@@ -250,10 +247,9 @@ export function ChannelWorkspace({
           const tile = tilesById.get(channel.id) ?? getWorkspaceTile(channel.id);
           const size = workspaceTileSize(tile);
           const colSpan = Math.max(1, Math.min(tile.colSpan, cols));
-          const rowSpan = tile.rowSpan;
           const workspaceWide = colSpan >= 2;
           const monitoring = open.includes(channel.id);
-          const footprint = workspaceTileFootprintLabel({ colSpan, rowSpan });
+          const footprint = workspaceTileFootprintLabel(tile);
           const isOver = dragOverChannelId === channel.id && dropEdge;
           return (
             <div
@@ -262,7 +258,7 @@ export function ChannelWorkspace({
               className={`channel-workspace-tile widget-${size}${!monitoring ? " channel-off" : ""}${
                 moveChannelId === channel.id ? " moving" : ""
               }${isOver ? ` drag-over drop-${dropEdge}` : ""}`}
-              style={{ gridColumn: `span ${colSpan}`, gridRow: `span ${rowSpan}` }}
+              style={{ gridColumn: `span ${colSpan}` }}
               title={`${channel.name} · ${footprint}`}
             >
               <div
@@ -275,8 +271,8 @@ export function ChannelWorkspace({
                 <button
                   type="button"
                   className="channel-workspace-size-btn"
-                  title={nextSizeTitle(size, { colSpan, rowSpan })}
-                  aria-label={nextSizeTitle(size, { colSpan, rowSpan })}
+                  title={nextSizeTitle(size, tile)}
+                  aria-label={nextSizeTitle(size, tile)}
                   onPointerDown={(e) => e.stopPropagation()}
                   onClick={() => cycleWorkspaceTileSize(channel.id, cols)}
                 >
@@ -297,9 +293,6 @@ export function ChannelWorkspace({
                   onToggleMonitor={() => onToggleMonitor(channel.id)}
                   onToggleExpanded={() => onUndock(channel.id)}
                   onMakePrimary={() => onMakePrimary(channel.id)}
-                  onRosterMemberCount={(count) =>
-                    setWorkspaceTileRosterRows(channel.id, count, cols)
-                  }
                 />
                 {!monitoring && <div className="channel-off-overlay" aria-hidden />}
               </div>

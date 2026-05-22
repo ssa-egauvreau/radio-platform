@@ -15,7 +15,7 @@ import {
 const STATE_KEY = "securityradio.console.state";
 
 /** Bump when workspace layout rules change — triggers one-time localStorage migration. */
-const CURRENT_LAYOUT_VERSION = 11;
+const CURRENT_LAYOUT_VERSION = 12;
 const MAX_STATE_STORAGE_BYTES = 256 * 1024;
 const MAX_OPEN_CHANNELS = 16;
 const MAX_DOCKED_CHANNELS = 12;
@@ -39,8 +39,6 @@ export type WorkspaceWidgetSize = "small" | "medium" | "large";
 
 /** Minimum width of one workspace grid column. */
 export const WORKSPACE_MIN_COL_PX = 172;
-/** Fixed height of one workspace grid row (must match CSS --workspace-row-unit). */
-export const WORKSPACE_GRID_UNIT_ROW_PX = 100;
 /** Maximum column units per tile. */
 export const WORKSPACE_MAX_COL_SPAN = 3;
 /** Maximum row units per tile (large + busy roster). */
@@ -647,7 +645,7 @@ export function cycleWorkspaceTileSize(id: number, availableCols = WORKSPACE_MAX
   setWorkspaceTileSize(id, next, availableCols);
 }
 
-/** Re-clamp medium/large footprints when the workspace column count changes. */
+/** Re-clamp column spans when the workspace gets narrower or wider. */
 export function syncWorkspaceTilesForViewport(availableCols: number): void {
   if (state.expanded.length === 0) {
     return;
@@ -661,15 +659,9 @@ export function syncWorkspaceTilesForViewport(availableCols: number): void {
     const size = workspaceTileSize(tile);
     const preset = workspacePresetForSize(size, cols);
     const colSpan = Math.min(preset.colSpan, cols);
-    let rowSpan = tile.rowSpan;
-    if (size !== "large") {
-      rowSpan = preset.rowSpan;
-    } else {
-      rowSpan = Math.max(preset.rowSpan, rowSpan);
-    }
     const clamped: WorkspaceTileLayout = {
       colSpan: clampWorkspaceColSpan(colSpan),
-      rowSpan: clampWorkspaceRowSpan(rowSpan),
+      rowSpan: preset.rowSpan,
     };
     if (tile.colSpan !== clamped.colSpan || tile.rowSpan !== clamped.rowSpan) {
       nextLayout[key] = clamped;
@@ -679,34 +671,6 @@ export function syncWorkspaceTilesForViewport(availableCols: number): void {
   if (changed) {
     commit({ ...state, workspaceLayout: nextLayout });
   }
-}
-
-/** Grow or shrink a large tile's row span from the connected-user count. */
-export function setWorkspaceTileRosterRows(
-  id: number,
-  memberCount: number,
-  availableCols = WORKSPACE_MAX_COLS,
-): void {
-  if (!state.expanded.includes(id)) {
-    return;
-  }
-  const tile = getWorkspaceTile(id);
-  if (workspaceTileSize(tile) !== "large") {
-    return;
-  }
-  const cols = Math.max(1, availableCols);
-  const preset = workspacePresetForSize("large", cols);
-  const colSpan = Math.min(tile.colSpan, cols, preset.colSpan);
-  const rowSpan = workspaceLargeRowSpanForRoster(memberCount, colSpan);
-  const key = layoutKey(id);
-  const next: WorkspaceTileLayout = { colSpan, rowSpan };
-  if (tile.colSpan === next.colSpan && tile.rowSpan === next.rowSpan) {
-    return;
-  }
-  commit({
-    ...state,
-    workspaceLayout: { ...state.workspaceLayout, [key]: next },
-  });
 }
 
 /** Reorder the docked sequence so the dragged tile lands before/after the target (drag-to-move). */

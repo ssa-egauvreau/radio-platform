@@ -846,10 +846,11 @@ code.mono {
 /* --- Mission Control: 12-col grid, four slots, vertical packing --- */
 .channel-workspace-rows.channel-workspace-grid {
   display: grid;
-  /* Many narrow columns so several 1×1 (S) widgets sit side by side; row height set inline. */
+  /* Width from column span; height grows with content (no fixed row clipping). */
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 172px), 1fr));
+  grid-auto-rows: minmax(min-content, auto);
   grid-auto-flow: row dense;
-  align-items: stretch;
+  align-items: start;
   gap: 8px;
   align-content: start;
   /* Size to the docked tiles so the page is the only scrollbar (no scroll-in-scroll). */
@@ -893,11 +894,11 @@ code.mono {
   position: relative;
   min-width: 0;
   width: 100%;
-  min-height: 0;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
+  align-self: start;
   border: 1px solid color-mix(in srgb, #fff 22%, var(--border));
   border-radius: 14px;
   background: color-mix(in srgb, var(--bg-raised) 58%, transparent);
@@ -1026,17 +1027,12 @@ code.mono {
 }
 .channel-workspace-tile-inner {
   position: relative;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   display: flex;
   flex-direction: column;
-  min-height: 0;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
   -webkit-user-drag: none;
-}
-.channel-workspace-tile.widget-large .channel-workspace-tile-inner {
-  overflow-y: auto;
-  overflow-x: hidden;
 }
 .channel-workspace-tile-inner input,
 .channel-workspace-tile-inner button,
@@ -1047,14 +1043,12 @@ code.mono {
   -webkit-user-drag: none;
 }
 .channel-workspace-tile .channel-card.workspace {
-  flex: 1 1 auto;
-  min-height: 0;
-  height: 100%;
+  flex: 0 1 auto;
   width: 100%;
   max-width: 100%;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: visible;
   box-sizing: border-box;
   border: none;
   border-radius: 0;
@@ -1070,13 +1064,18 @@ code.mono {
   min-width: 0;
 }
 .channel-workspace-tile .channel-card.workspace .ch-card-body {
-  flex: 1 1 auto;
-  min-height: 0;
+  flex: 0 1 auto;
   min-width: 0;
-  /* Content-sized — the tile grows to fit; the page scrolls, not the panel. */
   overflow: visible;
-  display: grid;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
   box-sizing: border-box;
+}
+.channel-workspace-tile .channel-card.workspace[data-width="wide"] .ch-card-body.workspace-dense {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 6px;
 }
 /* Single-column dense stack only for narrow (small / phone full-width) tiles. Wide tiles
    (medium & large on desktop) keep the 2-column control grid so they don't waste the width. */
@@ -1166,20 +1165,54 @@ code.mono {
   font-size: 10px;
 }
 .channel-card.workspace[data-widget-size="small"] .ch-card-body.workspace-dense {
-  padding: 2px 4px 4px;
-  gap: 2px;
+  padding: 2px 4px 5px;
+  gap: 3px;
 }
-.channel-card.workspace[data-widget-size="small"] .volume-row {
+.channel-card.workspace[data-widget-size="small"] .volume-row,
+.channel-card.workspace[data-widget-size="small"] .ch-card-head .volume-row {
   margin: 0;
+  gap: 4px;
+  padding: 2px 6px 0;
+}
+.channel-card.workspace[data-widget-size="small"] .vol-slider {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.channel-card.workspace[data-widget-size="small"] .vol-pct {
+  font-size: 9px;
+  min-width: 2.5em;
 }
 .channel-card.workspace[data-widget-size="small"] .ch-card-head.workspace-head {
   padding: 0;
 }
 .channel-card.workspace[data-widget-size="small"] .ch-card-toolbar {
-  gap: 2px;
+  gap: 3px;
+  justify-content: stretch;
 }
-.channel-workspace-tile.widget-small .channel-card.workspace .ch-card-body {
+.channel-card.workspace[data-widget-size="small"] .ch-card-toolbar .ch-power,
+.channel-card.workspace[data-widget-size="small"] .ch-card-toolbar .ch-quick-ptt {
+  flex: 1 1 0;
+  min-width: 0;
+  justify-content: center;
+  min-height: 32px;
+}
+.channel-card.workspace[data-widget-size="medium"] .ch-card-toolbar .ch-quick-ptt {
+  min-height: 30px;
+}
+.channel-workspace-tile.widget-small .channel-card.workspace,
+.channel-workspace-tile.widget-medium .channel-card.workspace {
   font-size: 11px;
+}
+.channel-card.workspace[data-widget-size="medium"] .ch-card-body.workspace-dense {
+  padding: 4px 6px 6px;
+}
+.channel-card.workspace[data-widget-size="medium"] .live-tx-console {
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.channel-card.workspace[data-widget-size="medium"] .live-tx-transcript {
+  max-height: 3.2em;
+  overflow: hidden;
 }
 .channel-card.workspace[data-widget-size="medium"] .live-tx-console {
   margin: 0;
@@ -1509,14 +1542,15 @@ code.mono {
 .channel-workspace-tile .channel-card.workspace .ch-card-body > .audio-out-row {
   grid-column: 1 / -1;
 }
-.channel-workspace-tile .channel-card.workspace .tx-button-integrated {
-  min-height: 56px;
+.channel-workspace-tile.widget-large .channel-card.workspace .tx-button-integrated {
+  min-height: 48px;
+  flex: 0 0 auto;
 }
 .channel-workspace-tile .channel-card.workspace .roster {
-  flex: 1 1 auto;
-  min-height: 0;
-  max-height: none;
-  overflow: visible;
+  flex: 0 1 auto;
+  max-height: min(220px, 35vh);
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .channel-dock {

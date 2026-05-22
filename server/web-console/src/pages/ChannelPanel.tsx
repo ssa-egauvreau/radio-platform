@@ -63,8 +63,6 @@ interface ChannelPanelProps {
   onToggleMonitor: () => void;
   onToggleExpanded: () => void;
   onMakePrimary: () => void;
-  /** Large widgets: grow grid row span from connected-user count. */
-  onRosterMemberCount?: (count: number) => void;
 }
 
 /**
@@ -85,7 +83,6 @@ export function ChannelPanel({
   onToggleMonitor,
   onToggleExpanded,
   onMakePrimary,
-  onRosterMemberCount,
 }: ChannelPanelProps) {
   const workspace = layout === "workspace";
   const [voiceState, setVoiceState] = useState<VoiceState>("connecting");
@@ -483,7 +480,8 @@ export function ChannelPanel({
   const wsSize = workspace ? workspaceWidgetSize : "large";
   const showToolbar = true;
   const showVolume = true;
-  const showMemberCount = workspace && (wsSize === "small" || wsSize === "medium");
+  const showStatusChip = !workspace || wsSize !== "small";
+  const showMemberCount = workspace;
   const showMeta = !workspace || wsSize === "large";
   const showAudioOut = !workspace || wsSize === "large";
   const showActions = !workspace || wsSize === "large";
@@ -491,7 +489,76 @@ export function ChannelPanel({
   const showTonesCompact = workspace && wsSize === "medium";
   const showLiveTx = !workspace || wsSize === "medium" || wsSize === "large";
   const showRoster = !workspace || wsSize === "large";
-  const showMainTxButton = !workspace || wsSize !== "small";
+  /** Full XMIT pad only on large — S/M use the toolbar PTT so nothing is clipped. */
+  const showMainTxButton = !workspace || wsSize === "large";
+  /** Small tiles: volume sits above ON/PTT in the header so every control stays visible. */
+  const volumeInHead = workspace && wsSize === "small";
+
+  const volumeRow = showVolume ? (
+    <div className="volume-row">
+      <button
+        className="vol-mute"
+        onClick={toggleMute}
+        title={muted ? "Unmute channel" : "Mute channel"}
+      >
+        {muted ? <IconVolumeMuted size={16} /> : <IconVolume size={16} />}
+      </button>
+      <input
+        className="vol-slider"
+        type="range"
+        min={0}
+        max={1}
+        step={0.05}
+        value={volume}
+        onChange={(e) => changeVolume(Number(e.target.value))}
+      />
+      <span className="vol-pct">{muted ? "Muted" : `${Math.round(volume * 100)}%`}</span>
+    </div>
+  ) : null;
+
+  const workspaceToolbar = showToolbar ? (
+    <div className="ch-card-toolbar">
+      {showStatusChip && monitoring &&
+        (connected ? (
+          <span className={`state-chip ${transmitting ? "tx" : receiving ? "rx" : voiceState}`}>
+            {transmitting ? "ON AIR" : receiving ? "RX" : STATE_LABEL[voiceState]}
+          </span>
+        ) : (
+          <span className={`state-chip ${voiceState}`}>{STATE_LABEL[voiceState]}</span>
+        ))}
+      {showStatusChip && monitoring && receiving && !transmitting && (
+        <span className="state-chip busy">BUSY</span>
+      )}
+      <button
+        type="button"
+        className={monitoring ? "ch-power active" : "ch-power"}
+        onClick={onToggleMonitor}
+        aria-pressed={monitoring}
+        title={monitoring ? "Turn channel off (stop monitoring)" : "Turn channel on (monitor)"}
+      >
+        <IconHeadphones size={16} />
+        <span>{monitoring ? "ON" : "OFF"}</span>
+      </button>
+      <button
+        type="button"
+        className={transmitting ? "ch-quick-ptt active" : "ch-quick-ptt"}
+        disabled={!monitoring || !connected || !canTransmit}
+        onPointerDown={beginTransmit}
+        onPointerUp={stopTx}
+        onPointerCancel={stopTx}
+        title={
+          !monitoring
+            ? "Turn the channel on to talk"
+            : !canTransmit
+              ? "Listen-only on this channel"
+              : "Hold to talk"
+        }
+      >
+        <IconBolt size={16} />
+        <span>{transmitting ? "ON AIR" : "PTT"}</span>
+      </button>
+    </div>
+  ) : null;
 
   return (
     <div
@@ -527,49 +594,8 @@ export function ChannelPanel({
               </div>
               {showMemberCount && <ChannelMemberCount channelName={channel.name} />}
             </div>
-            {showToolbar && (
-              <div className="ch-card-toolbar">
-                {monitoring &&
-                  (connected ? (
-                    <span className={`state-chip ${transmitting ? "tx" : receiving ? "rx" : voiceState}`}>
-                      {transmitting ? "ON AIR" : receiving ? "RX" : STATE_LABEL[voiceState]}
-                    </span>
-                  ) : (
-                    <span className={`state-chip ${voiceState}`}>{STATE_LABEL[voiceState]}</span>
-                  ))}
-                {monitoring && receiving && !transmitting && (
-                  <span className="state-chip busy">BUSY</span>
-                )}
-                <button
-                  type="button"
-                  className={monitoring ? "ch-power active" : "ch-power"}
-                  onClick={onToggleMonitor}
-                  aria-pressed={monitoring}
-                  title={monitoring ? "Turn channel off (stop monitoring)" : "Turn channel on (monitor)"}
-                >
-                  <IconHeadphones size={16} />
-                  <span>{monitoring ? "ON" : "OFF"}</span>
-                </button>
-                <button
-                  type="button"
-                  className={transmitting ? "ch-quick-ptt active" : "ch-quick-ptt"}
-                  disabled={!monitoring || !connected || !canTransmit}
-                  onPointerDown={beginTransmit}
-                  onPointerUp={stopTx}
-                  onPointerCancel={stopTx}
-                  title={
-                    !monitoring
-                      ? "Turn the channel on to talk"
-                      : !canTransmit
-                        ? "Listen-only on this channel"
-                        : "Hold to talk"
-                  }
-                >
-                  <IconBolt size={16} />
-                  <span>{transmitting ? "ON AIR" : "PTT"}</span>
-                </button>
-              </div>
-            )}
+            {volumeInHead && volumeRow}
+            {workspaceToolbar}
           </>
         ) : (
           <>
@@ -664,27 +690,7 @@ export function ChannelPanel({
         </div>
       )}
 
-      {showVolume && (
-      <div className="volume-row">
-        <button
-          className="vol-mute"
-          onClick={toggleMute}
-          title={muted ? "Unmute channel" : "Mute channel"}
-        >
-          {muted ? <IconVolumeMuted size={16} /> : <IconVolume size={16} />}
-        </button>
-        <input
-          className="vol-slider"
-          type="range"
-          min={0}
-          max={1}
-          step={0.05}
-          value={volume}
-          onChange={(e) => changeVolume(Number(e.target.value))}
-        />
-        <span className="vol-pct">{muted ? "Muted" : `${Math.round(volume * 100)}%`}</span>
-      </div>
-      )}
+      {showVolume && !volumeInHead && volumeRow}
 
       {showAudioOut && (
       <label className="audio-out-row">
@@ -902,9 +908,7 @@ export function ChannelPanel({
         </div>
       )}
 
-      {showRoster && (
-        <ChannelRoster channelName={channel.name} onMemberCount={onRosterMemberCount} />
-      )}
+      {showRoster && <ChannelRoster channelName={channel.name} />}
       </div>
       )}
     </div>
