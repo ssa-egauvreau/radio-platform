@@ -628,6 +628,12 @@ code.mono {
 .console-col:has(.channel-workspace-layout) {
   background: color-mix(in srgb, var(--bg) 88%, var(--panel));
 }
+.mission-control-channels .section-panel {
+  min-height: 0;
+}
+.mission-control-channels .channel-workspace-layout {
+  min-height: 320px;
+}
 .console-col h3 {
   margin: 0 0 12px;
   font-size: 12px;
@@ -732,8 +738,10 @@ code.mono {
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 6px;
   align-content: start;
+  align-items: stretch;
   min-height: 320px;
-  padding: 8px;
+  padding: 8px 8px 14px;
+  overflow: visible;
   border: 2px dashed color-mix(in srgb, var(--border) 85%, var(--accent-2) 15%);
   border-radius: 8px;
   background: color-mix(in srgb, var(--bg) 62%, var(--bg-raised));
@@ -761,12 +769,21 @@ code.mono {
   position: relative;
   min-width: 0;
   min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: visible;
+}
+.channel-workspace-tile.resizing {
+  z-index: 5;
 }
 .channel-workspace-tile-inner {
   position: relative;
+  flex: 1 1 auto;
   height: 100%;
   min-height: 0;
+  padding-bottom: 12px;
   cursor: grab;
+  overflow: visible;
 }
 .channel-workspace-tile-inner:active {
   cursor: grabbing;
@@ -777,16 +794,19 @@ code.mono {
 }
 .channel-workspace-tile .channel-card.workspace {
   height: 100%;
-  min-height: 0;
+  min-height: 100%;
   display: flex;
   flex-direction: column;
+  overflow: visible;
+}
+.channel-workspace-tile .channel-card.workspace .ch-card-head.workspace-head {
+  flex: 0 0 auto;
 }
 .channel-workspace-tile .channel-card.workspace .ch-card-body {
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 0;
   overflow: visible;
-  display: flex;
-  flex-direction: column;
+  display: grid;
 }
 .channel-off-overlay {
   position: absolute;
@@ -806,18 +826,20 @@ code.mono {
   padding: 0;
 }
 .channel-workspace-resize-h {
-  left: 12px;
-  right: 12px;
+  left: 8px;
+  right: 8px;
   bottom: 0;
-  height: 8px;
+  height: 14px;
   cursor: ns-resize;
+  z-index: 12;
 }
 .channel-workspace-resize-w {
-  top: 12px;
-  bottom: 12px;
+  top: 8px;
+  bottom: 20px;
   right: 0;
-  width: 8px;
+  width: 12px;
   cursor: ew-resize;
+  z-index: 12;
 }
 .channel-workspace-resize-h:hover,
 .channel-workspace-resize-w:hover {
@@ -896,17 +918,39 @@ code.mono {
   padding: 0.5rem 1rem 0;
   margin: 0;
 }
-.mission-control-grid {
-  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+.mission-control-layout {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  gap: 0;
+  background: var(--border);
 }
-.mission-control-grid .console-col:first-child {
-  min-width: 0;
+.mission-control-channels {
+  min-width: 280px;
+  min-height: 0;
+  overflow: auto;
 }
-.mission-control-grid .map-alerts-col {
+.mission-control-col-splitter {
+  flex: 0 0 8px;
+  margin: 0;
+  border: none;
+  border-left: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  background: color-mix(in srgb, var(--border) 70%, var(--accent-2) 30%);
+  cursor: ew-resize;
+  padding: 0;
+  align-self: stretch;
+}
+.mission-control-col-splitter:hover {
+  background: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+.mission-control-map-alerts {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  min-width: 0;
+  min-width: 240px;
   overflow: hidden;
 }
 .map-alerts-column {
@@ -998,9 +1042,19 @@ code.mono {
 
 .channel-workspace-tile .channel-card.workspace .ch-card-body,
 .channel-workspace-tile .channel-card.workspace .ch-card-body.workspace-dense {
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 5px 6px;
-  padding: 6px 8px 8px;
+  padding: 6px 8px 10px;
+  align-content: start;
+}
+.channel-workspace-tile .channel-card.workspace .ch-actions-grid,
+.channel-workspace-tile .channel-card.workspace .ch-actions-stack {
+  gap: 4px;
+}
+.channel-workspace-tile .channel-card.workspace .ch-action-cell {
+  min-width: 0;
+  font-size: 10px;
+  padding: 6px 5px;
 }
 .channel-workspace-tile .channel-card.workspace .ch-card-body > .tx-button,
 .channel-workspace-tile .channel-card.workspace .ch-card-body > .live-tx,
@@ -3089,9 +3143,26 @@ code.mono {
     gap: 8px;
   }
   /* Stack the console columns; the 1px grid gap keeps separators. */
-  .console-grid {
+  .console-grid,
+  .mission-control-layout {
     display: flex;
     flex-direction: column;
+  }
+  .mission-control-col-splitter {
+    flex: 0 0 8px;
+    width: 100%;
+    height: 8px;
+    cursor: ns-resize;
+    border-left: none;
+    border-right: none;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .mission-control-channels,
+  .mission-control-map-alerts {
+    flex: 1 1 auto !important;
+    min-width: 0;
+    width: 100%;
   }
   .console-col {
     overflow: visible;

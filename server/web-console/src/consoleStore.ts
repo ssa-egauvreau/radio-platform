@@ -23,17 +23,19 @@ export interface WorkspaceTileLayout {
 }
 
 export const WORKSPACE_COLS = 12;
-export const WORKSPACE_ROW_PX = 28;
+/** Pixel height per workspace grid row — must fit channel controls without clipping. */
+export const WORKSPACE_ROW_PX = 40;
+export const WORKSPACE_GRID_GAP_PX = 6;
 /** Default tile width before viewport-based sizing (2-wide on a 12-column grid). */
 export const WORKSPACE_DEFAULT_COL_SPAN = 6;
 /** Breakpoints aligned with channel-dock 3-wide / 4-wide layout. */
 export const WORKSPACE_BREAK_3_WIDE = 1180;
 export const WORKSPACE_BREAK_4_WIDE = 1580;
-export const WORKSPACE_DEFAULT_ROW_SPAN = 11;
+export const WORKSPACE_DEFAULT_ROW_SPAN = 14;
 export const WORKSPACE_MIN_COL_SPAN = 3;
 export const WORKSPACE_MAX_COL_SPAN = 12;
-export const WORKSPACE_MIN_ROW_SPAN = 6;
-export const WORKSPACE_MAX_ROW_SPAN = 28;
+export const WORKSPACE_MIN_ROW_SPAN = 8;
+export const WORKSPACE_MAX_ROW_SPAN = 36;
 
 export interface ConsoleState {
   /** Channel ids with live voice connected ("on" / monitoring). */

@@ -7,6 +7,7 @@ import {
   WORKSPACE_MAX_ROW_SPAN,
   WORKSPACE_MIN_COL_SPAN,
   WORKSPACE_MIN_ROW_SPAN,
+  WORKSPACE_GRID_GAP_PX,
   WORKSPACE_ROW_PX,
   defaultWorkspaceTile,
   getWorkspaceTile,
@@ -71,7 +72,11 @@ export function ChannelWorkspace({
   const maxRow = dockedChannels.reduce((m, ch) => {
     const t = getWorkspaceTile(ch.id);
     return Math.max(m, t.row + t.rowSpan);
-  }, 8);
+  }, 10);
+  const gridMinHeight = Math.max(
+    360,
+    maxRow * WORKSPACE_ROW_PX + (maxRow - 1) * WORKSPACE_GRID_GAP_PX + 48,
+  );
 
   const handleDockDrop = useCallback(
     (e: DragEvent) => {
@@ -98,8 +103,16 @@ export function ChannelWorkspace({
     [dockedChannels, onDockFromRail],
   );
 
+  function tilePixelHeight(rowSpan: number): number {
+    return rowSpan * WORKSPACE_ROW_PX + (rowSpan - 1) * WORKSPACE_GRID_GAP_PX;
+  }
+
   function beginMove(e: PointerEvent<HTMLDivElement>, channelId: number) {
-    if ((e.target as HTMLElement).closest("button, input, select, a, .tx-button, .vol-slider")) {
+    if (
+      (e.target as HTMLElement).closest(
+        "button, input, select, a, .tx-button, .vol-slider, .channel-workspace-resize-h, .channel-workspace-resize-w",
+      )
+    ) {
       return;
     }
     const tile = getWorkspaceTile(channelId);
@@ -130,6 +143,7 @@ export function ChannelWorkspace({
   }
 
   function beginResize(e: PointerEvent<HTMLButtonElement>, channelId: number) {
+    e.preventDefault();
     e.stopPropagation();
     const origin = getWorkspaceTile(channelId);
     const startY = e.clientY;
@@ -154,6 +168,7 @@ export function ChannelWorkspace({
   }
 
   function beginResizeWidth(e: PointerEvent<HTMLButtonElement>, channelId: number) {
+    e.preventDefault();
     e.stopPropagation();
     if (!gridRef.current) {
       return;
@@ -183,7 +198,11 @@ export function ChannelWorkspace({
     <section
       ref={gridRef}
       className={`channel-workspace-grid${dockDragOver ? " drag-over" : ""}`}
-      style={{ gridAutoRows: `${WORKSPACE_ROW_PX}px`, minHeight: maxRow * WORKSPACE_ROW_PX + 48 }}
+      style={{
+        gridAutoRows: `${WORKSPACE_ROW_PX}px`,
+        gap: `${WORKSPACE_GRID_GAP_PX}px`,
+        minHeight: gridMinHeight,
+      }}
       data-workspace-cols={viewportWide}
       aria-label="Channel workspace"
       onDragOver={(e) => {
@@ -197,7 +216,9 @@ export function ChannelWorkspace({
       {dockedChannels.length === 0 ? (
         <div className="channel-workspace-empty">
           <p>Drag channels here from the list on the left.</p>
-          <p className="muted">Snap next to other channels · drag the bottom edge to resize height</p>
+          <p className="muted">
+            Snap next to other channels · drag the bottom edge to resize taller · right edge for width
+          </p>
         </div>
       ) : (
         dockedChannels.map((channel) => {
@@ -212,6 +233,7 @@ export function ChannelWorkspace({
               style={{
                 gridColumn: `${tile.col + 1} / span ${tile.colSpan}`,
                 gridRow: `${tile.row + 1} / span ${tile.rowSpan}`,
+                minHeight: tilePixelHeight(tile.rowSpan),
               }}
             >
               <div

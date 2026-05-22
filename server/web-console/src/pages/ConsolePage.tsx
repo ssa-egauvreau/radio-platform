@@ -3,6 +3,7 @@ import { bindLostLinkBusyAlerts, sounds } from "../sounds";
 import { Topbar } from "../Topbar";
 import { ChannelsPanel } from "./ChannelsPanel";
 import { MapAlertsColumn } from "./MapAlertsColumn";
+import { MissionControlLayout } from "./MissionControlLayout";
 import { Link } from "react-router-dom";
 import { PopOutSection } from "./PopOutSection";
 
@@ -26,8 +27,8 @@ export function ConsolePage() {
         <span className="muted"> — transcripts, 10-33, plate lookups, 10-8 CAD notes</span>
       </p>
 
-      <div className="console-grid mission-control-grid">
-        <div className="console-col">
+      <MissionControlLayout
+        channels={
           <PopOutSection
             title="Channels"
             route="/console/channels"
@@ -36,12 +37,9 @@ export function ConsolePage() {
             height={900}
             render={(onPopOut) => <ChannelsPanel onPopOut={onPopOut} />}
           />
-        </div>
-
-        <div className="console-col map-alerts-col">
-          <MapAlertsColumn />
-        </div>
-      </div>
+        }
+        mapAlerts={<MapAlertsColumn />}
+      />
     </div>
   );
 }
