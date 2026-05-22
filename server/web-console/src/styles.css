@@ -846,9 +846,10 @@ code.mono {
 /* --- Mission Control: 12-col grid, four slots, vertical packing --- */
 .channel-workspace-rows.channel-workspace-grid {
   display: grid;
-  /* Many narrow columns so several small (S) widgets sit side by side; inline style may override. */
+  /* Many narrow columns so several 1×1 (S) widgets sit side by side; row height set inline. */
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 172px), 1fr));
   grid-auto-flow: row dense;
+  align-items: stretch;
   gap: 8px;
   align-content: start;
   /* Size to the docked tiles so the page is the only scrollbar (no scroll-in-scroll). */
@@ -893,12 +894,10 @@ code.mono {
   min-width: 0;
   width: 100%;
   min-height: 0;
-  /* Size to the channel panel's content (no fixed widget height, no internal scroll). */
-  align-self: start;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  overflow: visible;
+  overflow: hidden;
   border: 1px solid color-mix(in srgb, #fff 22%, var(--border));
   border-radius: 14px;
   background: color-mix(in srgb, var(--bg-raised) 58%, transparent);
@@ -1032,9 +1031,12 @@ code.mono {
   flex-direction: column;
   min-height: 0;
   min-width: 0;
-  /* Grow with the panel's content — the page is the only scrollbar. */
-  overflow: visible;
+  overflow: hidden;
   -webkit-user-drag: none;
+}
+.channel-workspace-tile.widget-large .channel-workspace-tile-inner {
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 .channel-workspace-tile-inner input,
 .channel-workspace-tile-inner button,
@@ -1047,11 +1049,12 @@ code.mono {
 .channel-workspace-tile .channel-card.workspace {
   flex: 1 1 auto;
   min-height: 0;
+  height: 100%;
   width: 100%;
   max-width: 100%;
   display: flex;
   flex-direction: column;
-  overflow: visible;
+  overflow: hidden;
   box-sizing: border-box;
   border: none;
   border-radius: 0;
@@ -1161,6 +1164,22 @@ code.mono {
 .channel-card.workspace[data-widget-size="small"] .ch-power {
   padding: 4px 6px;
   font-size: 10px;
+}
+.channel-card.workspace[data-widget-size="small"] .ch-card-body.workspace-dense {
+  padding: 2px 4px 4px;
+  gap: 2px;
+}
+.channel-card.workspace[data-widget-size="small"] .volume-row {
+  margin: 0;
+}
+.channel-card.workspace[data-widget-size="small"] .ch-card-head.workspace-head {
+  padding: 0;
+}
+.channel-card.workspace[data-widget-size="small"] .ch-card-toolbar {
+  gap: 2px;
+}
+.channel-workspace-tile.widget-small .channel-card.workspace .ch-card-body {
+  font-size: 11px;
 }
 .channel-card.workspace[data-widget-size="medium"] .live-tx-console {
   margin: 0;

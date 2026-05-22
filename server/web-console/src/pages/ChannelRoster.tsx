@@ -45,7 +45,13 @@ function tier(ms: number): string {
 }
 
 /** Live list of radios/operators connected to a channel's voice stream. */
-export function ChannelRoster({ channelName }: { channelName: string }) {
+export function ChannelRoster({
+  channelName,
+  onMemberCount,
+}: {
+  channelName: string;
+  onMemberCount?: (count: number) => void;
+}) {
   const [members, setMembers] = useState<ChannelMember[]>([]);
   const aliasFor = useUnitAliasResolver();
 
@@ -68,6 +74,10 @@ export function ChannelRoster({ channelName }: { channelName: string }) {
       window.clearInterval(timer);
     };
   }, [channelName]);
+
+  useEffect(() => {
+    onMemberCount?.(members.length);
+  }, [members.length, onMemberCount]);
 
   return (
     <div className="roster">

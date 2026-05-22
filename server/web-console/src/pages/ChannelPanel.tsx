@@ -63,6 +63,8 @@ interface ChannelPanelProps {
   onToggleMonitor: () => void;
   onToggleExpanded: () => void;
   onMakePrimary: () => void;
+  /** Large widgets: grow grid row span from connected-user count. */
+  onRosterMemberCount?: (count: number) => void;
 }
 
 /**
@@ -83,6 +85,7 @@ export function ChannelPanel({
   onToggleMonitor,
   onToggleExpanded,
   onMakePrimary,
+  onRosterMemberCount,
 }: ChannelPanelProps) {
   const workspace = layout === "workspace";
   const [voiceState, setVoiceState] = useState<VoiceState>("connecting");
@@ -899,7 +902,9 @@ export function ChannelPanel({
         </div>
       )}
 
-      {showRoster && <ChannelRoster channelName={channel.name} />}
+      {showRoster && (
+        <ChannelRoster channelName={channel.name} onMemberCount={onRosterMemberCount} />
+      )}
       </div>
       )}
     </div>
