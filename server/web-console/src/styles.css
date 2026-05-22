@@ -806,17 +806,20 @@ code.mono {
   font-size: 9px;
 }
 
-/* --- Mission Control: equal-width channel rows (max 4 per row) --- */
-.channel-workspace-rows {
-  display: flex;
-  flex-direction: column;
+/* --- Mission Control: 12-col grid, four slots, vertical packing --- */
+.channel-workspace-rows.channel-workspace-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 6px;
+  align-items: start;
+  align-content: start;
   min-height: 320px;
   min-width: 0;
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
   overflow-x: hidden;
+  overflow-y: auto;
   padding: 8px;
   border: 2px dashed color-mix(in srgb, var(--border) 85%, var(--accent-2) 15%);
   border-radius: 8px;
@@ -829,14 +832,8 @@ code.mono {
   border-color: var(--accent);
   background: color-mix(in srgb, var(--accent) 8%, var(--bg));
 }
-.channel-workspace-row {
-  display: flex;
-  flex-direction: row;
-  align-items: flex-start;
-  gap: 6px;
-  min-width: 0;
-}
 .channel-workspace-empty {
+  grid-column: 1 / -1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -849,12 +846,8 @@ code.mono {
 }
 .channel-workspace-tile {
   position: relative;
-  flex: 1 1 0;
-  flex-grow: 1;
-  flex-shrink: 1;
-  align-self: flex-start;
   min-width: 0;
-  max-width: 100%;
+  min-height: 0;
   box-sizing: border-box;
   display: flex;
   flex-direction: column;
@@ -920,31 +913,57 @@ code.mono {
   display: grid;
   box-sizing: border-box;
 }
+.channel-workspace-tile .channel-card.workspace[data-tier="6"] .ch-card-body,
+.channel-workspace-tile .channel-card.workspace[data-tier="7"] .ch-card-body,
 .channel-workspace-tile .channel-card.workspace[data-tier="8"] .ch-card-body,
 .channel-workspace-tile .channel-card.workspace[data-tier="9"] .ch-card-body,
 .channel-workspace-tile .channel-card.workspace[data-tier="10"] .ch-card-body,
-.channel-workspace-tile .channel-card.workspace[data-tier="11"] .ch-card-body {
+.channel-workspace-tile .channel-card.workspace[data-tier="11"] .ch-card-body,
+.channel-workspace-tile .channel-card.workspace[data-tier="12"] .ch-card-body {
   overflow-y: auto;
 }
 .channel-card.workspace[data-tier="0"] .ch-card-body.workspace-dense,
-.channel-card.workspace[data-tier="1"] .ch-card-body.workspace-dense {
+.channel-card.workspace[data-tier="1"] .ch-card-body.workspace-dense,
+.channel-card.workspace[data-tier="2"] .ch-card-body.workspace-dense {
   display: flex;
   flex-direction: column;
   align-content: stretch;
   grid-template-columns: none;
+  gap: 4px;
+  padding: 4px 6px 6px;
+}
+.channel-card.workspace[data-tier="0"] .ch-card-body.workspace-dense > .volume-row,
+.channel-card.workspace[data-tier="1"] .ch-card-body.workspace-dense > .volume-row {
+  flex: 0 0 auto;
+  margin: 0;
 }
 .channel-card.workspace[data-tier="0"] .ch-card-body.workspace-dense > .tx-button,
-.channel-card.workspace[data-tier="1"] .ch-card-body.workspace-dense > .tx-button {
+.channel-card.workspace[data-tier="1"] .ch-card-body.workspace-dense > .tx-button,
+.channel-card.workspace[data-tier="2"] .ch-card-body.workspace-dense > .tx-button {
   flex: 1 1 0;
   min-height: 0;
   grid-column: auto;
 }
 .channel-card.workspace[data-tier="0"] .tx-button-integrated,
-.channel-card.workspace[data-tier="1"] .tx-button-integrated {
+.channel-card.workspace[data-tier="1"] .tx-button-integrated,
+.channel-card.workspace[data-tier="2"] .tx-button-integrated {
   min-height: 0;
+  padding: 6px;
 }
-.channel-card.workspace[data-tier="0"] .ch-card-head.workspace-head {
+.channel-card.workspace[data-tier="0"] .tx-button-integrated .tx-main {
+  font-size: 15px;
+}
+.channel-card.workspace[data-tier="0"] .tx-sub,
+.channel-card.workspace[data-tier="1"] .tx-sub {
+  display: none;
+}
+.channel-card.workspace[data-tier="0"] .ch-card-head.workspace-head,
+.channel-card.workspace[data-tier="1"] .ch-card-head.workspace-head {
   flex: 0 0 auto;
+}
+.channel-card.workspace[data-tier="0"] .ch-card-toolbar,
+.channel-card.workspace[data-tier="1"] .ch-card-toolbar {
+  padding: 2px 4px 3px;
 }
 .channel-off-overlay {
   position: absolute;
@@ -1200,7 +1219,10 @@ code.mono {
   grid-column: 1 / -1;
 }
 .channel-workspace-tile .channel-card.workspace .tx-button-integrated {
-  min-height: 80px;
+  min-height: 56px;
+}
+.channel-workspace-tile .channel-card.workspace[data-tier="0"] .tx-button-integrated {
+  min-height: 0;
 }
 .channel-workspace-tile .channel-card.workspace .roster {
   flex: 1 1 auto;

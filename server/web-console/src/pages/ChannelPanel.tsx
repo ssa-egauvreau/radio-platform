@@ -473,14 +473,14 @@ export function ChannelPanel({
   const canTransmit = permission !== "listen_only";
   const transmitting = voiceState === "transmitting";
   const wsTier = workspace ? workspaceTier : 99;
-  const showToolbar = wsTier >= 1;
-  const showMeta = wsTier >= 2;
-  const showVolume = wsTier >= 3;
-  const showAudioOut = wsTier >= 4;
-  const showActions = wsTier >= 5;
-  const showTones = wsTier >= 6;
-  const showLiveTx = wsTier >= 7;
-  const showRoster = wsTier >= 8;
+  const showToolbar = true;
+  const showVolume = wsTier >= 0;
+  const showMeta = wsTier >= 1;
+  const showAudioOut = wsTier >= 2;
+  const showActions = wsTier >= 3;
+  const showTones = wsTier >= 4;
+  const showLiveTx = wsTier >= 5;
+  const showRoster = wsTier >= 6;
 
   return (
     <div
@@ -722,7 +722,7 @@ export function ChannelPanel({
           <IconBolt size={26} />
           {transmitting ? "ON AIR" : !canTransmit ? "LISTEN ONLY" : receiving ? "BUSY" : "XMIT"}
         </span>
-        {(wsTier >= 2 || !workspace) && (
+        {(wsTier >= 1 || !workspace) && (
           <span className="tx-sub">
             {transmitting
               ? "release to stop"

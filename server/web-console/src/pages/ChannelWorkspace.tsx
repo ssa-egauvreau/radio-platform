@@ -2,8 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type
 import type { UserChannel } from "../api";
 import { ChannelPanel } from "./ChannelPanel";
 import {
-  WORKSPACE_GRID_GAP_PX,
-  WORKSPACE_MAX_PER_ROW,
   WORKSPACE_ROW_PX,
   dockChannel,
   getWorkspaceTile,
@@ -13,32 +11,41 @@ import {
   workspaceTierFromRowSpan,
 } from "../consoleStore";
 
-function chunkChannels<T>(items: T[], size: number): T[][] {
-  const rows: T[][] = [];
-  for (let i = 0; i < items.length; i += size) {
-    rows.push(items.slice(i, i + size));
-  }
-  return rows;
-}
-
-function tilePixelHeight(rowSpan: number): number {
-  return rowSpan * WORKSPACE_ROW_PX + (rowSpan - 1) * WORKSPACE_GRID_GAP_PX;
-}
-
-function insertIndexFromPointer(clientX: number, root: HTMLElement, channelIds: number[]): number {
-  const tiles = [...root.querySelectorAll<HTMLElement>("[data-channel-id]")];
-  if (tiles.length === 0) {
-    return 0;
-  }
-  for (let i = 0; i < tiles.length; i++) {
-    const id = Number(tiles[i]!.dataset.channelId);
+function insertIndexFromPointer(
+  clientX: number,
+  clientY: number,
+  root: HTMLElement,
+  channelIds: number[],
+): number {
+  type Entry = { id: number; idx: number; top: number; left: number; midY: number; midX: number };
+  const entries: Entry[] = [];
+  for (const id of channelIds) {
+    const el = root.querySelector<HTMLElement>(`[data-channel-id="${id}"]`);
+    if (!el) {
+      continue;
+    }
     const idx = channelIds.indexOf(id);
     if (idx < 0) {
       continue;
     }
-    const rect = tiles[i]!.getBoundingClientRect();
-    if (clientX < rect.left + rect.width / 2) {
-      return idx;
+    const rect = el.getBoundingClientRect();
+    entries.push({
+      id,
+      idx,
+      top: rect.top,
+      left: rect.left,
+      midY: rect.top + rect.height / 2,
+      midX: rect.left + rect.width / 2,
+    });
+  }
+  entries.sort((a, b) => a.top - b.top || a.left - b.left);
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i]!;
+    if (clientY < e.midY || (clientY <= e.top + 8 && clientX < e.midX)) {
+      return e.idx;
+    }
+    if (clientY < e.top + 4) {
+      return e.idx;
     }
   }
   return channelIds.length;
@@ -71,7 +78,6 @@ export function ChannelWorkspace({
   const [dragOverChannelId, setDragOverChannelId] = useState<number | null>(null);
 
   const channelIds = useMemo(() => dockedChannels.map((c) => c.id), [dockedChannels]);
-  const rows = useMemo(() => chunkChannels(dockedChannels, WORKSPACE_MAX_PER_ROW), [dockedChannels]);
 
   useEffect(() => {
     if (channelIds.length === 0) {
@@ -90,7 +96,12 @@ export function ChannelWorkspace({
       if (!Number.isFinite(id) || id <= 0 || !rootRef.current) {
         return;
       }
-      const insertAt = insertIndexFromPointer(e.clientX, rootRef.current, channelIds);
+      const insertAt = insertIndexFromPointer(
+        e.clientX,
+        e.clientY,
+        rootRef.current,
+        channelIds,
+      );
       if (channelIds.includes(id)) {
         const next = [...channelIds];
         const from = next.indexOf(id);
@@ -169,8 +180,9 @@ export function ChannelWorkspace({
   return (
     <section
       ref={rootRef}
-      className={`channel-workspace-rows${dockDragOver ? " drag-over" : ""}`}
+      className={`channel-workspace-rows channel-workspace-grid${dockDragOver ? " drag-over" : ""}`}
       aria-label="Channel workspace"
+      style={{ gridAutoRows: `${WORKSPACE_ROW_PX}px` }}
       onDragOver={(e) => {
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
@@ -183,59 +195,58 @@ export function ChannelWorkspace({
         <div className="channel-workspace-empty">
           <p>Drag channels here from the list on the left.</p>
           <p className="muted">
-            Up to four per row, equal width · drag left or right to reorder · drag bottom edge to resize
-            (snaps to show more or fewer controls)
+            Up to four across · short tiles stack vertically · drag bottom edge to resize (volume + XMIT at
+            smallest)
           </p>
         </div>
       ) : (
-        rows.map((rowChannels) => (
-          <div key={rowChannels.map((c) => c.id).join("-")} className="channel-workspace-row">
-            {rowChannels.map((channel) => {
-              const tile = getWorkspaceTile(channel.id);
-              const monitoring = open.includes(channel.id);
-              return (
-                <div
-                  key={channel.id}
-                  data-channel-id={channel.id}
-                  className={`channel-workspace-tile${!monitoring ? " channel-off" : ""}${
-                    resizeChannelId === channel.id ? " resizing" : ""
-                  }${dragOverChannelId === channel.id ? " drag-over" : ""}`}
-                  style={{ height: tilePixelHeight(tile.rowSpan) }}
-                  draggable
-                  onDragStart={(e) => onTileDragStart(e, channel.id)}
-                  onDragOver={(e) => onTileDragOver(e, channel.id)}
-                  onDragLeave={() =>
-                    setDragOverChannelId((id) => (id === channel.id ? null : id))
-                  }
-                  onDrop={(e) => onTileDrop(e, channel.id)}
-                >
-                  <div className="channel-workspace-tile-inner">
-                    <ChannelPanel
-                      channel={channel}
-                      layout="workspace"
-                      workspaceTier={workspaceTierFromRowSpan(tile.rowSpan)}
-                      monitoring={monitoring}
-                      expanded
-                      primary={primary === channel.id}
-                      pttCode={pttCode}
-                      keyboardOn={keyboardOn}
-                      onToggleMonitor={() => onToggleMonitor(channel.id)}
-                      onToggleExpanded={() => onUndock(channel.id)}
-                      onMakePrimary={() => onMakePrimary(channel.id)}
-                    />
-                    {!monitoring && <div className="channel-off-overlay" aria-hidden />}
-                  </div>
-                  <button
-                    type="button"
-                    className="channel-workspace-resize-h"
-                    aria-label="Resize height (snaps to each control section)"
-                    onPointerDown={(e) => beginResizeHeight(e, channel.id)}
-                  />
-                </div>
-              );
-            })}
-          </div>
-        ))
+        dockedChannels.map((channel) => {
+          const tile = getWorkspaceTile(channel.id);
+          const monitoring = open.includes(channel.id);
+          return (
+            <div
+              key={channel.id}
+              data-channel-id={channel.id}
+              className={`channel-workspace-tile${!monitoring ? " channel-off" : ""}${
+                resizeChannelId === channel.id ? " resizing" : ""
+              }${dragOverChannelId === channel.id ? " drag-over" : ""}`}
+              style={{
+                gridColumn: `${tile.col + 1} / span ${tile.colSpan}`,
+                gridRow: `${tile.row + 1} / span ${tile.rowSpan}`,
+              }}
+              draggable
+              onDragStart={(e) => onTileDragStart(e, channel.id)}
+              onDragOver={(e) => onTileDragOver(e, channel.id)}
+              onDragLeave={() =>
+                setDragOverChannelId((id) => (id === channel.id ? null : id))
+              }
+              onDrop={(e) => onTileDrop(e, channel.id)}
+            >
+              <div className="channel-workspace-tile-inner">
+                <ChannelPanel
+                  channel={channel}
+                  layout="workspace"
+                  workspaceTier={workspaceTierFromRowSpan(tile.rowSpan)}
+                  monitoring={monitoring}
+                  expanded
+                  primary={primary === channel.id}
+                  pttCode={pttCode}
+                  keyboardOn={keyboardOn}
+                  onToggleMonitor={() => onToggleMonitor(channel.id)}
+                  onToggleExpanded={() => onUndock(channel.id)}
+                  onMakePrimary={() => onMakePrimary(channel.id)}
+                />
+                {!monitoring && <div className="channel-off-overlay" aria-hidden />}
+              </div>
+              <button
+                type="button"
+                className="channel-workspace-resize-h"
+                aria-label="Resize height (snaps to each control section)"
+                onPointerDown={(e) => beginResizeHeight(e, channel.id)}
+              />
+            </div>
+          );
+        })
       )}
     </section>
   );

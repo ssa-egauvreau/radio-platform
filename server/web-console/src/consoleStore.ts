@@ -34,13 +34,12 @@ export const WORKSPACE_BREAK_4_WIDE = 1580;
 export const WORKSPACE_DEFAULT_ROW_SPAN = 14;
 export const WORKSPACE_MIN_COL_SPAN = 3;
 export const WORKSPACE_MAX_COL_SPAN = 12;
-export const WORKSPACE_MIN_ROW_SPAN = 8;
+export const WORKSPACE_MIN_ROW_SPAN = 5;
 export const WORKSPACE_MAX_ROW_SPAN = 36;
 /**
- * Resize snap points (rowSpan). Each step adds another block of controls; smallest is XMIT-only.
- * Must stay sorted ascending and within min/max row span.
+ * Resize snap points (rowSpan). Smallest ≈ title + toolbar + volume + XMIT; each step adds more controls.
  */
-export const WORKSPACE_ROW_SNAPS: readonly number[] = [8, 9, 10, 11, 12, 13, 14, 16, 18, 22, 28, 36];
+export const WORKSPACE_ROW_SNAPS: readonly number[] = [5, 6, 7, 8, 9, 10, 12, 14, 16, 20, 26, 32, 36];
 /** Maximum channel panels side-by-side in one row (equal width, full row). */
 export const WORKSPACE_MAX_PER_ROW = 4;
 
@@ -60,7 +59,7 @@ export function snapWorkspaceRowSpan(rowSpan: number): number {
 }
 
 /**
- * Compactness tier for workspace channel cards (0 = XMIT only, higher = more sections).
+ * Compactness tier for workspace channel cards (0 = volume + XMIT, higher = more sections).
  * Aligns with WORKSPACE_ROW_SNAPS indices.
  */
 export function workspaceTierFromRowSpan(rowSpan: number): number {
@@ -269,31 +268,46 @@ function snapWorkspaceColSpan(colSpan: number, width: number): number {
   return Math.max(WORKSPACE_MIN_COL_SPAN, Math.min(WORKSPACE_MAX_COL_SPAN, best));
 }
 
+/** Column width on the 12-column workspace grid (four slots across). */
+export const WORKSPACE_SLOT_COL_SPAN = Math.floor(WORKSPACE_COLS / WORKSPACE_MAX_PER_ROW);
+
 /**
- * Assigns equal-width tiles per row (max 4). One channel fills the row; two split 50/50, etc.
+ * Packs channels into up to four columns; short tiles leave room for another channel below.
  */
-export function relayoutWorkspace(
+export function packWorkspaceLayout(
   expandedIds: number[],
   previous: Record<string, WorkspaceTileLayout>,
 ): Record<string, WorkspaceTileLayout> {
   const out: Record<string, WorkspaceTileLayout> = {};
-  expandedIds.forEach((id, index) => {
-    const row = Math.floor(index / WORKSPACE_MAX_PER_ROW);
-    const indexInRow = index % WORKSPACE_MAX_PER_ROW;
-    const countInRow = Math.min(
-      WORKSPACE_MAX_PER_ROW,
-      expandedIds.length - row * WORKSPACE_MAX_PER_ROW,
-    );
-    const colSpan = Math.floor(WORKSPACE_COLS / countInRow);
-    const prev = previous[layoutKey(id)];
-    out[layoutKey(id)] = {
-      col: indexInRow * colSpan,
+  const columnBottom = new Array<number>(WORKSPACE_MAX_PER_ROW).fill(0);
+  for (const id of expandedIds) {
+    const key = layoutKey(id);
+    const prev = previous[key];
+    const rowSpan = snapWorkspaceRowSpan(prev?.rowSpan ?? WORKSPACE_DEFAULT_ROW_SPAN);
+    let slot = 0;
+    for (let s = 1; s < WORKSPACE_MAX_PER_ROW; s++) {
+      if (columnBottom[s]! < columnBottom[slot]!) {
+        slot = s;
+      }
+    }
+    const row = columnBottom[slot]!;
+    out[key] = {
+      col: slot * WORKSPACE_SLOT_COL_SPAN,
       row,
-      colSpan,
-      rowSpan: snapWorkspaceRowSpan(prev?.rowSpan ?? WORKSPACE_DEFAULT_ROW_SPAN),
+      colSpan: WORKSPACE_SLOT_COL_SPAN,
+      rowSpan,
     };
-  });
+    columnBottom[slot] = row + rowSpan;
+  }
   return out;
+}
+
+/** @deprecated Alias — use packWorkspaceLayout */
+export function relayoutWorkspace(
+  expandedIds: number[],
+  previous: Record<string, WorkspaceTileLayout>,
+): Record<string, WorkspaceTileLayout> {
+  return packWorkspaceLayout(expandedIds, previous);
 }
 
 export function getWorkspaceTile(id: number): WorkspaceTileLayout {
@@ -320,15 +334,16 @@ export function setWorkspaceTileRowSpan(id: number, rowSpan: number): void {
   if (!prev) {
     return;
   }
+  const merged = {
+    ...state.workspaceLayout,
+    [key]: {
+      ...prev,
+      rowSpan: snapWorkspaceRowSpan(rowSpan),
+    },
+  };
   commit({
     ...state,
-    workspaceLayout: relayoutWorkspace(state.expanded, {
-      ...state.workspaceLayout,
-      [key]: {
-        ...prev,
-        rowSpan: snapWorkspaceRowSpan(rowSpan),
-      },
-    }),
+    workspaceLayout: packWorkspaceLayout(state.expanded, merged),
   });
 }
 
