@@ -590,7 +590,7 @@ export function ChannelPanel({
       </div>
 
       {expanded && (
-      <div className="ch-card-body">
+      <div className={`ch-card-body${workspace ? " workspace-dense" : ""}`}>
       <div className="live-meta">
         Permission: <strong>{PERMISSION_LABEL[permission]}</strong>
       </div>
@@ -680,69 +680,87 @@ export function ChannelPanel({
         />
       )}
 
-      <button className="txmode-btn" onClick={toggleTxMode}>
-        TX MODE: <strong>{txDigital ? "COMPRESSED · FAST" : "HIGH QUALITY · NORMAL SPEED"}</strong>
-      </button>
+      <div className={workspace ? "ch-actions-grid" : "ch-actions-stack"}>
+        <button className="txmode-btn ch-action-cell" onClick={toggleTxMode} type="button">
+          {workspace ? (
+            <>
+              <span className="ch-action-kicker">TX mode</span>
+              <strong>{txDigital ? "Fast" : "HQ"}</strong>
+            </>
+          ) : (
+            <>
+              TX MODE:{" "}
+              <strong>{txDigital ? "COMPRESSED · FAST" : "HIGH QUALITY · NORMAL SPEED"}</strong>
+            </>
+          )}
+        </button>
 
-      <button
-        className={marker ? "marker-button active" : "marker-button"}
-        disabled={!connected || !canTransmit}
-        onClick={toggleMarker}
-      >
-        <IconBeacon size={18} />
-        <span>{marker ? "10-33 MARKER ON" : "10-33 CHANNEL MARKER"}</span>
-      </button>
-      {marker && <div className="marker-note">Emergency traffic — marker tone every 12s</div>}
+        <button
+          type="button"
+          className={marker ? "marker-button active ch-action-cell" : "marker-button ch-action-cell"}
+          disabled={!connected || !canTransmit}
+          onClick={toggleMarker}
+          title="10-33 emergency marker tone"
+        >
+          <IconBeacon size={workspace ? 14 : 18} />
+          <span>{marker ? (workspace ? "10-33 ON" : "10-33 MARKER ON") : workspace ? "10-33" : "10-33 CHANNEL MARKER"}</span>
+        </button>
 
-      <button
-        className={aiDispatch ? "marker-button active" : "marker-button"}
-        disabled={!aiDispatchReady}
-        onClick={toggleAiDispatch}
-        title={
-          aiDispatchHint ??
-          "When on, unit transmissions on this channel can trigger an AI dispatcher reply on the air."
-        }
-      >
-        <span>{aiDispatch ? "AI DISPATCH ON" : "AI DISPATCH OFF"}</span>
-      </button>
-      {aiDispatchHint && (
-        <div className="marker-note muted">{aiDispatchHint}</div>
-      )}
-      {aiDispatch && !aiDispatchHint && (
-        <div className="marker-note">
-          Unit traffic is transcribed; AI replies as {channel.name} traffic when configured.
+        <button
+          type="button"
+          className={aiDispatch ? "marker-button active ch-action-cell" : "marker-button ch-action-cell"}
+          disabled={!aiDispatchReady}
+          onClick={toggleAiDispatch}
+          title={
+            aiDispatchHint ??
+            "When on, unit transmissions on this channel can trigger an AI dispatcher reply on the air."
+          }
+        >
+          <span>{aiDispatch ? (workspace ? "AI ON" : "AI DISPATCH ON") : workspace ? "AI OFF" : "AI DISPATCH OFF"}</span>
+        </button>
+      </div>
+      {(marker || aiDispatchHint || (aiDispatch && !aiDispatchHint)) && (
+        <div className="ch-action-notes">
+          {marker && <span className="marker-note">10-33 marker tone every 12s</span>}
+          {aiDispatchHint && <span className="marker-note muted">{aiDispatchHint}</span>}
+          {aiDispatch && !aiDispatchHint && (
+            <span className="marker-note">AI transcribes and replies on this channel</span>
+          )}
         </div>
       )}
 
       <div className="toneout">
-        <div className="toneout-row">
+        <div className={workspace ? "ch-tone-grid" : "toneout-row"}>
           <button
-            className="toneout-btn"
+            type="button"
+            className="toneout-btn ch-action-cell"
             disabled={!connected || !canTransmit}
             onClick={() => sendTone("routine")}
           >
-            <IconToneRoutine size={16} />
+            <IconToneRoutine size={workspace ? 13 : 16} />
             Routine
           </button>
           <button
-            className="toneout-btn priority"
+            type="button"
+            className="toneout-btn priority ch-action-cell"
             disabled={!connected || !canTransmit}
             onClick={() => sendTone("priority")}
           >
-            <IconTonePriority size={16} />
+            <IconTonePriority size={workspace ? 13 : 16} />
             Priority
           </button>
           <button
-            className="toneout-btn"
+            type="button"
+            className="toneout-btn ch-action-cell"
             disabled={!connected || !canTransmit}
             onClick={() => sendTone("status")}
           >
-            <IconToneStatus size={16} />
+            <IconToneStatus size={workspace ? 13 : 16} />
             Status
           </button>
         </div>
         {toneOuts.some((t) => t.has_audio) && (
-          <div className="toneout-custom">
+          <div className={workspace ? "ch-tone-grid" : "toneout-custom"}>
             {toneOuts
               .filter((t) => t.has_audio)
               .map((toneOut) => {
@@ -751,7 +769,8 @@ export function ChannelPanel({
                 return (
                   <button
                     key={toneOut.id}
-                    className={looping ? "toneout-btn custom looping" : "toneout-btn custom"}
+                    type="button"
+                    className={looping ? "toneout-btn custom looping ch-action-cell" : "toneout-btn custom ch-action-cell"}
                     disabled={!connected || !canTransmit}
                     onClick={() => void fireToneOut(toneOut)}
                     title={
@@ -762,17 +781,17 @@ export function ChannelPanel({
                         : `Play "${toneOut.name}"`
                     }
                   >
-                    <ToneOutBadge toneOut={toneOut} size={16} />
+                    <ToneOutBadge toneOut={toneOut} size={workspace ? 14 : 16} />
                     <span className="toneout-label">{toneOut.name}</span>
-                    {isLoop && <span className="toneout-mode">{looping ? "■ loop" : "↻ loop"}</span>}
+                    {isLoop && <span className="toneout-mode">{looping ? "■" : "↻"}</span>}
                   </button>
                 );
               })}
           </div>
         )}
-        <button className="stopall-btn" onClick={stopAllSounds}>
-          <IconStop size={16} />
-          Stop All Sounds
+        <button type="button" className="stopall-btn" onClick={stopAllSounds}>
+          <IconStop size={workspace ? 13 : 16} />
+          {workspace ? "Stop all" : "Stop All Sounds"}
         </button>
       </div>
 
