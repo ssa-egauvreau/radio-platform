@@ -44,7 +44,7 @@ export function numberToWords(n: number): string {
   return o === 0 ? TENS[t]! : `${TENS[t]}-${digitWord(o)}`;
 }
 
-function twoDigitSpoken(n: number): string {
+export function twoDigitSpoken(n: number): string {
   if (n < 10) {
     return ONES[n]!;
   }

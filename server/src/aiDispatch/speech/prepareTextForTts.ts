@@ -1,12 +1,16 @@
 /**
  * ElevenLabs TTS preparation — ported from 10-8-alert-dashboard prepareTextForTTS().
  * Turns dispatcher text into phrasing radios expect: "913" → "nine thirteen",
- * "32-08" → "thirty-two oh-eight", "27-000" → "twenty seven thousand", SSML pacing.
+ * "32-08" → "thirty-two oh-eight", "10-97" → "ten" + pause + "ninety seven",
+ * "27-000" → "twenty seven thousand", other dashes → SSML breaks (not "to").
  */
 
 import { CALL_TYPE_SPOKEN, callTypeSpokenKeysByLength } from "./callTypeSpoken.js";
-import { spokenAccountCode } from "./numbers.js";
+import { digitWord, spokenAccountCode, twoDigitSpoken } from "./numbers.js";
 import { formatPhoneForTts } from "./phoneSpeech.js";
+
+/** SSML pause where a dash appeared — avoids TTS reading hyphen as "to". */
+const DASH_BREAK = '<break time="0.28s" />';
 
 const COMMAND_STAFF_PRONUNCIATION: Record<string, string> = {
   "27-000": "twenty seven thousand",
@@ -119,8 +123,8 @@ function expandCallTypesForSpeech(text: string): string {
 }
 
 /**
- * SSA account codes in XX-YY form (18-06, 32-08) — before tens-code despace.
- * Skips 10-XX (ten codes) and 27-0XX (command staff, already expanded).
+ * SSA account codes in XX-YY form (18-06, 32-08).
+ * Skips 10-XX (handled by [expandTenCodesForSpeech]) and 27-0XX (command staff).
  */
 function expandAccountCodesForSpeech(text: string): string {
   return text.replace(/\b(\d{2})-(\d{2})\b/g, (match, a: string, b: string) => {
@@ -134,6 +138,35 @@ function expandAccountCodesForSpeech(text: string): string {
   });
 }
 
+function spokenTenCodeSuffix(suffix: string): string {
+  const digits = suffix.replace(/\D/g, "");
+  if (!digits) {
+    return suffix;
+  }
+  if (digits.length === 1) {
+    return digitWord(parseInt(digits, 10));
+  }
+  if (digits.length === 2) {
+    return twoDigitSpoken(parseInt(digits, 10));
+  }
+  if (digits.length === 3) {
+    const head = parseInt(digits[0]!, 10);
+    const tail = parseInt(digits.slice(1), 10);
+    return `${digitWord(head)} ${twoDigitSpoken(tail)}`;
+  }
+  return digits
+    .split("")
+    .map((d) => digitWord(parseInt(d, 10)))
+    .join(" ");
+}
+
+/** 10-97 → "ten" + pause + "ninety seven" (not "ten to ninety seven"). */
+function expandTenCodesForSpeech(text: string): string {
+  return text.replace(/\b10-(\d{1,3})\b/gi, (_match, suffix: string) => {
+    return `ten${DASH_BREAK}${spokenTenCodeSuffix(suffix)}`;
+  });
+}
+
 /** US phone patterns embedded in free text → digit-group TTS form. */
 function expandPhoneNumbersInText(text: string): string {
   return text.replace(
@@ -142,15 +175,36 @@ function expandPhoneNumbersInText(text: string): string {
   );
 }
 
-/** Digit-hyphen-digit → spaces so TTS reads "10 8" not "ten dash eight". */
-function despaceHyphensInCodes(text: string): string {
-  if (!text) {
+function speakDigitToken(token: string): string {
+  if (/^\d{1,2}$/.test(token)) {
+    return twoDigitSpoken(parseInt(token, 10));
+  }
+  if (/^\d{3}$/.test(token)) {
+    const head = parseInt(token[0]!, 10);
+    const tail = parseInt(token.slice(1), 10);
+    return `${digitWord(head)} ${twoDigitSpoken(tail)}`;
+  }
+  return token
+    .split("")
+    .map((d) => digitWord(parseInt(d, 10)))
+    .join(" ");
+}
+
+/** Remaining digit-hyphen-digit (e.g. rare codes) → spoken groups with a pause, not "to". */
+function expandRemainingDigitHyphens(text: string): string {
+  let out = text.replace(/\b(\d+)-(\d+)\b/g, (_match, left: string, right: string) => {
+    return `${speakDigitToken(left)}${DASH_BREAK}${speakDigitToken(right)}`;
+  });
+  out = out.replace(/(\d)-([A-Za-z])\b/gi, `$1${DASH_BREAK}$2`);
+  return out;
+}
+
+/** Any leftover hyphen → SSML break (dash must never be read as "to"). */
+function hyphensToSpeechBreaks(text: string): string {
+  if (!text.includes("-")) {
     return text;
   }
-  let out = text;
-  out = out.replace(/(\d)-(\d)/g, "$1 $2");
-  out = out.replace(/(\d)-([A-Za-z])\b/g, "$1 $2");
-  return out;
+  return text.replace(/-/g, DASH_BREAK);
 }
 
 function addSpeechPacing(text: string): string {
@@ -170,8 +224,10 @@ export function prepareTextForTts(text: string): string {
   let out = expandAbbreviationsForSpeech(text);
   out = expandCallTypesForSpeech(out);
   out = expandAccountCodesForSpeech(out);
+  out = expandTenCodesForSpeech(out);
   out = expandPhoneNumbersInText(out);
-  out = despaceHyphensInCodes(out);
+  out = expandRemainingDigitHyphens(out);
+  out = hyphensToSpeechBreaks(out);
   out = addSpeechPacing(out);
   return out;
 }
