@@ -268,6 +268,21 @@ export interface AgencySound {
   updated_at: string;
 }
 
+export interface KbDocument {
+  id: number;
+  title: string;
+  category: string;
+  property_code: string | null;
+  filename: string | null;
+  mime: string;
+  byte_size: number;
+  status: string;
+  error: string | null;
+  chunk_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface IntegrationItem {
   key: string;
   label: string;
@@ -707,6 +722,14 @@ export const api = {
   deleteSound: (kind: string) =>
     request<{ ok: boolean }>("DELETE", `/v1/admin/sounds/${encodeURIComponent(kind)}`),
 
+  // --- AI dispatcher knowledge base --------------------------------------
+  listKbDocuments: () =>
+    request<{ documents: KbDocument[]; categories: string[] }>("GET", "/v1/admin/kb/documents"),
+  deleteKbDocument: (id: number) =>
+    request<{ ok: boolean }>("DELETE", `/v1/admin/kb/documents/${id}`),
+  reindexKbDocument: (id: number) =>
+    request<{ ok: boolean }>("POST", `/v1/admin/kb/documents/${id}/reindex`),
+
   // --- agency branding ---------------------------------------------------
   deleteAgencyLogo: () => request<{ ok: boolean }>("DELETE", "/v1/admin/agency/logo"),
 
@@ -786,6 +809,41 @@ export async function uploadSound(kind: string, file: File): Promise<void> {
     }
     throw new ApiError(code, res.status);
   }
+}
+
+/** Uploads a knowledge-base PDF (raw body — metadata rides on the query string). */
+export async function uploadKbDocument(
+  file: File,
+  meta: { title: string; category: string; propertyCode?: string },
+): Promise<KbDocument> {
+  const headers: Record<string, string> = { "Content-Type": "application/pdf" };
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  const params = new URLSearchParams({
+    title: meta.title,
+    category: meta.category,
+    filename: file.name,
+  });
+  if (meta.propertyCode?.trim()) {
+    params.set("property_code", meta.propertyCode.trim());
+  }
+  const res = await fetch(`/v1/admin/kb/documents?${params.toString()}`, {
+    method: "POST",
+    headers,
+    body: file,
+  });
+  if (!res.ok) {
+    handle401IfNeeded(res.status);
+    let code = `http_${res.status}`;
+    try {
+      code = (JSON.parse(await res.text()) as { error?: string }).error ?? code;
+    } catch {
+      /* keep the generic code */
+    }
+    throw new ApiError(code, res.status);
+  }
+  return (JSON.parse(await res.text()) as { document: KbDocument }).document;
 }
 
 /** Fetches a transmission's WAV audio as a Blob (a bearer header cannot ride on <audio src>). */

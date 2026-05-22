@@ -186,19 +186,26 @@ export async function parseDispatcherTransmission(opts: {
   unitId: string;
   channelName: string;
   transcript: string;
+  /** Relevant agency knowledge (RAG) appended to the user turn, not the cached system prompt. */
+  knowledgeContext?: string;
 }): Promise<AiDispatchParseResult | null> {
   const pacific = new Date().toLocaleString("en-US", {
     timeZone: "America/Los_Angeles",
     hour12: false,
   });
 
+  const knowledge = opts.knowledgeContext?.trim()
+    ? `\nRelevant agency knowledge (use only if it applies to this transmission):\n${opts.knowledgeContext.trim()}\n`
+    : "";
+
   const userContent =
     `Current Pacific time: ${pacific}\n` +
     `Radio channel (use this name on the air instead of "green-1"): ${opts.channelName}\n` +
     `Transmitting unit: ${opts.unitId}\n` +
     `STT confidence: 0.85\n` +
-    `Transcript: ${opts.transcript}\n\n` +
-    `Return ONLY the JSON object described in the system prompt.`;
+    `Transcript: ${opts.transcript}\n` +
+    knowledge +
+    `\nReturn ONLY the JSON object described in the system prompt.`;
 
   const result = await completeDispatcherLlm({
     systemPrompt: opts.systemPrompt,

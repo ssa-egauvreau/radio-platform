@@ -99,6 +99,12 @@ import {
   getToneOutAudio,
   getToneOutIcon,
   deleteToneOut,
+  isKbCategory,
+  KB_CATEGORIES,
+  listKbDocuments,
+  createKbDocument,
+  getKbDocumentContent,
+  deleteKbDocument,
   resolveAgencyByKey,
   setAgencyLogo,
   setAgencySound,
@@ -129,6 +135,7 @@ import {
 } from "./aiDispatch/platformConfig.js";
 import { applyChannelTen33Marker } from "./aiDispatch/ten33Marker.js";
 import { listAiDispatchLog } from "./aiDispatch/activityLog.js";
+import { enqueueKbIngest } from "./aiDispatch/knowledgeBase/ingest.js";
 import { handleTen8Webhook, handleTen8WebhookGet } from "./ten8/webhook.js";
 import {
   handleAndroidUpdateApk,
@@ -149,6 +156,9 @@ const LOGO_MAX_BYTES = "512kb";
 
 /** Upper bound for an uploaded soundboard tone-out clip. */
 const TONE_OUT_AUDIO_MAX = "4mb";
+
+/** Upper bound for an uploaded knowledge-base document (PDF). */
+const KB_MAX_DOC_BYTES = process.env.KB_MAX_DOC_BYTES?.trim() || "10mb";
 
 /** Reads a device-category value from request input, or null when absent/invalid. */
 function asDeviceType(value: unknown): string | null {
@@ -1470,6 +1480,146 @@ export function createApiRouter(): Router {
         actorName: req.authUser!.username,
         action: "sound_clear",
         target: kind,
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- AI dispatcher knowledge base (admin-uploaded reference docs) ------
+
+  router.get("/admin/kb/documents", requireAdmin, async (req, res) => {
+    try {
+      res.json({
+        documents: await listKbDocuments(req.authUser!.agencyId!),
+        categories: KB_CATEGORIES,
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post(
+    "/admin/kb/documents",
+    requireAdmin,
+    raw({ type: () => true, limit: KB_MAX_DOC_BYTES }),
+    async (req, res) => {
+      try {
+        const mime = (req.header("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+        if (mime !== "application/pdf") {
+          res.status(415).json({ error: "pdf_only" });
+          return;
+        }
+        const body: unknown = req.body;
+        if (!Buffer.isBuffer(body) || body.length === 0) {
+          res.status(400).json({ error: "missing_file" });
+          return;
+        }
+        const filename =
+          typeof req.query.filename === "string" ? req.query.filename.trim().slice(0, 255) : null;
+        const title =
+          (typeof req.query.title === "string" ? req.query.title.trim() : "").slice(0, 255) ||
+          filename ||
+          "Untitled document";
+        const categoryRaw = typeof req.query.category === "string" ? req.query.category.trim() : "";
+        const category = isKbCategory(categoryRaw) ? categoryRaw : "other";
+        const propertyCode =
+          typeof req.query.property_code === "string" && req.query.property_code.trim()
+            ? req.query.property_code.trim().slice(0, 32)
+            : null;
+
+        const agencyId = req.authUser!.agencyId!;
+        const doc = await createKbDocument(agencyId, {
+          title,
+          category,
+          propertyCode,
+          filename,
+          mime,
+          content: body,
+          uploadedByUserId: req.authUser!.id,
+        });
+        enqueueKbIngest(doc.id);
+        await writeAudit({
+          agencyId,
+          actorUserId: req.authUser!.id,
+          actorName: req.authUser!.username,
+          action: "kb_document_upload",
+          target: String(doc.id),
+          detail: { title, category, property_code: propertyCode, bytes: body.length },
+          ip: clientIp(req),
+        });
+        res.status(201).json({ document: doc });
+      } catch (error) {
+        fail(res, error);
+      }
+    },
+  );
+
+  router.get("/admin/kb/documents/:id/file", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      const doc = await getKbDocumentContent(req.authUser!.agencyId!, id);
+      if (!doc) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.setHeader("Content-Type", doc.mime);
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${(doc.filename ?? `document-${id}.pdf`).replace(/"/g, "")}"`,
+      );
+      res.send(doc.content);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post("/admin/kb/documents/:id/reindex", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const agencyId = req.authUser!.agencyId!;
+      // Confirm the document belongs to this agency before kicking off ingest.
+      const doc = await getKbDocumentContent(agencyId, id);
+      if (!doc) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      enqueueKbIngest(id);
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "kb_document_reindex",
+        target: String(id),
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.delete("/admin/kb/documents/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const agencyId = req.authUser!.agencyId!;
+      const ok = await deleteKbDocument(agencyId, id);
+      if (!ok) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "kb_document_delete",
+        target: String(id),
         ip: clientIp(req),
       });
       res.json({ ok: true });

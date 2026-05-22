@@ -1867,3 +1867,171 @@ export async function listChannelAiDispatchEnabled(agencyId: number): Promise<st
   );
   return res.rows.map((r) => r.channel_name);
 }
+
+// --- AI dispatcher knowledge base (RAG) ----------------------------------
+
+export const KB_CATEGORIES = ["post_order", "route_sheet", "policy", "other"] as const;
+export type KbCategory = (typeof KB_CATEGORIES)[number];
+
+export function isKbCategory(value: unknown): value is KbCategory {
+  return typeof value === "string" && (KB_CATEGORIES as readonly string[]).includes(value);
+}
+
+/** Document metadata for the admin list (never selects the PDF bytes or extracted text). */
+export interface KbDocumentMeta {
+  id: number;
+  title: string;
+  category: string;
+  property_code: string | null;
+  filename: string | null;
+  mime: string;
+  byte_size: number;
+  status: string;
+  error: string | null;
+  chunk_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+const KB_DOC_META_COLS =
+  "id, title, category, property_code, filename, mime, byte_size, status, error, chunk_count, created_at, updated_at";
+
+export async function listKbDocuments(agencyId: number): Promise<KbDocumentMeta[]> {
+  const res = await requirePool().query<KbDocumentMeta>(
+    `SELECT ${KB_DOC_META_COLS} FROM agency_kb_documents
+      WHERE agency_id = $1 ORDER BY created_at DESC, id DESC;`,
+    [agencyId],
+  );
+  return res.rows;
+}
+
+export async function createKbDocument(
+  agencyId: number,
+  input: {
+    title: string;
+    category: string;
+    propertyCode: string | null;
+    filename: string | null;
+    mime: string;
+    content: Buffer;
+    uploadedByUserId: number | null;
+  },
+): Promise<KbDocumentMeta> {
+  const res = await requirePool().query<KbDocumentMeta>(
+    `INSERT INTO agency_kb_documents
+       (agency_id, title, category, property_code, filename, mime, byte_size, content, status, uploaded_by_user_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'processing', $9)
+     RETURNING ${KB_DOC_META_COLS};`,
+    [
+      agencyId,
+      input.title,
+      input.category,
+      input.propertyCode,
+      input.filename,
+      input.mime,
+      input.content.length,
+      input.content,
+      input.uploadedByUserId,
+    ],
+  );
+  return res.rows[0]!;
+}
+
+/** Loads a document's original bytes for download or re-indexing (agency-scoped). */
+export async function getKbDocumentContent(
+  agencyId: number,
+  id: number,
+): Promise<{ content: Buffer; mime: string; filename: string | null } | null> {
+  const res = await requirePool().query<{ content: Buffer; mime: string; filename: string | null }>(
+    `SELECT content, mime, filename FROM agency_kb_documents WHERE id = $1 AND agency_id = $2;`,
+    [id, agencyId],
+  );
+  return res.rows[0] ?? null;
+}
+
+/** Document row used by the ingest worker — includes the bytes, not agency-scoped. */
+export async function getKbDocumentForIngest(
+  id: number,
+): Promise<{ id: number; agency_id: number; content: Buffer } | null> {
+  const res = await requirePool().query<{ id: number; agency_id: number; content: Buffer }>(
+    `SELECT id, agency_id, content FROM agency_kb_documents WHERE id = $1;`,
+    [id],
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function setKbDocumentStatus(
+  id: number,
+  status: string,
+  patch: { error?: string | null; chunkCount?: number; extractedText?: string | null } = {},
+): Promise<void> {
+  await requirePool().query(
+    `UPDATE agency_kb_documents
+        SET status = $2,
+            error = $3,
+            chunk_count = COALESCE($4, chunk_count),
+            extracted_text = COALESCE($5, extracted_text),
+            updated_at = now()
+      WHERE id = $1;`,
+    [id, status, patch.error ?? null, patch.chunkCount ?? null, patch.extractedText ?? null],
+  );
+}
+
+export async function deleteKbDocument(agencyId: number, id: number): Promise<boolean> {
+  const res = await requirePool().query(
+    `DELETE FROM agency_kb_documents WHERE id = $1 AND agency_id = $2;`,
+    [id, agencyId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+/** Replaces all chunks for a document in one transaction (used by ingest / reindex). */
+export async function replaceKbChunks(
+  documentId: number,
+  agencyId: number,
+  chunks: Array<{ content: string; embedding: number[] }>,
+): Promise<void> {
+  const pool = requirePool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM agency_kb_chunks WHERE document_id = $1;`, [documentId]);
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]!;
+      await client.query(
+        `INSERT INTO agency_kb_chunks (document_id, agency_id, chunk_index, content, embedding)
+         VALUES ($1, $2, $3, $4, $5);`,
+        [documentId, agencyId, i, chunk.content, chunk.embedding],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export interface KbChunkRow {
+  id: string;
+  document_id: number;
+  title: string;
+  category: string;
+  property_code: string | null;
+  content: string;
+  embedding: number[];
+}
+
+/** All ready chunks for an agency, joined to their document for source labelling. */
+export async function listKbChunksForAgency(agencyId: number): Promise<KbChunkRow[]> {
+  const res = await requirePool().query<KbChunkRow>(
+    `SELECT c.id::text AS id, c.document_id, d.title, d.category, d.property_code,
+            c.content, c.embedding
+       FROM agency_kb_chunks c
+       JOIN agency_kb_documents d ON d.id = c.document_id
+      WHERE c.agency_id = $1 AND d.status = 'ready';`,
+    [agencyId],
+  );
+  return res.rows;
+}
