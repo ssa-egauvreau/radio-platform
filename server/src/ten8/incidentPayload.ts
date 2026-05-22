@@ -1,6 +1,7 @@
 import type { AiDispatchParseResult } from "../aiDispatch/parse.js";
 import { lookupSsaProperty } from "../aiDispatch/ssaProperties.js";
 import { isWebSearchConfigured, webSearchAnswer } from "../aiDispatch/webSearch.js";
+import { resolveTen8IncidentType } from "./callTypes.js";
 
 /** Fields 10-8 / Google Maps geocoding expect (see New Incident API `location` example). */
 export type Ten8LocationFields = {
@@ -189,8 +190,11 @@ export async function buildTen8NewIncidentBody(
   parsed: AiDispatchParseResult,
   unit: string,
   dispatcherName: string,
+  opts?: { knownIncidentTypes?: string[] },
 ): Promise<Record<string, unknown>> {
-  const type = parsed.code?.trim() || "Officer Initiated";
+  const type = resolveTen8IncidentType(parsed.code, {
+    knownTypes: opts?.knownIncidentTypes,
+  });
   const body: Record<string, unknown> = {
     type,
     summary: parsed.summary?.trim() || type,
@@ -214,6 +218,9 @@ export async function buildTen8NewIncidentBody(
 export function finalizeTen8NewIncidentBody(body: Record<string, unknown>): Record<string, unknown> {
   const out = { ...body };
   out.priority = clampTen8Priority(out.priority, 3);
+  if (typeof out.type === "string") {
+    out.type = out.type.trim();
+  }
   if (
     typeof out.streetAddress === "string" &&
     out.streetAddress.trim() &&

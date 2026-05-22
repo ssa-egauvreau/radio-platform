@@ -332,11 +332,16 @@ async function processTransmission(transmissionId: number): Promise<void> {
           // Self-dispatch is a NEW call — create an incident, never comment on an unrelated one.
           if (await ten8NewIncidentConfigured(tx.agency_id)) {
             const createUnit = (parsed.unit ?? unitId ?? "").trim();
+            const active = await listTen8ActiveIncidents(tx.agency_id);
+            const knownIncidentTypes = active
+              .map((i) => i.incident_type)
+              .filter((t): t is string => !!t?.trim());
             const body = await buildTen8NewIncidentBody(
               tx.agency_id,
               parsed,
               createUnit,
               platform.dispatchUnitId,
+              { knownIncidentTypes },
             );
             const res = await ten8CreateIncident(tx.agency_id, body);
             ten8Actions.ten8_incident = { request: body, ...res };

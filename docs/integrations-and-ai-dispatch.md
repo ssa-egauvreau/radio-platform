@@ -141,6 +141,7 @@ Do **not** put plate keys in Railway for normal agency setup. Optional env fallb
 - Second key pair from 10-8 support; used only to **create** new calls (not reads/comments).
 - **Self-dispatch (AI `intent=dispatch`)** sends addresses in **Google Maps / 10-8 format**: `street, city, ST ZIP` on the `location` field, plus `streetAddress`, `city`, `state`, `zip`, and `county` when known. SSA account codes (`18-06`, `32-08`, etc.) are expanded from the property database; place names are looked up via web search when needed.
 - **Priority** is always **1–4** (1 = highest). The server never sends priority **0**; routine officer-initiated calls default to **3**, in-progress / alarm types to **2**, emergencies to **1**.
+- **`type` (call type)** must match your 10-8 CAD exactly (e.g. `961 - Car Stop`, `Patrol Check`, `Code 6 - Out for Investigation`). The AI still returns a short **code** (`961`, `ped`, `c6`); the server maps that to the official QuickCall **type** string before POST. Unknown codes default to **Patrol Check** and are logged.
 - If empty, safeT can fall back to the v1.0.8 key pair when creating calls (same as the old server).
 
 ## AI activity log
