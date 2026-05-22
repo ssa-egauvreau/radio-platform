@@ -271,6 +271,9 @@ class RadioViewModel(
                         val dest = event.channel.uppercase(Locale.US)
                         if (by != null) "MOVED TO $dest BY ${by.uppercase(Locale.US)}" else "MOVED TO $dest"
                     }
+                    // Internal uplink-mode signal (AI dispatch wants clear PCM); the transport acts
+                    // on it directly, so there's no operator-facing banner to show.
+                    is VoiceControlEvent.AiDispatchPcm -> null
                 }
                 if (hint != null) {
                     _uiState.update { it.copy(statusMessage = hint) }
