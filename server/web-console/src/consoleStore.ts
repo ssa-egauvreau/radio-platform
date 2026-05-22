@@ -15,7 +15,11 @@ import {
 const STATE_KEY = "securityradio.console.state";
 
 /** Bump when workspace layout rules change — triggers one-time localStorage migration. */
-const CURRENT_LAYOUT_VERSION = 5;
+const CURRENT_LAYOUT_VERSION = 6;
+/** Column span for a compact stack tile (right column). */
+export const WORKSPACE_STACK_COL_SPAN = 3;
+/** Column span for a half-width tile. */
+export const WORKSPACE_HALF_COL_SPAN = 6;
 const MAX_STATE_STORAGE_BYTES = 256 * 1024;
 const MAX_OPEN_CHANNELS = 16;
 const MAX_DOCKED_CHANNELS = 12;
@@ -552,38 +556,78 @@ function snapWorkspaceColSpan(colSpan: number, width: number): number {
 /** Column width on the 12-column workspace grid (four slots across). */
 export const WORKSPACE_SLOT_COL_SPAN = Math.floor(WORKSPACE_COLS / WORKSPACE_MAX_PER_ROW);
 
-/**
- * After vertical packing, widen every channel row so tiles share the full 12 columns
- * (1 → full width, 2 → 50/50, 3 → thirds, 4 → quarters).
- */
-function applyEqualWidthRows(layout: Record<string, WorkspaceTileLayout>): void {
-  const byStartRow = new Map<number, string[]>();
-  for (const [key, tile] of Object.entries(layout)) {
-    const list = byStartRow.get(tile.row) ?? [];
-    list.push(key);
-    byStartRow.set(tile.row, list);
-  }
-  for (const keys of byStartRow.values()) {
-    keys.sort((a, b) => layout[a]!.col - layout[b]!.col);
-    const n = keys.length;
-    if (n <= 0) {
-      continue;
-    }
-    const baseSpan = Math.max(WORKSPACE_MIN_COL_SPAN, Math.floor(WORKSPACE_COLS / n));
-    let col = 0;
+function columnSlotFromCol(col: number): number {
+  return Math.min(
+    WORKSPACE_MAX_PER_ROW - 1,
+    Math.max(0, Math.floor(col / WORKSPACE_SLOT_COL_SPAN)),
+  );
+}
+
+function tilesOverlap(a: WorkspaceTileLayout, b: WorkspaceTileLayout): boolean {
+  const aColEnd = a.col + a.colSpan;
+  const bColEnd = b.col + b.colSpan;
+  const aRowEnd = a.row + a.rowSpan;
+  const bRowEnd = b.row + b.rowSpan;
+  return a.col < bColEnd && b.col < aColEnd && a.row < bRowEnd && b.row < aRowEnd;
+}
+
+/** Push tiles down until nothing overlaps (keeps column placement). */
+function resolveWorkspaceOverlaps(
+  layout: Record<string, WorkspaceTileLayout>,
+  expandedIds: number[],
+): void {
+  const keys = expandedIds.map((id) => layoutKey(id)).filter((k) => layout[k]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    keys.sort((a, b) => layout[a]!.row - layout[b]!.row || layout[a]!.col - layout[b]!.col);
     for (let i = 0; i < keys.length; i++) {
-      const key = keys[i]!;
-      const tile = layout[key]!;
-      const colSpan = i === keys.length - 1 ? WORKSPACE_COLS - col : baseSpan;
-      layout[key] = { ...tile, col, colSpan };
-      col += colSpan;
+      for (let j = i + 1; j < keys.length; j++) {
+        const ka = keys[i]!;
+        const kb = keys[j]!;
+        const ta = layout[ka]!;
+        const tb = layout[kb]!;
+        if (!tilesOverlap(ta, tb)) {
+          continue;
+        }
+        layout[kb] = { ...tb, row: ta.row + ta.rowSpan };
+        changed = true;
+      }
     }
   }
 }
 
+/** The widest tile grows downward so the workspace stays filled when smaller tiles stack beside it. */
+function fillPrimaryTileHeight(
+  layout: Record<string, WorkspaceTileLayout>,
+  expandedIds: number[],
+): void {
+  const keys = expandedIds.map((id) => layoutKey(id)).filter((k) => layout[k]);
+  if (keys.length === 0) {
+    return;
+  }
+  const maxBottom = Math.max(...keys.map((k) => layout[k]!.row + layout[k]!.rowSpan));
+  let primaryKey = keys[0]!;
+  let maxSpan = layout[primaryKey]!.colSpan;
+  for (const k of keys) {
+    if (layout[k]!.colSpan > maxSpan) {
+      maxSpan = layout[k]!.colSpan;
+      primaryKey = k;
+    }
+  }
+  const primary = layout[primaryKey]!;
+  if (primary.colSpan < WORKSPACE_HALF_COL_SPAN) {
+    return;
+  }
+  const need = maxBottom - primary.row;
+  if (need > primary.rowSpan) {
+    layout[primaryKey] = { ...primary, rowSpan: snapWorkspaceRowSpan(need) };
+  }
+}
+
 /**
- * Packs channels into up to four columns; short tiles stack below. Each row of tiles
- * is stretched to fill the workspace width with equal column spans.
+ * Packs channels: keeps dragged positions, stacks compact tiles in side columns,
+ * and stretches the main (wide) tile to fill the workspace height.
  */
 export function packWorkspaceLayout(
   expandedIds: number[],
@@ -591,10 +635,30 @@ export function packWorkspaceLayout(
 ): Record<string, WorkspaceTileLayout> {
   const out: Record<string, WorkspaceTileLayout> = {};
   const columnBottom = new Array<number>(WORKSPACE_MAX_PER_ROW).fill(0);
+  const placed = new Set<string>();
+
   for (const id of expandedIds) {
     const key = layoutKey(id);
     const prev = previous[key];
-    const rowSpan = snapWorkspaceRowSpan(prev?.rowSpan ?? WORKSPACE_DEFAULT_ROW_SPAN);
+    if (prev && tileFitsGrid(prev)) {
+      const tile: WorkspaceTileLayout = {
+        col: prev.col,
+        row: prev.row,
+        colSpan: Math.max(WORKSPACE_MIN_COL_SPAN, Math.min(WORKSPACE_MAX_COL_SPAN, prev.colSpan)),
+        rowSpan: snapWorkspaceRowSpan(prev.rowSpan),
+      };
+      out[key] = tile;
+      const slot = columnSlotFromCol(tile.col);
+      columnBottom[slot] = Math.max(columnBottom[slot]!, tile.row + tile.rowSpan);
+      placed.add(key);
+    }
+  }
+
+  const unplaced = expandedIds.filter((id) => !placed.has(layoutKey(id)));
+  for (let i = 0; i < unplaced.length; i++) {
+    const id = unplaced[i]!;
+    const key = layoutKey(id);
+    const rowSpan = snapWorkspaceRowSpan(previous[key]?.rowSpan ?? WORKSPACE_DEFAULT_ROW_SPAN);
     let slot = 0;
     for (let s = 1; s < WORKSPACE_MAX_PER_ROW; s++) {
       if (columnBottom[s]! < columnBottom[slot]!) {
@@ -602,16 +666,134 @@ export function packWorkspaceLayout(
       }
     }
     const row = columnBottom[slot]!;
-    out[key] = {
-      col: slot * WORKSPACE_SLOT_COL_SPAN,
-      row,
-      colSpan: WORKSPACE_SLOT_COL_SPAN,
-      rowSpan,
-    };
+    const total = expandedIds.length;
+    const isFirst = placed.size === 0 && i === 0;
+    let colSpan = WORKSPACE_STACK_COL_SPAN;
+    let col = slot * WORKSPACE_SLOT_COL_SPAN;
+    if (total === 1 && isFirst) {
+      colSpan = WORKSPACE_COLS;
+      col = 0;
+    } else if (placed.size === 0 && i === 0) {
+      colSpan = WORKSPACE_COLS - WORKSPACE_STACK_COL_SPAN;
+      col = 0;
+    }
+    out[key] = { col, row, colSpan, rowSpan };
     columnBottom[slot] = row + rowSpan;
+    placed.add(key);
   }
-  applyEqualWidthRows(out);
+
+  if (expandedIds.length >= 2) {
+    const firstKey = layoutKey(expandedIds[0]!);
+    const first = out[firstKey];
+    if (first && first.colSpan >= WORKSPACE_COLS) {
+      out[firstKey] = { ...first, colSpan: WORKSPACE_COLS - WORKSPACE_STACK_COL_SPAN };
+    }
+  }
+
+  resolveWorkspaceOverlaps(out, expandedIds);
+  fillPrimaryTileHeight(out, expandedIds);
   return out;
+}
+
+/** Drop a compact tile directly under another (same column). */
+export function stackWorkspaceTileBelow(sourceId: number, targetId: number): void {
+  if (sourceId === targetId || !state.expanded.includes(sourceId) || !state.expanded.includes(targetId)) {
+    return;
+  }
+  const layout = { ...state.workspaceLayout };
+  const packed = packWorkspaceLayout(state.expanded, layout);
+  const srcKey = layoutKey(sourceId);
+  const tgtKey = layoutKey(targetId);
+  const src = packed[srcKey];
+  const tgt = packed[tgtKey];
+  if (!src || !tgt) {
+    return;
+  }
+  layout[srcKey] = {
+    ...src,
+    col: tgt.col,
+    colSpan: Math.min(WORKSPACE_STACK_COL_SPAN, tgt.colSpan, src.colSpan),
+    row: tgt.row + tgt.rowSpan,
+  };
+  const workspaceLayout = packWorkspaceLayout(state.expanded, layout);
+  commit({ ...state, workspaceLayout });
+}
+
+/** Drop a tile in the column to the left or right of a target. */
+export function placeWorkspaceTileBeside(
+  sourceId: number,
+  targetId: number,
+  side: "left" | "right",
+): void {
+  if (sourceId === targetId || !state.expanded.includes(sourceId) || !state.expanded.includes(targetId)) {
+    return;
+  }
+  const layout = { ...state.workspaceLayout };
+  const packed = packWorkspaceLayout(state.expanded, layout);
+  const srcKey = layoutKey(sourceId);
+  const tgtKey = layoutKey(targetId);
+  const src = packed[srcKey];
+  let tgt = packed[tgtKey];
+  if (!src || !tgt) {
+    return;
+  }
+
+  if (side === "right") {
+    if (tgt.colSpan > WORKSPACE_COLS - WORKSPACE_STACK_COL_SPAN) {
+      layout[tgtKey] = {
+        ...tgt,
+        colSpan: WORKSPACE_COLS - WORKSPACE_STACK_COL_SPAN,
+      };
+      tgt = layout[tgtKey]!;
+    }
+    layout[srcKey] = {
+      ...src,
+      col: Math.min(tgt.col + tgt.colSpan, WORKSPACE_COLS - WORKSPACE_STACK_COL_SPAN),
+      row: tgt.row,
+      colSpan: WORKSPACE_STACK_COL_SPAN,
+    };
+  } else {
+    layout[srcKey] = {
+      ...src,
+      col: Math.max(0, tgt.col - WORKSPACE_STACK_COL_SPAN),
+      row: tgt.row,
+      colSpan: WORKSPACE_STACK_COL_SPAN,
+    };
+    if (layout[srcKey]!.col + WORKSPACE_STACK_COL_SPAN > tgt.col) {
+      layout[tgtKey] = {
+        ...tgt,
+        col: WORKSPACE_STACK_COL_SPAN,
+        colSpan: Math.min(tgt.colSpan, WORKSPACE_COLS - WORKSPACE_STACK_COL_SPAN),
+      };
+    }
+  }
+
+  const workspaceLayout = packWorkspaceLayout(state.expanded, layout);
+  commit({ ...state, workspaceLayout });
+}
+
+/** Cycle tile width: compact stack → half → full width. */
+export function cycleWorkspaceTileWidth(id: number): void {
+  if (!state.expanded.includes(id)) {
+    return;
+  }
+  const key = layoutKey(id);
+  const packed = packWorkspaceLayout(state.expanded, state.workspaceLayout);
+  const tile = packed[key];
+  if (!tile) {
+    return;
+  }
+  const layout = { ...state.workspaceLayout };
+  const spans = [WORKSPACE_STACK_COL_SPAN, WORKSPACE_HALF_COL_SPAN, WORKSPACE_COLS];
+  const idx = spans.indexOf(tile.colSpan);
+  const nextSpan = spans[(idx + 1) % spans.length]!;
+  layout[key] = {
+    ...tile,
+    col: nextSpan === WORKSPACE_COLS ? 0 : tile.col,
+    colSpan: nextSpan,
+  };
+  const workspaceLayout = packWorkspaceLayout(state.expanded, layout);
+  commit({ ...state, workspaceLayout });
 }
 
 /** @deprecated Alias — use packWorkspaceLayout */
@@ -698,7 +880,7 @@ export function dockChannel(id: number, insertAt?: number): void {
   commitWorkspaceIfChanged(expanded, workspaceLayout);
 }
 
-/** Reorder docked channels (e.g. drag left/right); widths reflow to fill each row. */
+/** Reorder docked channel list without resetting tile positions on the grid. */
 export function reorderDockedChannels(orderedIds: number[]): void {
   const expanded: number[] = [];
   for (const id of orderedIds) {
@@ -711,7 +893,7 @@ export function reorderDockedChannels(orderedIds: number[]): void {
       expanded.push(id);
     }
   }
-  const workspaceLayout = relayoutWorkspace(expanded, state.workspaceLayout);
+  const workspaceLayout = packWorkspaceLayout(expanded, state.workspaceLayout);
   commitWorkspaceIfChanged(expanded, workspaceLayout);
 }
 

@@ -4,12 +4,37 @@ import { ChannelPanel } from "./ChannelPanel";
 import {
   WORKSPACE_GRID_GAP_PX,
   WORKSPACE_ROW_PX,
+  cycleWorkspaceTileWidth,
   getWorkspaceTile,
+  placeWorkspaceTileBeside,
   reorderDockedChannels,
   setWorkspaceTileRowSpan,
   snapWorkspaceRowSpan,
+  stackWorkspaceTileBelow,
   workspaceTierFromRowSpan,
 } from "../consoleStore";
+
+export type WorkspaceDropZone = "stack" | "left" | "right" | "reorder";
+
+function dropZoneFromPointer(
+  clientX: number,
+  clientY: number,
+  tileEl: HTMLElement,
+): WorkspaceDropZone {
+  const rect = tileEl.getBoundingClientRect();
+  const y = (clientY - rect.top) / rect.height;
+  const x = (clientX - rect.left) / rect.width;
+  if (y > 0.62) {
+    return "stack";
+  }
+  if (x > 0.68) {
+    return "right";
+  }
+  if (x < 0.32) {
+    return "left";
+  }
+  return "reorder";
+}
 
 function insertIndexFromPointer(
   clientX: number,
@@ -76,6 +101,7 @@ export function ChannelWorkspace({
   const [dockDragOver, setDockDragOver] = useState(false);
   const [resizeChannelId, setResizeChannelId] = useState<number | null>(null);
   const [dragOverChannelId, setDragOverChannelId] = useState<number | null>(null);
+  const [dropZone, setDropZone] = useState<WorkspaceDropZone | null>(null);
 
   const channelIds = useMemo(() => dockedChannels.map((c) => c.id), [dockedChannels]);
 
@@ -83,7 +109,7 @@ export function ChannelWorkspace({
     (e: DragEvent) => {
       e.preventDefault();
       setDockDragOver(false);
-      setDragOverChannelId(null);
+      clearDragOver();
       const raw = e.dataTransfer.getData("text/channel-id");
       const id = Number(raw);
       if (!Number.isFinite(id) || id <= 0 || !rootRef.current) {
@@ -138,17 +164,44 @@ export function ChannelWorkspace({
 
   function onTileDragOver(e: DragEvent<HTMLDivElement>, channelId: number) {
     e.preventDefault();
+    e.stopPropagation();
     e.dataTransfer.dropEffect = "move";
     setDragOverChannelId(channelId);
+    const tile = (e.currentTarget as HTMLElement).closest<HTMLElement>("[data-channel-id]");
+    if (tile) {
+      setDropZone(dropZoneFromPointer(e.clientX, e.clientY, tile));
+    }
+  }
+
+  function clearDragOver() {
+    setDragOverChannelId(null);
+    setDropZone(null);
   }
 
   function onTileDrop(e: DragEvent<HTMLDivElement>, targetId: number) {
     e.preventDefault();
     e.stopPropagation();
-    setDragOverChannelId(null);
+    const zone = dropZone;
+    clearDragOver();
     const raw = e.dataTransfer.getData("text/channel-id");
     const sourceId = Number(raw);
     if (!Number.isFinite(sourceId) || sourceId === targetId) {
+      return;
+    }
+    const tile = (e.currentTarget as HTMLElement).closest<HTMLElement>("[data-channel-id]");
+    const resolvedZone =
+      zone ?? (tile ? dropZoneFromPointer(e.clientX, e.clientY, tile) : "reorder");
+
+    if (resolvedZone === "stack") {
+      stackWorkspaceTileBelow(sourceId, targetId);
+      return;
+    }
+    if (resolvedZone === "right") {
+      placeWorkspaceTileBeside(sourceId, targetId, "right");
+      return;
+    }
+    if (resolvedZone === "left") {
+      placeWorkspaceTileBeside(sourceId, targetId, "left");
       return;
     }
     const from = channelIds.indexOf(sourceId);
@@ -180,8 +233,8 @@ export function ChannelWorkspace({
         <div className="channel-workspace-empty">
           <p>Drag channels here from the list on the left.</p>
           <p className="muted">
-            Up to four across · drag the ⋮⋮ bar to reorder · drag bottom edge to resize (volume + XMIT at
-            smallest)
+            Drag ⋮⋮ to move · drop on bottom of a tile to stack · drop on left/right edge for a new column ·
+            double-click ⋮⋮ to change width · drag bottom edge to resize height
           </p>
         </div>
       ) : (
@@ -190,29 +243,42 @@ export function ChannelWorkspace({
           const monitoring = open.includes(channel.id);
           const tileMinHeight =
             tile.rowSpan * WORKSPACE_ROW_PX + Math.max(0, tile.rowSpan - 1) * WORKSPACE_GRID_GAP_PX;
+          const widthClass =
+            tile.colSpan >= 12
+              ? " workspace-tile-full"
+              : tile.colSpan >= 6
+                ? " workspace-tile-half"
+                : " workspace-tile-compact";
+          const dropClass =
+            dragOverChannelId === channel.id && dropZone
+              ? ` drop-${dropZone}`
+              : "";
           return (
             <div
               key={channel.id}
               data-channel-id={channel.id}
-              className={`channel-workspace-tile${!monitoring ? " channel-off" : ""}${
+              className={`channel-workspace-tile${widthClass}${!monitoring ? " channel-off" : ""}${
                 resizeChannelId === channel.id ? " resizing" : ""
-              }${dragOverChannelId === channel.id ? " drag-over" : ""}`}
+              }${dragOverChannelId === channel.id ? " drag-over" : ""}${dropClass}`}
               style={{
                 gridColumn: `${tile.col + 1} / span ${tile.colSpan}`,
                 gridRow: `${tile.row + 1} / span ${tile.rowSpan}`,
                 minHeight: tileMinHeight,
               }}
               onDragOver={(e) => onTileDragOver(e, channel.id)}
-              onDragLeave={() =>
-                setDragOverChannelId((id) => (id === channel.id ? null : id))
-              }
+              onDragLeave={() => {
+                if (dragOverChannelId === channel.id) {
+                  clearDragOver();
+                }
+              }}
               onDrop={(e) => onTileDrop(e, channel.id)}
             >
               <div
                 className="channel-workspace-drag-handle"
                 draggable
                 onDragStart={(e) => onTileDragStart(e, channel.id)}
-                title="Drag here to reorder this channel"
+                onDoubleClick={() => cycleWorkspaceTileWidth(channel.id)}
+                title="Drag to move · drop on tile edges to stack or place beside · double-click to change width"
               >
                 <span className="channel-workspace-drag-grip" aria-hidden>
                   ⋮⋮

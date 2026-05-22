@@ -840,9 +840,10 @@ code.mono {
   display: grid;
   grid-template-columns: repeat(12, minmax(0, 1fr));
   gap: 6px;
-  align-items: start;
+  align-items: stretch;
   align-content: start;
-  min-height: 320px;
+  min-height: min(72vh, 880px);
+  height: 100%;
   min-width: 0;
   width: 100%;
   max-width: 100%;
@@ -891,6 +892,23 @@ code.mono {
 .channel-workspace-tile.drag-over {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
+}
+.channel-workspace-tile.drag-over.drop-stack {
+  box-shadow: inset 0 -4px 0 var(--accent);
+  outline: none;
+}
+.channel-workspace-tile.drag-over.drop-right {
+  box-shadow: inset -4px 0 0 var(--accent);
+  outline: none;
+}
+.channel-workspace-tile.drag-over.drop-left {
+  box-shadow: inset 4px 0 0 var(--accent);
+  outline: none;
+}
+.channel-workspace-tile.workspace-tile-full .channel-workspace-tile-inner,
+.channel-workspace-tile.workspace-tile-half .channel-workspace-tile-inner {
+  flex: 1 1 auto;
+  min-height: 100%;
 }
 .channel-workspace-tile.resizing {
   z-index: 5;
