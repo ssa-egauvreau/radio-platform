@@ -1,7 +1,7 @@
 import type { AiDispatchParseResult } from "../aiDispatch/parse.js";
 import { lookupSsaProperty } from "../aiDispatch/ssaProperties.js";
 import { isWebSearchConfigured, webSearchAnswer } from "../aiDispatch/webSearch.js";
-import { resolveTen8IncidentType } from "./callTypes.js";
+import { resolveTen8IncidentType, resolveTen8PriorityForCode, clampPriority } from "./callTypes.js";
 
 /** Fields 10-8 / Google Maps geocoding expect (see New Incident API `location` example). */
 export type Ten8LocationFields = {
@@ -15,48 +15,8 @@ export type Ten8LocationFields = {
 };
 
 /** 10-8 New Incident API: priority is integer 1 (highest) through 4 (lowest). There is no 0. */
-export function clampTen8Priority(value: unknown, fallback = 3): number {
-  const n = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10);
-  if (!Number.isFinite(n) || n < 1) {
-    return fallback;
-  }
-  if (n > 4) {
-    return 4;
-  }
-  return Math.round(n);
-}
-
-/** Map call type / intent to a valid 10-8 priority (never 0). */
-export function resolveTen8Priority(code: string | null | undefined, intent: string): number {
-  const c = (code ?? "").trim().toLowerCase().replace(/\s+/g, "");
-  if (intent === "emergency" || c === "10-33" || c === "1033") {
-    return 1;
-  }
-  const urgent = [
-    "961",
-    "925",
-    "925v",
-    "459",
-    "459a",
-    "459s",
-    "415",
-    "415a",
-    "415b",
-    "415e",
-    "245",
-    "211",
-    "966a",
-    "187",
-    "242",
-  ];
-  if (urgent.some((u) => c === u || c.startsWith(u))) {
-    return 2;
-  }
-  const routine = ["586", "602", "484", "488", "c6", "test"];
-  if (routine.some((r) => c === r)) {
-    return 4;
-  }
-  return 3;
+export function clampTen8Priority(value: unknown, fallback = 4): number {
+  return clampPriority(value, fallback);
 }
 
 /**
@@ -200,7 +160,7 @@ export async function buildTen8NewIncidentBody(
     summary: parsed.summary?.trim() || type,
     dispatcher: dispatcherName,
     require_acknowledge: false,
-    priority: resolveTen8Priority(parsed.code, parsed.intent),
+    priority: resolveTen8PriorityForCode(parsed.code, parsed.intent),
   };
   if (unit.trim()) {
     body.units = unit.trim();
@@ -217,7 +177,7 @@ export async function buildTen8NewIncidentBody(
 /** Strip invalid priority and ensure location string is present when components exist. */
 export function finalizeTen8NewIncidentBody(body: Record<string, unknown>): Record<string, unknown> {
   const out = { ...body };
-  out.priority = clampTen8Priority(out.priority, 3);
+  out.priority = clampTen8Priority(out.priority, 4);
   if (typeof out.type === "string") {
     out.type = out.type.trim();
   }

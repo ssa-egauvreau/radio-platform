@@ -39,6 +39,11 @@ import {
   ten8NewIncidentConfigured,
 } from "../ten8/client.js";
 import { buildTen8NewIncidentBody } from "../ten8/incidentPayload.js";
+import {
+  extractCallIdFromCreateResponse,
+  formatTen8RadioComment,
+  isVerifiedOpenCallId,
+} from "../ten8/cadComments.js";
 import type { PlateLookupResult } from "./plateLookup.js";
 import type { AiDispatchParseResult } from "./parse.js";
 
@@ -181,6 +186,35 @@ function findMatchingOpenIncident(
     }
   }
   return null;
+}
+
+type Ten8ActiveIncident = Awaited<ReturnType<typeof listTen8ActiveIncidents>>[number];
+
+/**
+ * Post a CAD comment only when the call exists in our open-incident store (webhook-fed).
+ * Never comment on a call id that was guessed or made up — that can crash 10-8.
+ */
+async function postTen8RadioCommentIfVerified(opts: {
+  agencyId: number;
+  callId: string;
+  active: Ten8ActiveIncident[];
+  callsign: string;
+  transcript: string;
+}): Promise<Record<string, unknown>> {
+  const callId = opts.callId.trim();
+  if (!callId) {
+    return { skipped: "empty_call_id" };
+  }
+  if (!isVerifiedOpenCallId(callId, opts.active)) {
+    console.warn(`[ten8] skip comment — call ${callId} not in open incident list`);
+    return { skipped: "call_not_verified_open" };
+  }
+  const note = formatTen8RadioComment(opts.callsign, opts.transcript);
+  if (!note) {
+    return { skipped: "empty_radio_comment" };
+  }
+  const res = await ten8AddComment(opts.agencyId, callId, note);
+  return { call_id: callId, comment: note, ...res };
 }
 
 async function persistAiDispatchLog(opts: {
@@ -327,38 +361,57 @@ async function processTransmission(transmissionId: number): Promise<void> {
       }
 
       if (await ten8Configured(tx.agency_id)) {
-        const cadNote = `[AI] ${parsed.summary}`.slice(0, 500);
+        const callsign = (parsed.unit ?? unitId ?? "").trim();
+        const active = await listTen8ActiveIncidents(tx.agency_id);
+        const knownIncidentTypes = active
+          .map((i) => i.incident_type)
+          .filter((t): t is string => !!t?.trim());
+
         if (parsed.intent === "dispatch") {
-          // Self-dispatch is a NEW call — create an incident, never comment on an unrelated one.
+          // Self-dispatch is a NEW call — create only; never comment on an unrelated open call.
           if (await ten8NewIncidentConfigured(tx.agency_id)) {
-            const createUnit = (parsed.unit ?? unitId ?? "").trim();
-            const active = await listTen8ActiveIncidents(tx.agency_id);
-            const knownIncidentTypes = active
-              .map((i) => i.incident_type)
-              .filter((t): t is string => !!t?.trim());
             const body = await buildTen8NewIncidentBody(
               tx.agency_id,
               parsed,
-              createUnit,
+              callsign,
               platform.dispatchUnitId,
               { knownIncidentTypes },
             );
             const res = await ten8CreateIncident(tx.agency_id, body);
             ten8Actions.ten8_incident = { request: body, ...res };
+
+            if (res.ok && !res.shadow) {
+              const newCallId = extractCallIdFromCreateResponse(res.data);
+              if (newCallId) {
+                const note = formatTen8RadioComment(callsign, transcript);
+                if (note) {
+                  const commentRes = await ten8AddComment(tx.agency_id, newCallId, note);
+                  ten8Actions.ten8_incident_comment = {
+                    call_id: newCallId,
+                    comment: note,
+                    ...commentRes,
+                  };
+                }
+              }
+            }
           } else {
             ten8Actions.ten8_incident = { skipped: "new_incident_not_configured" };
           }
         } else if (parsed.actionable) {
-          const active = await listTen8ActiveIncidents(tx.agency_id);
           if (active.length === 0) {
             ten8Actions.ten8_comment = { skipped: "no_open_calls" };
           } else {
             const match = findMatchingOpenIncident(active, parsed, unitId);
-            if (match) {
-              const res = await ten8AddComment(tx.agency_id, match.call_id, cadNote);
-              ten8Actions.ten8_comment = { call_id: match.call_id, ...res };
-            } else {
+            if (!match?.call_id?.trim()) {
               ten8Actions.ten8_comment = { skipped: "no_matching_open_call" };
+            } else {
+              ten8Actions.ten8_comment = await postTen8RadioCommentIfVerified({
+                agencyId: tx.agency_id,
+                callId: match.call_id,
+                active,
+                callsign,
+                transcript,
+              });
             }
           }
         }
