@@ -1,8 +1,7 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type DragEvent } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { api, describeError, type UserChannel } from "../api";
 import { useAuth } from "../auth";
 import { sounds } from "../sounds";
-import { ChannelPanel } from "./ChannelPanel";
 import { QuickReplay } from "./QuickReplay";
 import { TransmissionLog } from "./TransmissionLog";
 import { SimulcastManager } from "./SimulcastManager";
@@ -20,6 +19,8 @@ import {
   useConsoleState,
 } from "../consoleStore";
 import { ChannelRailTile } from "./ChannelRailTile";
+import { ChannelWorkspace } from "./ChannelWorkspace";
+import { LiveControlPanel } from "./LiveControlPanel";
 
 /**
  * The "Channels" section — every channel the account may use, each as a
@@ -34,7 +35,6 @@ export function ChannelsPanel({ variant = "embedded", onPopOut }: SectionProps) 
   const [loading, setLoading] = useState(true);
   const [simulcastOpen, setSimulcastOpen] = useState(false);
   const [rebindingPtt, setRebindingPtt] = useState(false);
-  const [dockDragOver, setDockDragOver] = useState(false);
   const canSimulcast = user?.role === "admin" || user?.role === "dispatcher";
 
   const dockedChannels = expanded
@@ -42,14 +42,7 @@ export function ChannelsPanel({ variant = "embedded", onPopOut }: SectionProps) 
     .filter((c): c is UserChannel => !!c);
   const dockedIdSet = new Set(expanded);
 
-  function handleDockDrop(e: DragEvent) {
-    e.preventDefault();
-    setDockDragOver(false);
-    const raw = e.dataTransfer.getData("text/channel-id");
-    const id = Number(raw);
-    if (!Number.isFinite(id) || id <= 0) {
-      return;
-    }
+  function dockFromRail(id: number) {
     dockChannel(id);
     if (!open.includes(id)) {
       setChannelMonitoring(id, true);
@@ -143,7 +136,7 @@ export function ChannelsPanel({ variant = "embedded", onPopOut }: SectionProps) 
 
   return (
     <div className={variant === "window" ? "section-panel windowed" : "section-panel"}>
-      <SectionHeader title="Channels" onPopOut={onPopOut} />
+      <SectionHeader title="Mission Control — Channels" onPopOut={onPopOut} />
       <QuickReplay />
 
       {loading && <div className="empty">Loading…</div>}
@@ -177,43 +170,20 @@ export function ChannelsPanel({ variant = "embedded", onPopOut }: SectionProps) 
           })}
         </aside>
 
-        <section
-          className={`channel-dock${dockDragOver ? " drag-over" : ""}`}
-          aria-label="Channel workspace"
-          onDragOver={(e) => {
-            e.preventDefault();
-            e.dataTransfer.dropEffect = "move";
-            setDockDragOver(true);
-          }}
-          onDragLeave={() => setDockDragOver(false)}
-          onDrop={handleDockDrop}
-        >
-          {dockedChannels.length === 0 ? (
-            <div className="channel-dock-empty">
-              <p>Drag channels here from the list on the left.</p>
-              <p className="muted">Or click a channel name to open it at full size.</p>
-            </div>
-          ) : (
-            dockedChannels.map((channel) => (
-              <ChannelPanel
-                key={channel.id}
-                channel={channel}
-                layout="workspace"
-                monitoring={open.includes(channel.id)}
-                expanded
-                primary={primary === channel.id}
-                pttCode={pttCode}
-                keyboardOn={keyboardOn}
-                onToggleMonitor={() =>
-                  setChannelMonitoring(channel.id, !open.includes(channel.id))
-                }
-                onToggleExpanded={() => undockChannel(channel.id)}
-                onMakePrimary={() => setPrimaryChannel(channel.id)}
-              />
-            ))
-          )}
-        </section>
+        <ChannelWorkspace
+          dockedChannels={dockedChannels}
+          open={open}
+          primary={primary}
+          pttCode={pttCode}
+          keyboardOn={keyboardOn}
+          onToggleMonitor={(id) => setChannelMonitoring(id, !open.includes(id))}
+          onUndock={undockChannel}
+          onMakePrimary={setPrimaryChannel}
+          onDockFromRail={dockFromRail}
+        />
       </div>
+
+      <LiveControlPanel />
 
       {channels.length > 0 && (
         <div className="kbd-hint">

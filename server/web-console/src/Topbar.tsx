@@ -1,17 +1,21 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "./auth";
 import { AGENCY_LOGO_CHANGED_EVENT, getToken } from "./api";
+import { consoleNavFromPath, consoleNavLabel } from "./consoleNav";
 import { ThemeToggle } from "./ThemeToggle";
 import { IconRadio, IconShield, IconLogOut, IconWaveform, SafetMark } from "./icons";
 
-/** Shared top menu bar with Command / Bridges / Control / Platform navigation. */
+/** Shared top menu bar with Mission Control / Bridges / Control / Platform navigation. */
 export function Topbar({
   section,
 }: {
   section: "console" | "admin" | "owner" | "bridges" | "radio";
 }) {
   const { user, logout } = useAuth();
+  const location = useLocation();
+  const consoleNav = section === "console" ? consoleNavFromPath(location.pathname) : null;
+
   const sectionLabel =
     section === "admin"
       ? "Control"
@@ -21,14 +25,19 @@ export function Topbar({
           ? "Bridges"
           : section === "radio"
             ? "Radio"
-            : "Command";
+            : consoleNav
+              ? consoleNavLabel(consoleNav)
+              : "Mission Control";
   const isRadioRole = user?.role === "radio";
+
+  function navTabClass(active: boolean): string {
+    return active ? "nav-tab active" : "nav-tab";
+  }
 
   const [agencyLogo, setAgencyLogo] = useState<string | null>(null);
   const [logoNonce, setLogoNonce] = useState(0);
   const agencyId = user?.agencyId ?? null;
 
-  // Re-fetch the logo when the Branding tab uploads or removes one this session.
   useEffect(() => {
     const bump = () => setLogoNonce((n) => n + 1);
     window.addEventListener(AGENCY_LOGO_CHANGED_EVENT, bump);
@@ -75,33 +84,37 @@ export function Topbar({
         {section !== "owner" && (
           <>
             {isRadioRole ? (
-              // Radio-role accounts only see their own portal — the dispatch console, bridges
-              // page, and admin panel are not available to them.
-              <Link className={section === "radio" ? "nav-tab active" : "nav-tab"} to="/radio">
+              <Link className={navTabClass(section === "radio")} to="/radio">
                 <IconRadio size={15} /> Radio
               </Link>
             ) : (
               <>
-                <Link className={section === "console" ? "nav-tab active" : "nav-tab"} to="/console">
-                  <IconRadio size={15} /> Command
+                <Link
+                  className={navTabClass(section === "console" && consoleNav === "mission")}
+                  to="/console"
+                >
+                  <IconRadio size={15} /> Mission Control
                 </Link>
-                <Link className="nav-tab" to="/console/dashboard">
+                <Link
+                  className={navTabClass(section === "console" && consoleNav === "dashboard")}
+                  to="/console/dashboard"
+                >
                   Dashboard
                 </Link>
-                <Link className="nav-tab" to="/console/control">
-                  Live Control
-                </Link>
-                <Link className="nav-tab" to="/console/ai-activity">
+                <Link
+                  className={navTabClass(section === "console" && consoleNav === "ai-activity")}
+                  to="/console/ai-activity"
+                >
                   AI Log
                 </Link>
-                <Link className={section === "bridges" ? "nav-tab active" : "nav-tab"} to="/bridges">
+                <Link className={navTabClass(section === "bridges")} to="/bridges">
                   <IconWaveform size={15} /> Bridges
                 </Link>
-                <Link className={section === "radio" ? "nav-tab active" : "nav-tab"} to="/radio">
+                <Link className={navTabClass(section === "radio")} to="/radio">
                   <IconRadio size={15} /> Radio
                 </Link>
                 {user?.role === "admin" && (
-                  <Link className={section === "admin" ? "nav-tab active" : "nav-tab"} to="/admin">
+                  <Link className={navTabClass(section === "admin")} to="/admin">
                     <IconShield size={15} /> Control
                   </Link>
                 )}

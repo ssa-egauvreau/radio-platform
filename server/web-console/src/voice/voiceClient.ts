@@ -170,6 +170,7 @@ export class VoiceChannelClient {
 
   private playCtx: AudioContext | null = null;
   private playGain: GainNode | null = null;
+  private audioOutputId = "";
   private playHead = 0;
   private volume = 1;
   private muted = false;
@@ -240,6 +241,24 @@ export class VoiceChannelClient {
     this.muted = muted;
     if (this.playGain) {
       this.playGain.gain.value = muted ? 0 : this.volume;
+    }
+  }
+
+  /** Route this channel's listen audio to a specific output device (headset, speakers, etc.). */
+  setAudioOutputId(deviceId: string): void {
+    this.audioOutputId = deviceId;
+    void this.applyAudioOutputId();
+  }
+
+  private async applyAudioOutputId(): Promise<void> {
+    const ctx = this.playCtx as (AudioContext & { setSinkId?: (id: string) => Promise<void> }) | null;
+    if (!ctx?.setSinkId) {
+      return;
+    }
+    try {
+      await ctx.setSinkId(this.audioOutputId);
+    } catch {
+      /* device unavailable or policy blocked */
     }
   }
 
@@ -321,6 +340,7 @@ export class VoiceChannelClient {
     this.playGain = this.playCtx.createGain();
     this.playGain.gain.value = this.muted ? 0 : this.volume;
     this.playGain.connect(this.playCtx.destination);
+    void this.applyAudioOutputId();
     // Analyser tap for the RX waveform. Fed by the inbound sources (see schedulePcm)
     // rather than the gain node, so the waveform reflects incoming speech even when
     // the channel is muted or turned down.

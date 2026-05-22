@@ -628,10 +628,10 @@ code.mono {
 /* --- console: channel rail + workspace dock --- */
 .channel-workspace-layout {
   display: grid;
-  grid-template-columns: minmax(148px, 188px) minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(132px, 168px) minmax(0, 1fr);
+  gap: 8px;
   align-items: start;
-  min-height: 320px;
+  min-height: 280px;
 }
 .channel-rail {
   display: flex;
@@ -699,6 +699,249 @@ code.mono {
   padding: 3px 6px;
   font-size: 9px;
 }
+
+/* --- Mission Control: free-form channel workspace grid --- */
+.channel-workspace-grid {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  gap: 6px;
+  align-content: start;
+  min-height: 320px;
+  padding: 8px;
+  border: 2px dashed color-mix(in srgb, var(--border) 85%, var(--accent-2) 15%);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg) 62%, var(--bg-raised));
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease;
+}
+.channel-workspace-grid.drag-over {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+}
+.channel-workspace-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 200px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+.channel-workspace-tile {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+.channel-workspace-tile-inner {
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  cursor: grab;
+}
+.channel-workspace-tile-inner:active {
+  cursor: grabbing;
+}
+.channel-workspace-tile.dragging .channel-workspace-tile-inner {
+  opacity: 0.92;
+  box-shadow: 0 8px 24px color-mix(in srgb, #000 35%, transparent);
+}
+.channel-workspace-tile .channel-card.workspace {
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.channel-workspace-tile .channel-card.workspace .ch-card-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+.channel-off-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg) 55%, #888 45%);
+  opacity: 0.72;
+  pointer-events: none;
+}
+.channel-workspace-resize-h,
+.channel-workspace-resize-w {
+  position: absolute;
+  z-index: 8;
+  border: none;
+  background: transparent;
+  padding: 0;
+}
+.channel-workspace-resize-h {
+  left: 12px;
+  right: 12px;
+  bottom: 0;
+  height: 8px;
+  cursor: ns-resize;
+}
+.channel-workspace-resize-w {
+  top: 12px;
+  bottom: 12px;
+  right: 0;
+  width: 8px;
+  cursor: ew-resize;
+}
+.channel-workspace-resize-h:hover,
+.channel-workspace-resize-w:hover {
+  background: color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.live-control-embed {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-raised) 90%, var(--bg));
+}
+.live-control-embed.collapsed {
+  padding-bottom: 6px;
+}
+.live-control-embed-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 6px;
+}
+.live-control-embed-toggle {
+  border: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  padding: 4px 0;
+}
+.lcc-reason.compact {
+  font-size: 11px;
+  margin: 0;
+}
+.lcc-hint.compact {
+  font-size: 11px;
+  margin: 0 0 8px;
+}
+.lcc-selbar.compact {
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.banner.compact {
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+.lcc-grid.compact {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.lcc-channel.compact {
+  padding: 6px;
+  font-size: 11px;
+}
+.lcc-channel.compact .lcc-unit {
+  padding: 4px 6px;
+  font-size: 11px;
+}
+.mission-control-intro {
+  padding: 0.5rem 1rem 0;
+  margin: 0;
+}
+.mission-control-grid {
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+}
+.mission-control-grid .console-col:first-child {
+  min-width: 0;
+}
+
+.audio-out-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  margin: 0;
+  grid-column: 1 / -1;
+}
+.audio-out-label {
+  flex: 0 0 auto;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.audio-out-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text);
+}
+
+.tx-button.tx-button-integrated {
+  position: relative;
+  overflow: hidden;
+  min-height: 72px;
+  padding: 10px 8px;
+}
+.tx-button-wave {
+  position: absolute;
+  inset: 4px 6px auto;
+  height: 52px;
+  opacity: 0.55;
+  pointer-events: none;
+  z-index: 0;
+}
+.tx-button-integrated .tx-main,
+.tx-button-integrated .tx-sub {
+  position: relative;
+  z-index: 1;
+}
+.state-chip.tx {
+  color: #ef4444;
+  border-color: color-mix(in srgb, #ef4444 40%, var(--border));
+}
+.state-chip.rx {
+  color: #38bdf8;
+  border-color: color-mix(in srgb, #38bdf8 40%, var(--border));
+}
+
+.channel-workspace-tile .channel-card.workspace .ch-card-body,
+.channel-workspace-tile .channel-card.workspace .ch-card-body.workspace-dense {
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 6px;
+  padding: 6px 8px 8px;
+}
+.channel-workspace-tile .channel-card.workspace .ch-card-body > .tx-button,
+.channel-workspace-tile .channel-card.workspace .ch-card-body > .live-tx,
+.channel-workspace-tile .channel-card.workspace .ch-card-body > .ch-actions-grid,
+.channel-workspace-tile .channel-card.workspace .ch-card-body > .ch-action-notes,
+.channel-workspace-tile .channel-card.workspace .ch-card-body > .toneout,
+.channel-workspace-tile .channel-card.workspace .ch-card-body > .audio-out-row {
+  grid-column: 1 / -1;
+}
+.channel-workspace-tile .channel-card.workspace .tx-button-integrated {
+  min-height: 80px;
+}
+.channel-workspace-tile .channel-card.workspace .roster {
+  max-height: 96px;
+  overflow-y: auto;
+}
+
 .channel-dock {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

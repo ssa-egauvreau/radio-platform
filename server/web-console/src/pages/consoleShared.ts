@@ -28,6 +28,19 @@ export const volumeKey = (id: number) => `securityradio.vol.${id}`;
 export const muteKey = (id: number) => `securityradio.mute.${id}`;
 export const txDigitalKey = (id: number) => `securityradio.txDigital.${id}`;
 export const panelWidthKey = (id: number) => `securityradio.panelWidth.${id}`;
+export const audioOutputKey = (id: number) => `securityradio.audioOut.${id}`;
+
+export function loadAudioOutputId(channelId: number): string {
+  return localStorage.getItem(audioOutputKey(channelId)) ?? "";
+}
+
+export function saveAudioOutputId(channelId: number, deviceId: string): void {
+  if (deviceId) {
+    localStorage.setItem(audioOutputKey(channelId), deviceId);
+  } else {
+    localStorage.removeItem(audioOutputKey(channelId));
+  }
+}
 
 /** Min/max width (px) an operator may resize a channel panel to. */
 export const PANEL_MIN_WIDTH = 280;

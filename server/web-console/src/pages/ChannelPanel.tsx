@@ -29,10 +29,12 @@ import {
   PERMISSION_LABEL,
   STATE_LABEL,
   keyLabel,
+  loadAudioOutputId,
   loadMuted,
   loadTxDigital,
   loadVolume,
   muteKey,
+  saveAudioOutputId,
   txDigitalKey,
   volumeKey,
 } from "./consoleShared";
@@ -85,6 +87,8 @@ export function ChannelPanel({
   const [txDigital, setTxDigital] = useState(() => loadTxDigital(channel.id));
   const [volume, setVolume] = useState(() => loadVolume(channel.id));
   const [muted, setMuted] = useState(() => loadMuted(channel.id));
+  const [audioOutputId, setAudioOutputId] = useState(() => loadAudioOutputId(channel.id));
+  const [audioOutputs, setAudioOutputs] = useState<MediaDeviceInfo[]>([]);
   const [receiving, setReceiving] = useState(false);
   /** Custom soundboard tone-outs currently looping on this channel. */
   const [loopingIds, setLoopingIds] = useState<Set<number>>(new Set());
@@ -151,6 +155,7 @@ export function ChannelPanel({
     client.setDigitalTx(aiDispatch ? false : loadTxDigital(channel.id));
     client.setVolume(loadVolume(channel.id));
     client.setMuted(loadMuted(channel.id));
+    client.setAudioOutputId(loadAudioOutputId(channel.id));
     clientRef.current = client;
     client.connect();
   }, [channel.id, channel.name]);
@@ -423,6 +428,36 @@ export function ChannelPanel({
     localStorage.setItem(muteKey(channel.id), next ? "1" : "0");
   }
 
+  function changeAudioOutput(deviceId: string) {
+    setAudioOutputId(deviceId);
+    saveAudioOutputId(channel.id, deviceId);
+    clientRef.current?.setAudioOutputId(deviceId);
+  }
+
+  useEffect(() => {
+    if (!expanded) {
+      return;
+    }
+    async function loadDevices() {
+      try {
+        if (!navigator.mediaDevices?.enumerateDevices) {
+          return;
+        }
+        const list = await navigator.mediaDevices.enumerateDevices();
+        setAudioOutputs(list.filter((d) => d.kind === "audiooutput"));
+      } catch {
+        /* ignore */
+      }
+    }
+    void loadDevices();
+    navigator.mediaDevices?.addEventListener("devicechange", loadDevices);
+    return () => navigator.mediaDevices?.removeEventListener("devicechange", loadDevices);
+  }, [expanded]);
+
+  useEffect(() => {
+    clientRef.current?.setAudioOutputId(audioOutputId);
+  }, [audioOutputId, monitoring]);
+
   function reconnect() {
     // Manual button — cancel any in-flight auto-reconnect first so we don't race a second connect()
     // against the pending timer.
@@ -473,17 +508,8 @@ export function ChannelPanel({
             <div className="ch-card-toolbar">
               {monitoring &&
                 (connected ? (
-                  <span
-                    className={`ch-mini-wave${transmitting ? " tx" : receiving ? " rx" : ""}`}
-                    title={transmitting ? "On air" : receiving ? "Receiving" : "Listening"}
-                  >
-                    <Waveform
-                      getLevel={() => clientRef.current?.getLevel() ?? 0}
-                      active={transmitting || receiving}
-                      variant={transmitting ? "tx" : "rx"}
-                      bars={10}
-                      height={18}
-                    />
+                  <span className={`state-chip ${transmitting ? "tx" : receiving ? "rx" : voiceState}`}>
+                    {transmitting ? "ON AIR" : receiving ? "RX" : STATE_LABEL[voiceState]}
                   </span>
                 ) : (
                   <span className={`state-chip ${voiceState}`}>{STATE_LABEL[voiceState]}</span>
@@ -633,17 +659,50 @@ export function ChannelPanel({
         <span className="vol-pct">{muted ? "Muted" : `${Math.round(volume * 100)}%`}</span>
       </div>
 
+      <label className="audio-out-row">
+        <span className="audio-out-label">Audio out</span>
+        <select
+          className="audio-out-select"
+          value={audioOutputId}
+          onChange={(e) => changeAudioOutput(e.target.value)}
+          title="Play this channel on a specific speaker or headset"
+        >
+          <option value="">System default</option>
+          {audioOutputs.map((d) => (
+            <option key={d.deviceId || d.label} value={d.deviceId}>
+              {d.label || `Speaker ${d.deviceId.slice(0, 8)}`}
+            </option>
+          ))}
+        </select>
+      </label>
+
       {voiceDetail && (
         <div className={`banner ${voiceState === "error" ? "error" : "info"}`}>{voiceDetail}</div>
       )}
 
       <button
-        className={transmitting ? "tx-button active" : receiving ? "tx-button busy" : "tx-button"}
+        className={`tx-button${workspace ? " tx-button-integrated" : ""}${
+          transmitting ? " active" : receiving ? " busy" : ""
+        }`}
         disabled={!connected || !canTransmit}
         onPointerDown={beginTransmit}
         onPointerUp={stopTx}
         onPointerCancel={stopTx}
       >
+        {workspace && (
+          <div
+            className={`tx-button-wave${transmitting ? " tx" : receiving ? " rx" : ""}`}
+            aria-hidden
+          >
+            <Waveform
+              getLevel={() => clientRef.current?.getLevel() ?? 0}
+              active={transmitting || receiving}
+              variant={transmitting ? "tx" : "rx"}
+              bars={32}
+              height={56}
+            />
+          </div>
+        )}
         <span className="tx-main">
           <IconBolt size={26} />
           {transmitting ? "ON AIR" : !canTransmit ? "LISTEN ONLY" : receiving ? "BUSY" : "XMIT"}
@@ -663,13 +722,15 @@ export function ChannelPanel({
         </span>
       </button>
 
-      <div className={`waveform-strip${transmitting ? " tx" : receiving ? " rx" : ""}`}>
-        <Waveform
-          getLevel={() => clientRef.current?.getLevel() ?? 0}
-          active={transmitting || receiving}
-          variant={transmitting ? "tx" : "rx"}
-        />
-      </div>
+      {!workspace && (
+        <div className={`waveform-strip${transmitting ? " tx" : receiving ? " rx" : ""}`}>
+          <Waveform
+            getLevel={() => clientRef.current?.getLevel() ?? 0}
+            active={transmitting || receiving}
+            variant={transmitting ? "tx" : "rx"}
+          />
+        </div>
+      )}
 
       {monitoring && (
         <LatestChannelTransmission

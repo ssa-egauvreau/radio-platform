@@ -22,12 +22,12 @@ export function ConsolePage() {
     <div className="app-shell">
       <Topbar section="console" />
 
-      <p style={{ padding: "0.5rem 1rem 0", margin: 0 }}>
+      <p className="mission-control-intro">
         <Link to="/console/ai-activity">AI dispatch activity log</Link>
         <span className="muted"> — transcripts, 10-33, plate lookups, 10-8 CAD notes</span>
       </p>
 
-      <div className="console-grid">
+      <div className="console-grid mission-control-grid">
         <div className="console-col">
           <PopOutSection
             title="Channels"

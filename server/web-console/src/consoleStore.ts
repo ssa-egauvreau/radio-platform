@@ -14,6 +14,23 @@ import {
 
 const STATE_KEY = "securityradio.console.state";
 
+/** Free-form tile on the channel workspace grid (12 columns). */
+export interface WorkspaceTileLayout {
+  col: number;
+  row: number;
+  colSpan: number;
+  rowSpan: number;
+}
+
+export const WORKSPACE_COLS = 12;
+export const WORKSPACE_ROW_PX = 28;
+export const WORKSPACE_DEFAULT_COL_SPAN = 6;
+export const WORKSPACE_DEFAULT_ROW_SPAN = 11;
+export const WORKSPACE_MIN_COL_SPAN = 3;
+export const WORKSPACE_MAX_COL_SPAN = 12;
+export const WORKSPACE_MIN_ROW_SPAN = 6;
+export const WORKSPACE_MAX_ROW_SPAN = 28;
+
 export interface ConsoleState {
   /** Channel ids with live voice connected ("on" / monitoring). */
   open: number[];
@@ -25,6 +42,8 @@ export interface ConsoleState {
   pttCode: string;
   /** Whether console keyboard shortcuts are active. */
   keyboardOn: boolean;
+  /** Docked channel positions on the workspace grid (channel id → tile). */
+  workspaceLayout: Record<string, WorkspaceTileLayout>;
 }
 
 function numbers(value: unknown): number[] {
@@ -36,6 +55,37 @@ function withValidPrimary(open: number[], primary: unknown): number | null {
     return primary;
   }
   return open.length > 0 ? open[open.length - 1]! : null;
+}
+
+function parseWorkspaceLayout(raw: unknown): Record<string, WorkspaceTileLayout> {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return {};
+  }
+  const out: Record<string, WorkspaceTileLayout> = {};
+  for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
+    if (!val || typeof val !== "object" || Array.isArray(val)) {
+      continue;
+    }
+    const t = val as Record<string, unknown>;
+    const col = Number(t.col);
+    const row = Number(t.row);
+    const colSpan = Number(t.colSpan);
+    const rowSpan = Number(t.rowSpan);
+    if (
+      Number.isFinite(col) &&
+      Number.isFinite(row) &&
+      Number.isFinite(colSpan) &&
+      Number.isFinite(rowSpan)
+    ) {
+      out[key] = {
+        col: Math.max(0, Math.min(WORKSPACE_COLS - 1, col)),
+        row: Math.max(0, row),
+        colSpan: Math.max(WORKSPACE_MIN_COL_SPAN, Math.min(WORKSPACE_MAX_COL_SPAN, colSpan)),
+        rowSpan: Math.max(WORKSPACE_MIN_ROW_SPAN, Math.min(WORKSPACE_MAX_ROW_SPAN, rowSpan)),
+      };
+    }
+  }
+  return out;
 }
 
 function parse(raw: string | null): ConsoleState | null {
@@ -53,6 +103,7 @@ function parse(raw: string | null): ConsoleState | null {
       primary: withValidPrimary(open, value.primary),
       pttCode: typeof value.pttCode === "string" && value.pttCode ? value.pttCode : DEFAULT_PTT_CODE,
       keyboardOn: typeof value.keyboardOn === "boolean" ? value.keyboardOn : true,
+      workspaceLayout: parseWorkspaceLayout(value.workspaceLayout),
     };
   } catch {
     return null;
@@ -79,6 +130,7 @@ function migrate(): ConsoleState {
     primary: open.length > 0 ? open[0]! : null,
     pttCode: localStorage.getItem(PTT_CODE_KEY) || DEFAULT_PTT_CODE,
     keyboardOn: localStorage.getItem(KEYBOARD_ENABLED_KEY) !== "0",
+    workspaceLayout: {},
   };
 }
 
@@ -139,10 +191,74 @@ export function setChannelMonitoring(id: number, on: boolean): void {
   }
 }
 
+function layoutKey(id: number): string {
+  return String(id);
+}
+
+/** First open grid slot that does not overlap existing tiles. */
+export function defaultWorkspaceTile(
+  layout: Record<string, WorkspaceTileLayout>,
+  preferCol = 0,
+): WorkspaceTileLayout {
+  const colSpan = WORKSPACE_DEFAULT_COL_SPAN;
+  const rowSpan = WORKSPACE_DEFAULT_ROW_SPAN;
+  for (let row = 0; row < 80; row++) {
+    for (let col = preferCol; col <= WORKSPACE_COLS - colSpan; col += 3) {
+      const candidate = { col, row, colSpan, rowSpan };
+      const overlaps = Object.values(layout).some((t) => tilesOverlap(t, candidate));
+      if (!overlaps) {
+        return candidate;
+      }
+    }
+    for (let col = 0; col < WORKSPACE_COLS - colSpan; col += 3) {
+      const candidate = { col, row, colSpan, rowSpan };
+      const overlaps = Object.values(layout).some((t) => tilesOverlap(t, candidate));
+      if (!overlaps) {
+        return candidate;
+      }
+    }
+  }
+  return { col: 0, row: 0, colSpan, rowSpan };
+}
+
+function tilesOverlap(a: WorkspaceTileLayout, b: WorkspaceTileLayout): boolean {
+  return (
+    a.col < b.col + b.colSpan &&
+    a.col + a.colSpan > b.col &&
+    a.row < b.row + b.rowSpan &&
+    a.row + a.rowSpan > b.row
+  );
+}
+
+export function getWorkspaceTile(id: number): WorkspaceTileLayout {
+  return state.workspaceLayout[layoutKey(id)] ?? defaultWorkspaceTile(state.workspaceLayout);
+}
+
+export function setWorkspaceTile(id: number, tile: WorkspaceTileLayout): void {
+  const key = layoutKey(id);
+  commit({
+    ...state,
+    workspaceLayout: {
+      ...state.workspaceLayout,
+      [key]: {
+        col: Math.max(0, Math.min(WORKSPACE_COLS - WORKSPACE_MIN_COL_SPAN, tile.col)),
+        row: Math.max(0, tile.row),
+        colSpan: Math.max(WORKSPACE_MIN_COL_SPAN, Math.min(WORKSPACE_MAX_COL_SPAN, tile.colSpan)),
+        rowSpan: Math.max(WORKSPACE_MIN_ROW_SPAN, Math.min(WORKSPACE_MAX_ROW_SPAN, tile.rowSpan)),
+      },
+    },
+  });
+}
+
 /** Dock a channel on the workspace (full-size panel on the right). */
 export function dockChannel(id: number): void {
   const expanded = state.expanded.includes(id) ? state.expanded : [...state.expanded, id];
-  commit({ ...state, expanded });
+  const key = layoutKey(id);
+  const workspaceLayout = { ...state.workspaceLayout };
+  if (!workspaceLayout[key]) {
+    workspaceLayout[key] = defaultWorkspaceTile(workspaceLayout);
+  }
+  commit({ ...state, expanded, workspaceLayout });
 }
 
 /** Remove a channel from the workspace (returns to the left rail only). */
@@ -150,7 +266,10 @@ export function undockChannel(id: number): void {
   if (!state.expanded.includes(id)) {
     return;
   }
-  commit({ ...state, expanded: state.expanded.filter((x) => x !== id) });
+  const key = layoutKey(id);
+  const workspaceLayout = { ...state.workspaceLayout };
+  delete workspaceLayout[key];
+  commit({ ...state, expanded: state.expanded.filter((x) => x !== id), workspaceLayout });
 }
 
 /** Toggle workspace dock (full panel on the right). */
@@ -165,8 +284,16 @@ export function toggleChannelExpanded(id: number): void {
 /** Keyboard/quick action: turn the channel on, dock it, and make it primary. */
 export function focusChannel(id: number): void {
   const open = state.open.includes(id) ? state.open : [...state.open, id];
-  const expanded = state.expanded.includes(id) ? state.expanded : [...state.expanded, id];
-  commit({ ...state, open, expanded, primary: id });
+  let expanded = state.expanded;
+  let workspaceLayout = state.workspaceLayout;
+  if (!expanded.includes(id)) {
+    expanded = [...expanded, id];
+    const key = layoutKey(id);
+    if (!workspaceLayout[key]) {
+      workspaceLayout = { ...workspaceLayout, [key]: defaultWorkspaceTile(workspaceLayout) };
+    }
+  }
+  commit({ ...state, open, expanded, workspaceLayout, primary: id });
 }
 
 export function setPrimaryChannel(id: number): void {
@@ -185,10 +312,20 @@ export function reconcileChannels(availableIds: number[]): void {
   const allowed = new Set(availableIds);
   const open = state.open.filter((id) => allowed.has(id));
   const expanded = state.expanded.filter((id) => allowed.has(id));
-  if (open.length === state.open.length && expanded.length === state.expanded.length) {
+  const workspaceLayout: Record<string, WorkspaceTileLayout> = {};
+  for (const [key, tile] of Object.entries(state.workspaceLayout)) {
+    if (allowed.has(Number(key))) {
+      workspaceLayout[key] = tile;
+    }
+  }
+  if (
+    open.length === state.open.length &&
+    expanded.length === state.expanded.length &&
+    Object.keys(workspaceLayout).length === Object.keys(state.workspaceLayout).length
+  ) {
     return;
   }
-  commit({ ...state, open, expanded, primary: withValidPrimary(open, state.primary) });
+  commit({ ...state, open, expanded, workspaceLayout, primary: withValidPrimary(open, state.primary) });
 }
 
 export function setPttCode(code: string): void {

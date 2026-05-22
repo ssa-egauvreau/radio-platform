@@ -1,5 +1,17 @@
 [
   {
+    "version": "1.15",
+    "date": "2026-05-22",
+    "title": "Mission Control console redesign",
+    "changes": [
+      "Command is now Mission Control; the top menu highlights the page you are actually on.",
+      "Live unit control is built into Mission Control (drag units between channels).",
+      "Channel panels snap on a drag-and-drop grid, resize taller or wider, and grey out when turned off.",
+      "Waveforms show inside the transmit button (red when talking, blue when receiving).",
+      "Each channel can use its own audio output (headset vs speakers)."
+    ]
+  },
+  {
     "version": "1.14",
     "date": "2026-05-22",
     "title": "Out with — new calls vs comments",
