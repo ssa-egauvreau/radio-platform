@@ -284,10 +284,12 @@ function normalizeConsoleState(input: ConsoleState): ConsoleState {
     workspaceLayout = {};
   }
 
-  // Too many docked channels at once can freeze the tab (black screen) on reload.
+  // Too many docked channels at once can freeze the tab (black screen) on reload. Cap purely on the
+  // counts — NOT on the layout version: a version bump only migrates tile sizing and must not
+  // truncate a user's docked / monitored channels.
   let safeOpen = open;
   let safeExpanded = expanded;
-  if (version < CURRENT_LAYOUT_VERSION || safeExpanded.length > 6 || safeOpen.length > 8) {
+  if (safeExpanded.length > 6 || safeOpen.length > 8) {
     safeExpanded = safeExpanded.slice(0, 6);
     safeOpen = safeOpen.slice(0, 8);
     workspaceLayout = workspaceLayoutForExpanded(safeExpanded, workspaceLayout);
