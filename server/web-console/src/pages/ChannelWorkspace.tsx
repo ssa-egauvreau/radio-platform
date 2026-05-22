@@ -131,15 +131,7 @@ export function ChannelWorkspace({
     window.addEventListener("pointerup", onUp);
   }
 
-  function onTileDragStart(e: DragEvent<HTMLDivElement>, channelId: number) {
-    if (
-      (e.target as HTMLElement).closest(
-        "button, input, select, a, .tx-button, .vol-slider, .channel-workspace-resize-h",
-      )
-    ) {
-      e.preventDefault();
-      return;
-    }
+  function onTileDragStart(e: DragEvent<HTMLElement>, channelId: number) {
     e.dataTransfer.setData("text/channel-id", String(channelId));
     e.dataTransfer.effectAllowed = "move";
   }
@@ -188,7 +180,7 @@ export function ChannelWorkspace({
         <div className="channel-workspace-empty">
           <p>Drag channels here from the list on the left.</p>
           <p className="muted">
-            Up to four across · short tiles stack vertically · drag bottom edge to resize (volume + XMIT at
+            Up to four across · drag the ⋮⋮ bar to reorder · drag bottom edge to resize (volume + XMIT at
             smallest)
           </p>
         </div>
@@ -210,14 +202,22 @@ export function ChannelWorkspace({
                 gridRow: `${tile.row + 1} / span ${tile.rowSpan}`,
                 minHeight: tileMinHeight,
               }}
-              draggable
-              onDragStart={(e) => onTileDragStart(e, channel.id)}
               onDragOver={(e) => onTileDragOver(e, channel.id)}
               onDragLeave={() =>
                 setDragOverChannelId((id) => (id === channel.id ? null : id))
               }
               onDrop={(e) => onTileDrop(e, channel.id)}
             >
+              <div
+                className="channel-workspace-drag-handle"
+                draggable
+                onDragStart={(e) => onTileDragStart(e, channel.id)}
+                title="Drag here to reorder this channel"
+              >
+                <span className="channel-workspace-drag-grip" aria-hidden>
+                  ⋮⋮
+                </span>
+              </div>
               <div className="channel-workspace-tile-inner">
                 <ChannelPanel
                   channel={channel}
