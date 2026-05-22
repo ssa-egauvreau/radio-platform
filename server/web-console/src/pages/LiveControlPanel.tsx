@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type ChannelMember } from "../api";
 import { useUnitAliasResolver } from "../unitAliases";
-import { IconRadio, IconUser } from "../icons";
+import { IconRadio, IconRecord, IconUser } from "../icons";
 
 const POLL_MS = 4000;
 
@@ -161,6 +161,7 @@ export function LiveControlPanel() {
           onClick={() => setCollapsed((v) => !v)}
           aria-expanded={!collapsed}
         >
+          <IconRecord size={14} />
           {collapsed ? "▸" : "▾"} Live unit control
         </button>
         <label className="lcc-reason compact">

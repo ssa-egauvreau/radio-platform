@@ -4,9 +4,18 @@ import { useAuth } from "./auth";
 import { AGENCY_LOGO_CHANGED_EVENT, getToken } from "./api";
 import { consoleNavFromPath, consoleNavLabel } from "./consoleNav";
 import { ThemeToggle } from "./ThemeToggle";
-import { IconRadio, IconShield, IconLogOut, IconWaveform, SafetMark } from "./icons";
+import {
+  IconAi,
+  IconDashboard,
+  IconLogOut,
+  IconMobile,
+  IconSettings,
+  IconShield,
+  IconWaveform,
+  SafetMark,
+} from "./icons";
 
-/** Shared top menu bar with Mission Control / Bridges / Control / Platform navigation. */
+/** Shared top menu bar with Mission Control / Bridges / Settings / Platform navigation. */
 export function Topbar({
   section,
 }: {
@@ -18,13 +27,13 @@ export function Topbar({
 
   const sectionLabel =
     section === "admin"
-      ? "Control"
+      ? "Settings"
       : section === "owner"
         ? "Platform"
         : section === "bridges"
           ? "Bridges"
           : section === "radio"
-            ? "Radio"
+            ? "Mobile"
             : consoleNav
               ? consoleNavLabel(consoleNav)
               : "Mission Control";
@@ -85,7 +94,7 @@ export function Topbar({
           <>
             {isRadioRole ? (
               <Link className={navTabClass(section === "radio")} to="/radio">
-                <IconRadio size={15} /> Radio
+                <IconMobile size={15} /> Mobile
               </Link>
             ) : (
               <>
@@ -93,29 +102,29 @@ export function Topbar({
                   className={navTabClass(section === "console" && consoleNav === "mission")}
                   to="/console"
                 >
-                  <IconRadio size={15} /> Mission Control
+                  <IconShield size={15} /> Mission Control
                 </Link>
                 <Link
                   className={navTabClass(section === "console" && consoleNav === "dashboard")}
                   to="/console/dashboard"
                 >
-                  Dashboard
+                  <IconDashboard size={15} /> Dashboard
                 </Link>
                 <Link
                   className={navTabClass(section === "console" && consoleNav === "ai-activity")}
                   to="/console/ai-activity"
                 >
-                  AI Log
+                  <IconAi size={15} /> AI Log
                 </Link>
                 <Link className={navTabClass(section === "bridges")} to="/bridges">
                   <IconWaveform size={15} /> Bridges
                 </Link>
                 <Link className={navTabClass(section === "radio")} to="/radio">
-                  <IconRadio size={15} /> Radio
+                  <IconMobile size={15} /> Mobile
                 </Link>
                 {user?.role === "admin" && (
                   <Link className={navTabClass(section === "admin")} to="/admin">
-                    <IconShield size={15} /> Control
+                    <IconSettings size={15} /> Settings
                   </Link>
                 )}
               </>
@@ -125,9 +134,15 @@ export function Topbar({
       </nav>
       <div className="who">
         {user?.agencyName && (
-          <span className="agency-id" title={`Agency — ${user.agencyName}`}>
-            {agencyLogo && <img className="agency-logo" src={agencyLogo} alt="" />}
-            <span className="agency-name">{user.agencyName}</span>
+          <span
+            className={`agency-id${agencyLogo ? " has-logo" : ""}`}
+            title={`Agency — ${user.agencyName}`}
+          >
+            {agencyLogo ? (
+              <img className="agency-logo" src={agencyLogo} alt={user.agencyName} />
+            ) : (
+              <span className="agency-name">{user.agencyName}</span>
+            )}
           </span>
         )}
         <span className="role-chip">{user?.role}</span>

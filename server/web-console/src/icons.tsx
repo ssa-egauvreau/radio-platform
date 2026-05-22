@@ -100,7 +100,7 @@ export function IconLogOut(props: IconProps) {
   );
 }
 
-/** Shield — admin portal. */
+/** Shield — mission control. */
 export function IconShield(props: IconProps) {
   return (
     <StrokeIcon {...props}>
@@ -245,6 +245,60 @@ export function IconMapPin(props: IconProps) {
     <StrokeIcon {...props}>
       <path d="M12 21.5c4.5-4.2 7-7.7 7-11.3a7 7 0 0 0-14 0c0 3.6 2.5 7.1 7 11.3Z" />
       <circle cx="12" cy="10" r="2.6" />
+    </StrokeIcon>
+  );
+}
+
+/** Four-panel dashboard grid. */
+export function IconDashboard(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <rect x="3" y="3" width="8" height="8" rx="1.5" />
+      <rect x="13" y="3" width="8" height="8" rx="1.5" />
+      <rect x="3" y="13" width="8" height="8" rx="1.5" />
+      <rect x="13" y="13" width="8" height="8" rx="1.5" />
+    </StrokeIcon>
+  );
+}
+
+/** Gear — settings / admin. */
+export function IconSettings(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2.8v2.2M12 19v2.2M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M2.8 12h2.2M19 12h2.2M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6" />
+    </StrokeIcon>
+  );
+}
+
+/** Sparkle — AI / assistant. */
+export function IconAi(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M12 3.5 13.8 8.2 18.5 10 13.8 11.8 12 16.5 10.2 11.8 5.5 10 10.2 8.2Z" />
+      <path d="M5 5.5l.9 2.1 2.1.9-2.1.9L5 11.5l-.9-2.1-2.1-.9 2.1-.9Z" />
+      <path d="M18.5 14.5l.7 1.6 1.6.7-1.6.7-.7 1.6-.7-1.6-1.6-.7 1.6-.7Z" />
+    </StrokeIcon>
+  );
+}
+
+/** Smartphone — mobile radio app. */
+export function IconMobile(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <rect x="7" y="3" width="10" height="18" rx="2" />
+      <line x1="10" y1="6" x2="14" y2="6" />
+      <circle cx="12" cy="17" r="0.8" fill="currentColor" stroke="none" />
+    </StrokeIcon>
+  );
+}
+
+/** Record dot — live control / recording. */
+export function IconRecord(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" />
     </StrokeIcon>
   );
 }

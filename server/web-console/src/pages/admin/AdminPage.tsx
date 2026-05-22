@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { Topbar } from "../../Topbar";
-import { AccountsPanel } from "./AccountsPanel";
 import { ChannelsPanel } from "./ChannelsPanel";
-import { AssignmentsPanel } from "./AssignmentsPanel";
+import { UsersAndAssignmentsPanel } from "./UsersAndAssignmentsPanel";
 import { UnitAliasesPanel } from "./UnitAliasesPanel";
 import { SoundsPanel } from "./SoundsPanel";
 import { ToneOutsPanel } from "./ToneOutsPanel";
@@ -13,9 +12,8 @@ import { IntegrationsPanel } from "./IntegrationsPanel";
 import { AndroidAppPanel } from "./AndroidAppPanel";
 
 type TabId =
-  | "accounts"
+  | "users"
   | "channels"
-  | "assignments"
   | "aliases"
   | "integrations"
   | "android"
@@ -26,9 +24,8 @@ type TabId =
   | "audit";
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: "accounts", label: "Accounts" },
+  { id: "users", label: "Users" },
   { id: "channels", label: "Channels" },
-  { id: "assignments", label: "Assignments" },
   { id: "aliases", label: "Unit Aliases" },
   { id: "integrations", label: "Integrations" },
   { id: "android", label: "Android App" },
@@ -40,7 +37,7 @@ const TABS: { id: TabId; label: string }[] = [
 ];
 
 export function AdminPage() {
-  const [tab, setTab] = useState<TabId>("accounts");
+  const [tab, setTab] = useState<TabId>("users");
 
   return (
     <div className="app-shell">
@@ -59,9 +56,8 @@ export function AdminPage() {
           ))}
         </aside>
         <main className="panel">
-          {tab === "accounts" && <AccountsPanel />}
+          {tab === "users" && <UsersAndAssignmentsPanel />}
           {tab === "channels" && <ChannelsPanel />}
-          {tab === "assignments" && <AssignmentsPanel />}
           {tab === "aliases" && <UnitAliasesPanel />}
           {tab === "integrations" && <IntegrationsPanel />}
           {tab === "android" && <AndroidAppPanel />}

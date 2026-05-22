@@ -132,6 +132,7 @@ import {
   handleAndroidUpdateManifest,
   handleAndroidUpdatePublish,
 } from "./appUpdate.js";
+import { listTen8MapIncidents } from "./ten8/mapIncidents.js";
 import { listTen8ActiveIncidents, listTen8WebhookLog } from "./ten8/store.js";
 
 /** Legacy global radio key — lets a handset fetch its agency's custom tones. */
@@ -2161,6 +2162,15 @@ export function createApiRouter(): Router {
   router.get("/locations", requireAgencyMember, async (req, res) => {
     try {
       res.json({ positions: await listPositions(req.authUser!.agencyId!) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get("/ten8/map-incidents", requireAgencyMember, async (req, res) => {
+    try {
+      const incidents = await listTen8MapIncidents(req.authUser!.agencyId!);
+      res.json({ incidents });
     } catch (error) {
       fail(res, error);
     }

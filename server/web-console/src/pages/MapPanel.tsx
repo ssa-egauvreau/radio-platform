@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import { api, describeError, deviceTypeLabel, type Geofence, type PositionSample } from "../api";
+import {
+  api,
+  describeError,
+  deviceTypeLabel,
+  type Geofence,
+  type PositionSample,
+  type Ten8MapIncident,
+} from "../api";
 import { useAuth } from "../auth";
 import { sounds } from "../sounds";
 import { useUnitAliasResolver } from "../unitAliases";
@@ -84,6 +91,21 @@ function glyphFor(deviceType: string | null): string {
   return deviceType === "unit_radio" ? CAR_GLYPH : RADIO_GLYPH;
 }
 
+/** 10-8 open call pin with call type label. */
+function cadDivIcon(label: string): L.DivIcon {
+  return L.divIcon({
+    className: "cad-marker",
+    html:
+      `<div class="cm">` +
+      `<div class="cm-pin"></div>` +
+      `<div class="cm-label">${escapeHtml(label)}</div>` +
+      `</div>`,
+    iconSize: [32, 32],
+    iconAnchor: [16, 30],
+    popupAnchor: [0, -30],
+  });
+}
+
 /** Marker icon: a device glyph tinted by state, a heading arrow, and the unit's label. */
 function radioDivIcon(
   state: MarkerState,
@@ -153,7 +175,9 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
   const mapElRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<L.Map | null>(null);
   const markersRef = useRef<Map<string, { marker: L.Marker; iconKey: string }>>(new Map());
+  const cadMarkersRef = useRef<Map<string, L.Marker>>(new Map());
   const baseLayerRef = useRef<L.TileLayer | null>(null);
+  const cadLayerRef = useRef<L.LayerGroup | null>(null);
   const geoLayerRef = useRef<L.LayerGroup | null>(null);
   const trackLayerRef = useRef<L.LayerGroup | null>(null);
   const draftLayerRef = useRef<L.LayerGroup | null>(null);
@@ -161,7 +185,7 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
   // Units already auto-zoomed to, so a standing emergency only pulls the map once.
   const emergencyZoomedRef = useRef<Set<string>>(new Set());
 
-  const [stats, setStats] = useState({ total: 0, emergency: 0 });
+  const [stats, setStats] = useState({ total: 0, emergency: 0, calls: 0 });
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [baseLayer, setBaseLayer] = useState<BaseLayer>("street");
@@ -256,6 +280,7 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
       trackLayerRef.current = null;
       draftLayerRef.current = null;
       markers.clear();
+      cadMarkersRef.current.clear();
     };
   }, []);
 
@@ -412,7 +437,11 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
       try {
         // Positions drive the map; alerts only tint markers, so a failed
         // alerts fetch must not stop position updates.
-        const [locsResult, alertsResult] = await Promise.allSettled([api.locations(), api.alerts()]);
+        const [locsResult, alertsResult, callsResult] = await Promise.allSettled([
+          api.locations(),
+          api.alerts(),
+          api.ten8MapIncidents(),
+        ]);
         const map = mapRef.current;
         if (cancelled || !map) {
           return;
@@ -423,6 +452,45 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
         }
         setError(null);
         const locs = locsResult.value;
+
+        const cadLayer = cadLayerRef.current ?? L.layerGroup().addTo(map);
+        cadLayerRef.current = cadLayer;
+        const cadMarkers = cadMarkersRef.current;
+        const calls: Ten8MapIncident[] =
+          callsResult.status === "fulfilled" ? callsResult.value.incidents : [];
+        const seenCalls = new Set<string>();
+        for (const inc of calls) {
+          seenCalls.add(inc.call_id);
+          const labelKey = inc.label;
+          let entry = cadMarkers.get(inc.call_id);
+          if (!entry) {
+            entry = L.marker([inc.lat, inc.lon], { icon: cadDivIcon(inc.label) });
+            cadMarkers.set(inc.call_id, entry);
+          } else {
+            entry.setLatLng([inc.lat, inc.lon]);
+            entry.setIcon(cadDivIcon(inc.label));
+          }
+          const popup =
+            `<strong>${escapeHtml(inc.label)}</strong><br/>` +
+            `${escapeHtml(inc.incident_type ?? "Call")}<br/>` +
+            (inc.location ? escapeHtml(inc.location) : "") +
+            `<br/><span class="mono">${escapeHtml(inc.call_id)}</span>`;
+          if (!entry.getPopup()) {
+            entry.bindPopup(popup);
+          } else {
+            entry.setPopupContent(popup);
+          }
+          if (!cadLayer.hasLayer(entry)) {
+            entry.addTo(cadLayer);
+          }
+
+        }
+        for (const [id, marker] of [...cadMarkers.entries()]) {
+          if (!seenCalls.has(id)) {
+            cadLayer.removeLayer(marker);
+            cadMarkers.delete(id);
+          }
+        }
 
         const emergencyUnits = new Set(
           alertsResult.status === "fulfilled"
@@ -513,7 +581,7 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
             emergencyZoomedRef.current.delete(unit);
           }
         }
-        setStats({ total: seen.size, emergency: emergencyCount });
+        setStats({ total: seen.size, emergency: emergencyCount, calls: seenCalls.size });
         setUnitOptions(
           locs.positions
             .map((p) => ({ unitId: p.unit_id, label: p.display_name || aliasRef.current(p.unit_id) }))
@@ -696,6 +764,7 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
         <h3>Radio Map</h3>
         <span className="count">
           {stats.total} reporting
+          {stats.calls > 0 && <span className="count-cad"> · {stats.calls} open 10-8 calls</span>}
           {stats.emergency > 0 && <span className="count-emg"> · {stats.emergency} emergency</span>}
         </span>
         <div className="map-tools">

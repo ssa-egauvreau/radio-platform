@@ -1,5 +1,16 @@
 [
   {
+    "version": "1.16",
+    "date": "2026-05-22",
+    "title": "Portal navigation and map calls",
+    "changes": [
+      "Control renamed to Settings; Radio renamed to Mobile, with clearer icons on each tab.",
+      "Your company logo in the menu bar scales up to use the available space.",
+      "Settings → Users combines accounts and channel assignments in one sortable table.",
+      "The map shows open 10-8 calls as orange pins with the call name on the label."
+    ]
+  },
+  {
     "version": "1.15",
     "date": "2026-05-22",
     "title": "Mission Control console redesign",

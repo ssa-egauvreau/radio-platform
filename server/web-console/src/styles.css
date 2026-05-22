@@ -253,6 +253,8 @@ a {
 .topnav {
   display: flex;
   gap: 4px;
+  flex: 1 1 auto;
+  min-width: 0;
 }
 .nav-tab {
   display: flex;
@@ -280,6 +282,9 @@ a {
   gap: 12px;
   color: var(--text-dim);
   font-size: 13px;
+  flex: 1 1 auto;
+  min-width: 0;
+  justify-content: flex-end;
 }
 .role-chip {
   text-transform: uppercase;
@@ -1449,11 +1454,18 @@ code.mono {
 .agency-id {
   display: flex;
   align-items: center;
+  flex: 1 1 auto;
+  min-width: 72px;
+  max-width: min(42vw, 420px);
+  height: 44px;
+  margin-right: auto;
   gap: 6px;
   font-size: 12px;
   font-weight: 600;
   color: var(--text);
-  max-width: 220px;
+}
+.agency-id.has-logo {
+  padding: 2px 10px 2px 0;
 }
 .agency-id .agency-name {
   overflow: hidden;
@@ -1461,10 +1473,118 @@ code.mono {
   white-space: nowrap;
 }
 .agency-logo {
-  height: 22px;
-  width: 22px;
+  display: block;
+  height: 100%;
+  width: 100%;
+  max-height: 44px;
+  max-width: 100%;
   object-fit: contain;
+  object-position: left center;
   border-radius: 4px;
+}
+.th-sort {
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  padding: 0;
+}
+.th-sort:hover {
+  color: var(--accent);
+}
+.th-sort.active {
+  color: var(--accent);
+}
+.users-table-wrap {
+  overflow: auto;
+  max-width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.users-assignments-table {
+  min-width: max-content;
+}
+.users-assignments-table .sticky-actions {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--bg-raised);
+  box-shadow: 2px 0 6px color-mix(in srgb, #000 12%, transparent);
+}
+.users-assignments-table td.sticky-actions,
+.users-assignments-table th.sticky-actions {
+  min-width: 200px;
+}
+.users-assignments-table .channel-col-head {
+  font-size: 10px;
+  max-width: 88px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: bottom;
+}
+.users-assignments-table select {
+  font-size: 11px;
+  max-width: 96px;
+}
+.inline-edit {
+  width: 100%;
+  min-width: 88px;
+  font-size: 12px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg-input);
+  color: var(--text);
+}
+.cell-actions.compact {
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.cad-marker .cm {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  pointer-events: none;
+}
+.cad-marker .cm-pin {
+  width: 14px;
+  height: 14px;
+  border-radius: 50% 50% 50% 0;
+  background: #f59e0b;
+  border: 2px solid #fff;
+  transform: rotate(-45deg);
+  box-shadow: 0 2px 6px color-mix(in srgb, #000 35%, transparent);
+}
+.cad-marker .cm-label {
+  margin-top: 4px;
+  max-width: 120px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, #f59e0b 92%, #000 8%);
+  color: #1a1a1a;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.2;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-shadow: 0 1px 4px color-mix(in srgb, #000 25%, transparent);
+}
+.count-cad {
+  color: #f59e0b;
+  font-weight: 600;
+}
+.live-control-embed-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .modal-backdrop {

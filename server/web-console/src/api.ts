@@ -130,6 +130,15 @@ export interface Ten8ActiveIncident {
   updated_at: string;
 }
 
+export interface Ten8MapIncident {
+  call_id: string;
+  label: string;
+  incident_type: string | null;
+  location: string | null;
+  lat: number;
+  lon: number;
+}
+
 export interface Transmission {
   id: number;
   channel_id: number | null;
@@ -514,6 +523,8 @@ export const api = {
   },
 
   locations: () => request<{ positions: RadioPosition[] }>("GET", "/v1/locations"),
+  ten8MapIncidents: () =>
+    request<{ incidents: Ten8MapIncident[] }>("GET", "/v1/ten8/map-incidents"),
   agencyUnits: () =>
     request<{ units: { unit_id: string; display_name: string | null }[] }>(
       "GET",
