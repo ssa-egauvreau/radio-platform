@@ -1284,6 +1284,11 @@ code.mono {
   display: flex;
   flex-direction: column;
   min-width: 240px;
+  /* Pin the map/alerts column so it stays on screen while the (usually taller) channel side
+     scrolls. Stays static on the stacked mobile layout (reset in the phone breakpoint). */
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
 }
 .map-alerts-column {
   display: flex;
@@ -3529,6 +3534,8 @@ code.mono {
     flex: 1 1 auto !important;
     min-width: 0;
     width: 100%;
+    /* Stacked under the channels on phones — don't pin it. */
+    position: static;
   }
   /* Stacked under the channels, the map/alerts column has no row height to inherit, so the map
      (flex-sized) collapses to nothing and looks blank. Give it a real height on phones. */
