@@ -1256,7 +1256,9 @@ code.mono {
   /* Each column is its own content height; the page scrolls (single scrollbar). */
   align-items: flex-start;
   gap: 0;
-  background: var(--border);
+  /* Match the page background: the (shorter, sticky) map column leaves space beside it below, and a
+     border-coloured fill there looked like a stray grey block. The column divider is the splitter. */
+  background: var(--bg);
 }
 .mission-control-channels {
   min-width: 280px;
@@ -1281,6 +1283,8 @@ code.mono {
   display: flex;
   flex-direction: column;
   min-width: 240px;
+  /* Content-sized (overrides .console-col's overflow:auto) so it doesn't scroll inside itself. */
+  overflow: visible;
   /* Pin the map/alerts column so it stays on screen while the (usually taller) channel side
      scrolls. Stays static on the stacked mobile layout (reset in the phone breakpoint). */
   position: sticky;
