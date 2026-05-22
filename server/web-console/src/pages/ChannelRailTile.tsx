@@ -1,6 +1,11 @@
-import type { DragEvent } from "react";
+import { useRef, type DragEvent } from "react";
 import type { UserChannel } from "../api";
 import { IconHeadphones, IconRadio } from "../icons";
+import {
+  createRailDragGhostElement,
+  setRailDragPreview,
+  workspacePreviewForChannel,
+} from "./workspaceRailDrag";
 
 export function ChannelRailTile({
   channel,
@@ -15,9 +20,31 @@ export function ChannelRailTile({
   onDock: () => void;
   onToggleMonitor: () => void;
 }) {
+  const ghostRef = useRef<HTMLElement | null>(null);
+
   function onDragStart(e: DragEvent) {
     e.dataTransfer.setData("text/channel-id", String(channel.id));
     e.dataTransfer.effectAllowed = "move";
+    const { size, colSpan } = workspacePreviewForChannel(channel, docked);
+    setRailDragPreview({
+      channelId: channel.id,
+      channelName: channel.name,
+      color: channel.color ?? null,
+      simulcast: channel.simulcast === true,
+      size,
+      colSpan,
+    });
+    const ghost = createRailDragGhostElement(channel, size, colSpan);
+    ghostRef.current = ghost;
+    document.body.appendChild(ghost);
+    const rect = ghost.getBoundingClientRect();
+    e.dataTransfer.setDragImage(ghost, Math.min(rect.width * 0.5, 80), 28);
+  }
+
+  function onDragEnd() {
+    ghostRef.current?.remove();
+    ghostRef.current = null;
+    setRailDragPreview(null);
   }
 
   return (
@@ -25,6 +52,7 @@ export function ChannelRailTile({
       className={`channel-rail-tile${docked ? " docked" : ""}${monitoring ? " monitoring" : ""}`}
       draggable
       onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
       style={
         channel.color
           ? { borderLeftColor: channel.color, borderLeftWidth: 3 }

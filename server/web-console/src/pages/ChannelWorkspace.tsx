@@ -4,10 +4,13 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type DragEvent,
   type PointerEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
+import { ChannelRailDragFollower } from "../components/ChannelRailDragFollower";
 import type { UserChannel } from "../api";
 import { ChannelPanel } from "./ChannelPanel";
 import { previewWorkspaceOrder, type WorkspaceDropEdge } from "./channelWorkspaceOrder";
@@ -18,6 +21,11 @@ import {
   orderAfterDrop,
   workspaceGridRowSlots,
 } from "./channelWorkspaceDrag";
+import {
+  getRailDragPreview,
+  subscribeRailDragPreview,
+  setRailDragPreview,
+} from "./workspaceRailDrag";
 import {
   WORKSPACE_GRID_GAP_PX,
   WORKSPACE_MIN_COL_PX,
@@ -95,7 +103,16 @@ export function ChannelWorkspace({
   const [dropEdge, setDropEdge] = useState<WorkspaceDropEdge | null>(null);
   const [insertAtEnd, setInsertAtEnd] = useState(false);
   const [dragLayoutOrder, setDragLayoutOrder] = useState<number[]>([]);
+  const [railDragPointer, setRailDragPointer] = useState<{ x: number; y: number } | null>(
+    null,
+  );
   const [cols, setCols] = useState(1);
+
+  const railDrag = useSyncExternalStore(
+    subscribeRailDragPreview,
+    getRailDragPreview,
+    () => null,
+  );
 
   const { workspaceLayout } = useConsoleState();
   const channelIds = useMemo(() => dockedChannels.map((c) => c.id), [dockedChannels]);
@@ -169,6 +186,8 @@ export function ChannelWorkspace({
     (e: DragEvent) => {
       e.preventDefault();
       setDockDragOver(false);
+      setRailDragPointer(null);
+      setRailDragPreview(null);
       clearDragOver();
       const id = Number(e.dataTransfer.getData("text/channel-id"));
       if (!Number.isFinite(id) || id <= 0 || !rootRef.current) {
@@ -339,13 +358,47 @@ export function ChannelWorkspace({
       }
       gridChildren.push(renderTile(channel));
     });
+  } else if (railDrag && dockDragOver) {
+    const phSpan = Math.max(1, Math.min(railDrag.colSpan, cols));
+    const insertAt =
+      rootRef.current && railDragPointer
+        ? insertIndexFromPointer(
+            railDragPointer.x,
+            railDragPointer.y,
+            rootRef.current,
+            channelIds,
+          )
+        : channelIds.length;
+    displayChannels.forEach((channel, index) => {
+      if (index === insertAt) {
+        gridChildren.push(renderDropPlaceholder(phSpan, "rail-drop-placeholder"));
+      }
+      gridChildren.push(renderTile(channel));
+    });
+    if (insertAt >= displayChannels.length) {
+      gridChildren.push(renderDropPlaceholder(phSpan, "rail-drop-placeholder-end"));
+    }
   } else {
     displayChannels.forEach((channel) => {
       gridChildren.push(renderTile(channel));
     });
   }
 
+  const railFollower =
+    railDrag && railDragPointer && typeof document !== "undefined"
+      ? createPortal(
+          <ChannelRailDragFollower
+            preview={railDrag}
+            clientX={railDragPointer.x}
+            clientY={railDragPointer.y}
+          />,
+          document.body,
+        )
+      : null;
+
   return (
+    <>
+    {railFollower}
     <section
       ref={rootRef}
       className={`channel-workspace-rows channel-workspace-grid${
@@ -360,8 +413,16 @@ export function ChannelWorkspace({
         e.preventDefault();
         e.dataTransfer.dropEffect = "move";
         setDockDragOver(true);
+        setRailDragPointer({ x: e.clientX, y: e.clientY });
       }}
-      onDragLeave={() => setDockDragOver(false)}
+      onDragLeave={(e) => {
+        const root = rootRef.current;
+        if (root && e.relatedTarget instanceof Node && root.contains(e.relatedTarget)) {
+          return;
+        }
+        setDockDragOver(false);
+        setRailDragPointer(null);
+      }}
       onDrop={handleRailDrop}
     >
       {dockedChannels.length === 0 ? (
@@ -375,5 +436,6 @@ export function ChannelWorkspace({
         gridChildren
       )}
     </section>
+    </>
   );
 }

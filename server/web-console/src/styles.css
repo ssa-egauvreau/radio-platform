@@ -1076,6 +1076,175 @@ code.mono {
     opacity: 1;
   }
 }
+
+/* Rail → workspace drag: sized ghost under cursor + native drag image */
+@keyframes workspace-drag-lift {
+  from {
+    opacity: 0.65;
+    transform: translate(-50%, -14px) scale(0.94);
+  }
+  to {
+    opacity: 0.96;
+    transform: translate(-50%, -14px) scale(1);
+  }
+}
+.channel-workspace-rail-drag-follower {
+  position: fixed;
+  z-index: 10050;
+  pointer-events: none;
+  box-sizing: border-box;
+  border-radius: 14px;
+  border: 2px solid color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  box-shadow:
+    0 16px 40px color-mix(in srgb, #000 42%, transparent),
+    0 0 0 1px color-mix(in srgb, var(--accent) 35%, transparent);
+  transform: translate(-50%, -14px);
+  animation: workspace-drag-lift 0.2s ease-out;
+  overflow: hidden;
+}
+.channel-workspace-rail-drag-follower.widget-small {
+  min-height: 92px;
+}
+.channel-workspace-rail-drag-follower.widget-medium {
+  min-height: 148px;
+}
+.channel-workspace-rail-drag-follower.widget-large {
+  min-height: 228px;
+}
+.channel-workspace-rail-drag-follower-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-bottom: 1px solid color-mix(in srgb, #fff 15%, var(--border));
+  background: var(--text);
+  color: var(--bg);
+}
+.channel-workspace-rail-drag-follower-size {
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 5px;
+  border: 1px solid color-mix(in srgb, currentColor 40%, transparent);
+  background: color-mix(in srgb, #000 25%, transparent);
+  font-size: 10px;
+}
+.channel-workspace-rail-drag-follower-body {
+  padding: 8px 10px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.channel-workspace-rail-drag-follower .ghost-line {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--text-dim) 35%, transparent);
+}
+.channel-workspace-rail-drag-follower .ghost-line-short {
+  width: 70%;
+}
+.channel-workspace-rail-drag-follower .ghost-line-tx {
+  height: 28px;
+}
+.channel-workspace-rail-drag-follower .ghost-line-tall {
+  height: 40px;
+}
+.channel-workspace-rail-drag-follower .ghost-line-roster {
+  height: 52px;
+}
+.channel-workspace-rail-drag-follower .ghost-btn-row,
+.channel-workspace-rail-drag-follower .ghost-tone-row {
+  display: flex;
+  gap: 5px;
+}
+.channel-workspace-rail-drag-follower .ghost-pill {
+  flex: 1 1 0;
+  text-align: center;
+  padding: 5px 4px;
+  border-radius: 5px;
+  font-size: 9px;
+  font-weight: 700;
+  background: color-mix(in srgb, var(--bg-input) 90%, transparent);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.channel-workspace-rail-drag-follower .ghost-pill-ptt {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+}
+.channel-workspace-rail-drag-follower .ghost-pill-sm {
+  flex: 0 1 auto;
+  min-width: 28px;
+  padding: 4px;
+}
+
+.channel-workspace-drag-ghost {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  z-index: -1;
+  box-sizing: border-box;
+  border-radius: 12px;
+  border: 2px solid var(--accent);
+  background: color-mix(in srgb, var(--bg-raised) 95%, transparent);
+  box-shadow: 0 12px 32px color-mix(in srgb, #000 38%, transparent);
+  overflow: hidden;
+  pointer-events: none;
+}
+.channel-workspace-drag-ghost.widget-small {
+  min-height: 88px;
+}
+.channel-workspace-drag-ghost.widget-medium {
+  min-height: 140px;
+}
+.channel-workspace-drag-ghost.widget-large {
+  min-height: 210px;
+}
+.channel-workspace-drag-ghost-head {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--text);
+  color: var(--bg);
+}
+.channel-workspace-drag-ghost-body {
+  padding: 8px 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  font-size: 9px;
+  color: var(--text-muted);
+}
+.channel-workspace-drag-ghost-chip {
+  padding: 3px 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-input) 85%, transparent);
+  border: 1px solid var(--border);
+}
+.channel-workspace-drag-ghost-size {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 800;
+  border-radius: 5px;
+  background: color-mix(in srgb, #000 30%, transparent);
+  color: #fff;
+}
 .channel-workspace-tile.workspace-tile-main .channel-workspace-tile-inner,
 .channel-workspace-tile.workspace-tile-half .channel-workspace-tile-inner {
   flex: 1 1 auto;
