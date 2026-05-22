@@ -215,6 +215,16 @@ class RadioViewModel(
         }
         refreshAppUpdateBanner()
         appUpdater.setProgressListener { progress -> onAppUpdateProgress(progress) }
+        // Flash the app version in the zone/channel display for a few seconds at launch, on the
+        // rugged handset profiles only (IRC590 / TM-7 Plus).
+        val launchProfile = uiState.value.resolvedDeviceProfile
+        if (launchProfile == ResolvedDeviceProfile.IRC590 || launchProfile == ResolvedDeviceProfile.TM7_PLUS) {
+            _uiState.update { it.copy(versionBanner = "v${BuildConfig.VERSION_NAME}") }
+            viewModelScope.launch {
+                delay(VERSION_BANNER_MS)
+                _uiState.update { it.copy(versionBanner = null) }
+            }
+        }
         viewModelScope.launch {
             while (isActive) {
                 refreshClock()
@@ -765,6 +775,17 @@ class RadioViewModel(
                 soundPlayer.playChannelSwitch()
                 _uiState.update { it.copy(mappingSettingsVisible = false, currentlyMappingAction = null) }
                 mappingJob?.cancel()
+            }
+            RadioUiEvent.CheckForUpdates -> {
+                soundPlayer.playChannelSwitch()
+                _uiState.update { it.copy(statusMessage = "CHECKING FOR UPDATES…") }
+                appUpdater.checkAndInstallAsync(force = true)
+                viewModelScope.launch {
+                    delay(VERSION_BANNER_MS)
+                    _uiState.update {
+                        if (it.statusMessage == "CHECKING FOR UPDATES…") it.copy(statusMessage = "") else it
+                    }
+                }
             }
             RadioUiEvent.DismissSetupDialog -> {
                 _uiState.update { it.copy(setupDialogDismissed = true) }
@@ -2243,6 +2264,7 @@ class RadioViewModel(
 
     private companion object {
         const val CLOCK_TICK_MS = 1_000L
+        const val VERSION_BANNER_MS = 5_000L
         /** How long the "MOVED TO" banner survives the immediate re-join "VOICE ON" ack. */
         const val MOVE_BANNER_MS = 6_000L
         const val AIR_POLL_MS = 250L

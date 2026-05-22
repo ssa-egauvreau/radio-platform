@@ -42,6 +42,11 @@ data class RadioUiState(
     val isEmergencyActive: Boolean,
     val pttBusyTone: Boolean,
     val statusMessage: String,
+    /**
+     * When non-null, the app version to flash in the zone/channel display area for a few seconds at
+     * launch (IRC590 / TM-7 Plus only). Cleared back to null afterwards.
+     */
+    val versionBanner: String? = null,
     val channelsLoading: Boolean,
     val channelSyncError: String?,
     val channelSourceLabel: String,

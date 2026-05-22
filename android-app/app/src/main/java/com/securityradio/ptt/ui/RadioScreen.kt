@@ -77,6 +77,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.securityradio.ptt.BuildConfig
 import com.securityradio.ptt.device.AccessibilitySettingsLauncher
 import com.securityradio.ptt.device.DeviceProfilePreference
 import com.securityradio.ptt.device.DeviceProfileResolver
@@ -1204,7 +1205,8 @@ private fun LcdMainChannelBlock(
                 )
             }
             Text(
-                text = state.channelLabel.uppercase(Locale.US),
+                // At launch the version flashes here for a few seconds (IRC590 / TM-7 Plus).
+                text = (state.versionBanner ?: state.channelLabel).uppercase(Locale.US),
                 style = channelStyle,
                 color = chrome.channelTextColor,
                 maxLines = 1,
@@ -3876,6 +3878,26 @@ private fun DeviceSettingsTab(
             }
             item { HorizontalDivider(color = p.divider) }
         }
+        item {
+            SettingsSectionHeader("SOFTWARE", styles, p)
+            Text(
+                text = "VERSION ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})".uppercase(Locale.US),
+                style = styles.status,
+                color = p.textMuted,
+                modifier = Modifier.padding(bottom = 4.dp),
+            )
+            TextButton(
+                onClick = { onEvent(RadioUiEvent.CheckForUpdates) },
+                modifier = Modifier.fillMaxWidth(),
+                colors = ButtonDefaults.textButtonColors(
+                    containerColor = p.softKeyInactiveFill,
+                    contentColor = p.textPrimary,
+                ),
+            ) {
+                Text("CHECK FOR UPDATES".uppercase(Locale.US))
+            }
+        }
+        item { HorizontalDivider(color = p.divider) }
         item {
             SettingsSectionHeader("HANDSET LAYOUT", styles, p)
             Text(
