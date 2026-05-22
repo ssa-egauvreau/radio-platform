@@ -1,5 +1,14 @@
 [
   {
+    "version": "1.18",
+    "date": "2026-05-20",
+    "title": "Clearer transmission log transcripts",
+    "changes": [
+      "The transmission log now records and transcribes your real voice (clear audio), not the digital vocoder signal.",
+      "Radios and the dispatch console automatically send clear audio to the server for every channel so Whisper can understand speech better."
+    ]
+  },
+  {
     "version": "1.17",
     "date": "2026-05-20",
     "title": "Mission Control layout and live control",

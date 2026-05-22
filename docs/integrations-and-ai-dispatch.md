@@ -129,11 +129,12 @@ Active incidents appear on **Command → AI dispatch activity log**.
 
 Do **not** put plate keys in Railway for normal agency setup. Optional env fallbacks (`PLATE_LOOKUP_DEFAULT_STATE`, `PLATE_LOOKUP_PROVIDER`) exist for operators only; per-agency keys in Integrations take precedence.
 
-## AI dispatch audio (clear PCM, not IMBE)
+## Transmission log and AI dispatch audio (clear PCM, not IMBE)
 
-When **AI dispatch is ON** for a channel, the server records and transcribes **clear PCM** from the radio uplink — not P25 IMBE vocoder audio (Whisper cannot understand vocoded speech).
+The **transmission log** always records and transcribes **clear PCM** from the radio uplink — not P25 IMBE vocoder audio (Whisper cannot understand vocoded speech).
 
-- Handsets and the web console receive `ai_dispatch_listen_pcm` on join and switch to **PCM uplink** automatically.
+- Every voice join includes `record_listen_pcm: true` so handsets and the web console **uplink PCM** for recordings and transcripts.
+- When **AI dispatch is ON** for a channel, clients also receive `ai_dispatch_listen_pcm` (same PCM uplink behavior).
 - Other units still hear normal channel audio (including digital voice from peers who are not on an AI channel).
 - Toggling AI dispatch in the console notifies connected voice clients immediately.
 

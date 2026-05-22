@@ -51,6 +51,7 @@ sealed interface VoiceControlEvent {
         val channel: String,
         val permission: String,
         val aiDispatchListenPcm: Boolean = false,
+        val recordListenPcm: Boolean = false,
     ) : VoiceControlEvent
     /** AI dispatch on this channel — uplink clear PCM instead of IMBE vocoder. */
     data class AiDispatchPcm(val enabled: Boolean) : VoiceControlEvent
@@ -143,12 +144,17 @@ class VoiceRelayTransport(
             val json = JSONObject(text)
             when (json.optString("type")) {
                 "joined" -> {
+                    recordListenPcm = json.optBoolean("record_listen_pcm", false)
                     aiDispatchListenPcm = json.optBoolean("ai_dispatch_listen_pcm", false)
+                    if (recordListenPcm || aiDispatchListenPcm) {
+                        pcmAccLen = 0
+                    }
                     _controlEvents.tryEmit(
                         VoiceControlEvent.Joined(
                             channel = json.optString("channel"),
                             permission = json.optString("permission", "talk"),
                             aiDispatchListenPcm = aiDispatchListenPcm,
+                            recordListenPcm = recordListenPcm,
                         ),
                     )
                 }
@@ -215,7 +221,12 @@ class VoiceRelayTransport(
     @Volatile
     private var aiDispatchListenPcm: Boolean = false
 
-    private fun p25UplinkEligible(): Boolean = P25ImbeNative.isAvailable && !aiDispatchListenPcm
+    @Volatile
+    private var recordListenPcm: Boolean = false
+
+    private fun pcmUplinkRequired(): Boolean = aiDispatchListenPcm || recordListenPcm
+
+    private fun p25UplinkEligible(): Boolean = P25ImbeNative.isAvailable && !pcmUplinkRequired()
 
     private fun reconcileAccumulatorForModeToggle() {
         val cur = p25UplinkEligible()

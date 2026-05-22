@@ -193,6 +193,8 @@ export class VoiceChannelClient {
   private digitalTx = true;
   /** Server asked for clear PCM uplink so AI dispatch can transcribe speech. */
   private aiDispatchListenPcm = false;
+  /** Server wants clear PCM for the transmission log (all channels). */
+  private recordListenPcm = false;
   private readonly txConditioner = new ImbeTxConditioner();
   private gestureUnbind: (() => void) | null = null;
 
@@ -226,6 +228,21 @@ export class VoiceChannelClient {
   /** Force clear PCM uplink when AI dispatch is listening on this channel. */
   setAiDispatchListenPcm(on: boolean): void {
     this.aiDispatchListenPcm = on;
+    if (on) {
+      this.digitalTx = false;
+    }
+  }
+
+  /** Force clear PCM uplink for transmission log transcription. */
+  setRecordListenPcm(on: boolean): void {
+    this.recordListenPcm = on;
+    if (on) {
+      this.digitalTx = false;
+    }
+  }
+
+  private pcmUplinkRequired(): boolean {
+    return this.aiDispatchListenPcm || this.recordListenPcm;
   }
 
   /** Sets channel listen volume (0–1). Takes effect immediately and on next connect. */
@@ -405,6 +422,7 @@ export class VoiceChannelClient {
       channel?: string;
       by?: string;
       ai_dispatch_listen_pcm?: boolean;
+      record_listen_pcm?: boolean;
       enabled?: boolean;
     };
     try {
@@ -415,16 +433,15 @@ export class VoiceChannelClient {
     if (msg.type === "joined") {
       this.permission = msg.permission ?? "listen_only";
       this.callbacks.onPermission(this.permission);
+      if (msg.record_listen_pcm === true) {
+        this.setRecordListenPcm(true);
+      }
       if (msg.ai_dispatch_listen_pcm === true) {
-        this.aiDispatchListenPcm = true;
-        this.digitalTx = false;
+        this.setAiDispatchListenPcm(true);
       }
       this.setState("listening");
     } else if (msg.type === "ai_dispatch_pcm") {
-      this.aiDispatchListenPcm = msg.enabled === true;
-      if (this.aiDispatchListenPcm) {
-        this.digitalTx = false;
-      }
+      this.setAiDispatchListenPcm(msg.enabled === true);
     } else if (msg.type === "busy") {
       // The relay rejected our audio — another unit holds the channel.
       if (this.transmitting) {
@@ -548,7 +565,7 @@ export class VoiceChannelClient {
       if (!this.transmitting || !ws || ws.readyState !== WebSocket.OPEN || !(event.data instanceof ArrayBuffer)) {
         return;
       }
-      if (this.digitalTx && !this.aiDispatchListenPcm && imbeReady()) {
+      if (this.digitalTx && !this.pcmUplinkRequired() && imbeReady()) {
         // Condition then encode to P25 IMBE so transmissions carry the
         // digital-voice character without riding background noise.
         const pcm = new Int16Array(event.data);

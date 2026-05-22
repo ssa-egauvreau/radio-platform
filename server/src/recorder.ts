@@ -26,8 +26,13 @@ export interface FrameAttribution {
   userId: number | null;
   unitId: string;
   displayName: string | null;
-  /** AI dispatch on this channel — record clear PCM only, never vocoded IMBE. */
+  /** AI dispatch on this channel — uplink clear PCM for AI (also skips IMBE in the recording). */
   aiDispatchListenPcm?: boolean;
+  /**
+   * When true (default for all relay traffic), the transmission log stores only
+   * clear PCM frames so Whisper is not fed decoded IMBE audio.
+   */
+  recordListenPcm?: boolean;
 }
 
 /** Recordings are tracked per agency + channel so tenants never share a talk-spurt. */
@@ -100,14 +105,15 @@ export function recordFrame(attr: FrameAttribution, payload: Buffer): void {
     rec = { ...attr, startedAt: now, lastFrameMs: now, chunks: [], bytes: 0, decoder: null };
     active.set(key, rec);
   }
-  const aiListenPcm =
+  const preferClearPcm =
+    attr.recordListenPcm !== false ||
     attr.aiDispatchListenPcm === true ||
     isAiDispatchChannelCached(attr.agencyId, attr.channelName);
 
-  // AI dispatch transcription uses clear PCM — IMBE decode is unintelligible to Whisper.
+  // Transmission log + Whisper need clear PCM — decoded IMBE is poor for speech-to-text.
   let pcm: Buffer;
   if (isImbeFrame(payload)) {
-    if (aiListenPcm) {
+    if (preferClearPcm) {
       return;
     }
     if (!rec.decoder) {

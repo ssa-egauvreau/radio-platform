@@ -107,6 +107,8 @@ interface ClientMeta {
   markerToneUntilMs: number;
   /** When true, uplink should be clear PCM so AI dispatch / Whisper can understand speech. */
   aiDispatchListenPcm: boolean;
+  /** Always true after join — handsets/console uplink PCM for transmission log transcription. */
+  recordListenPcm: boolean;
   /** Cached from the users table for console accounts (roster / live control). */
   deviceType: string | null;
 }
@@ -190,6 +192,7 @@ function frameAttribution(meta: ClientMeta): FrameAttribution {
     unitId: meta.unitId,
     displayName: meta.displayName,
     aiDispatchListenPcm: meta.aiDispatchListenPcm,
+    recordListenPcm: meta.recordListenPcm,
   };
 }
 
@@ -770,6 +773,7 @@ export function attachVoiceRelay(
             lastBusyMs: 0,
             markerToneUntilMs: 0,
             aiDispatchListenPcm: false,
+            recordListenPcm: true,
             deviceType: null,
           });
           wss.emit("connection", ws, req);
@@ -915,6 +919,7 @@ export function attachVoiceRelay(
       }
     }
     meta.aiDispatchListenPcm = aiListenPcm;
+    meta.recordListenPcm = true;
     const prior = voiceRoster.get(ws);
     voiceRoster.set(ws, {
       channelKey: chanKey,
@@ -934,6 +939,7 @@ export function attachVoiceRelay(
         channel: channelName,
         permission,
         unit_id: unitId,
+        record_listen_pcm: true,
         ...(aiListenPcm ? { ai_dispatch_listen_pcm: true } : {}),
       }),
     );
@@ -1007,6 +1013,7 @@ export function attachVoiceRelay(
                   channelName: target.channelName,
                   channelId: target.channelId,
                   aiDispatchListenPcm: isAiDispatchChannelCached(meta.agencyId, target.channelName),
+                  recordListenPcm: true,
                 },
                 payload,
               );
@@ -1034,6 +1041,7 @@ export function attachVoiceRelay(
                 channelName: target.channelName,
                 channelId: target.channelId,
                 aiDispatchListenPcm: isAiDispatchChannelCached(meta.agencyId, target.channelName),
+                recordListenPcm: true,
               },
               payload,
             );
