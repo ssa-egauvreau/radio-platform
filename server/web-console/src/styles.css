@@ -450,24 +450,50 @@ a {
   gap: 10px;
   margin: 8px 0;
 }
-.bridge-meter-bar {
+.bridge-meter .audio-level-meter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+.audio-level-meter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  width: 100%;
+}
+.audio-level-meter-bar {
   position: relative;
   flex: 1 1 auto;
+  min-width: 0;
   height: 14px;
   border-radius: 4px;
   background: var(--bg-input);
   border: 1px solid var(--border);
   overflow: hidden;
 }
-.bridge-meter-fill {
+.audio-level-meter-fill {
   height: 100%;
-  background: var(--accent-2);
-  transition: width 0.1s linear;
+  transition: width 0.08s linear;
 }
-.bridge-meter-fill.keyed {
+.audio-level-meter-fill.tx {
+  background: color-mix(in srgb, #ef4444 75%, var(--accent-2));
+}
+.audio-level-meter-fill.rx {
+  background: color-mix(in srgb, #38bdf8 70%, var(--accent-2));
+}
+.audio-level-meter-fill.bridge,
+.audio-level-meter-fill.keyed {
+  background: var(--accent-2);
+}
+.audio-level-meter-fill.bridge.keyed,
+.audio-level-meter-fill.keyed {
   background: #22c55e;
 }
-.bridge-meter-mark {
+.audio-level-meter-mark {
   position: absolute;
   top: -2px;
   bottom: -2px;
@@ -475,15 +501,53 @@ a {
   margin-left: -1px;
   background: var(--amber);
 }
-.bridge-meter-status {
+.audio-level-meter-status {
   flex: 0 0 auto;
   min-width: 104px;
   font-size: 11px;
   color: var(--text-muted);
 }
-.bridge-meter-status.keyed {
+.audio-level-meter-status.keyed {
   color: #22c55e;
   font-weight: 600;
+}
+.audio-level-meter--strip {
+  width: 100%;
+}
+.audio-level-meter--strip .audio-level-meter-bar {
+  height: 22px;
+}
+.audio-level-meter--mini {
+  width: 100%;
+  min-width: 48px;
+}
+.audio-level-meter--mini .audio-level-meter-bar {
+  height: 10px;
+  border-radius: 3px;
+}
+.audio-level-meter--tx-fill {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.audio-level-meter--tx-fill .audio-level-meter-bar {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--bg-input) 40%, transparent);
+}
+.audio-level-meter--tx-fill .audio-level-meter-fill.tx {
+  background: color-mix(in srgb, #ef4444 55%, transparent);
+}
+.audio-level-meter--tx-fill .audio-level-meter-fill.rx {
+  background: color-mix(in srgb, #38bdf8 50%, transparent);
+}
+.audio-level-meter--tx-fill .audio-level-meter-fill {
+  opacity: 0.9;
 }
 .bridge-meter-row {
   display: flex;
@@ -1043,9 +1107,7 @@ code.mono {
 }
 .tx-button-wave {
   position: absolute;
-  inset: 4px 6px auto;
-  height: 52px;
-  opacity: 0.55;
+  inset: 0;
   pointer-events: none;
   z-index: 0;
 }
@@ -1492,15 +1554,20 @@ code.mono {
   overflow-y: auto;
 }
 .ch-mini-wave {
-  flex: 0 0 auto;
+  flex: 0 1 88px;
   display: inline-flex;
   align-items: center;
-  width: 56px;
+  min-width: 56px;
+  max-width: 88px;
+  width: 72px;
   height: 22px;
   padding: 0 4px;
   border: 1px solid var(--border);
   border-radius: 4px;
   background: var(--bg-input);
+}
+.ch-mini-wave .audio-level-meter {
+  width: 100%;
 }
 .ch-mini-wave.tx {
   border-color: var(--red);
@@ -1846,7 +1913,7 @@ code.mono {
 }
 .waveform-strip {
   margin-top: 8px;
-  padding: 4px 8px;
+  padding: 6px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: var(--bg-input);
@@ -1857,6 +1924,9 @@ code.mono {
 }
 .waveform-strip.rx {
   border-color: var(--accent);
+}
+.waveform-strip .audio-level-meter {
+  margin: 0;
 }
 .waveform {
   display: block;

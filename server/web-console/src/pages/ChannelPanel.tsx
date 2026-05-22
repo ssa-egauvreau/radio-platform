@@ -8,7 +8,7 @@ import {
 import type { Permission, ToneOut, UserChannel } from "../api";
 import { api } from "../api";
 import { VoiceChannelClient, type VoiceState, type ToneOutKind } from "../voice/voiceClient";
-import { Waveform } from "../voice/Waveform";
+import { AudioLevelMeter } from "../voice/AudioLevelMeter";
 import { ChannelRoster } from "./ChannelRoster";
 import { LatestChannelTransmission } from "../components/LatestChannelTransmission";
 import { sounds } from "../sounds";
@@ -569,12 +569,11 @@ export function ChannelPanel({
                   className={`ch-mini-wave${transmitting ? " tx" : receiving ? " rx" : ""}`}
                   title={transmitting ? "On air" : receiving ? "Receiving" : "Listening"}
                 >
-                  <Waveform
+                  <AudioLevelMeter
                     getLevel={() => clientRef.current?.getLevel() ?? 0}
                     active={transmitting || receiving}
                     variant={transmitting ? "tx" : "rx"}
-                    bars={10}
-                    height={18}
+                    className="audio-level-meter--mini"
                   />
                 </span>
               ) : (
@@ -694,12 +693,11 @@ export function ChannelPanel({
             className={`tx-button-wave${transmitting ? " tx" : receiving ? " rx" : ""}`}
             aria-hidden
           >
-            <Waveform
+            <AudioLevelMeter
               getLevel={() => clientRef.current?.getLevel() ?? 0}
               active={transmitting || receiving}
               variant={transmitting ? "tx" : "rx"}
-              bars={32}
-              height={56}
+              className="audio-level-meter--tx-fill"
             />
           </div>
         )}
@@ -724,10 +722,11 @@ export function ChannelPanel({
 
       {!workspace && (
         <div className={`waveform-strip${transmitting ? " tx" : receiving ? " rx" : ""}`}>
-          <Waveform
+          <AudioLevelMeter
             getLevel={() => clientRef.current?.getLevel() ?? 0}
             active={transmitting || receiving}
             variant={transmitting ? "tx" : "rx"}
+            className="audio-level-meter--strip"
           />
         </div>
       )}

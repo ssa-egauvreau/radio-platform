@@ -11,7 +11,7 @@ import { LatestChannelTransmission } from "../components/LatestChannelTransmissi
 import { useAuth } from "../auth";
 import { Topbar } from "../Topbar";
 import { VoiceChannelClient, type VoiceState } from "../voice/voiceClient";
-import { Waveform } from "../voice/Waveform";
+import { AudioLevelMeter } from "../voice/AudioLevelMeter";
 import { ScanListenClient } from "../voice/scanListenClient";
 import { bindLostLinkBusyAlerts, sounds } from "../sounds";
 
@@ -549,11 +549,11 @@ export function RadioPortal() {
         >
           <div className="rp-status-line">{channelStatus}</div>
           <div className={`waveform-strip rp-waveform${transmitting ? " tx" : receiving ? " rx" : ""}`}>
-            <Waveform
+            <AudioLevelMeter
               getLevel={() => voiceRef.current?.getLevel() ?? 0}
               active={transmitting || receiving}
               variant={transmitting ? "tx" : "rx"}
-              height={36}
+              className="audio-level-meter--strip"
             />
           </div>
           <button
