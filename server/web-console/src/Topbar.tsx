@@ -24,6 +24,7 @@ export function Topbar({
   const { user, logout } = useAuth();
   const location = useLocation();
   const consoleNav = section === "console" ? consoleNavFromPath(location.pathname) : null;
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const sectionLabel =
     section === "admin"
@@ -80,6 +81,11 @@ export function Topbar({
     };
   }, [agencyId, logoNonce]);
 
+  // Close the mobile hamburger menu after navigating.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [location.pathname]);
+
   return (
     <header className="topbar">
       <div className="brand">
@@ -89,7 +95,17 @@ export function Topbar({
         </span>
         <span className="brand-section">{sectionLabel}</span>
       </div>
-      <nav className="topnav">
+      <button
+        type="button"
+        className="topbar-hamburger"
+        aria-label={menuOpen ? "Close menu" : "Open menu"}
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        {menuOpen ? "✕" : "☰"}
+      </button>
+      <div className={`topbar-menu${menuOpen ? " open" : ""}`}>
+      <nav className="topnav" onClick={() => setMenuOpen(false)}>
         {section !== "owner" && (
           <>
             {isRadioRole ? (
@@ -151,6 +167,7 @@ export function Topbar({
         <button className="btn sm icon-btn" onClick={logout}>
           <IconLogOut size={14} /> Sign out
         </button>
+      </div>
       </div>
     </header>
   );

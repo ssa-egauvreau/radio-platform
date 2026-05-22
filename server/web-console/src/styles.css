@@ -248,6 +248,15 @@ a {
   background: var(--bg-raised);
   border-bottom: 1px solid var(--border);
   flex: none;
+  position: relative;
+}
+/* Hamburger only appears on phones; on desktop the menu is transparent so the nav + user controls
+   flow as normal flex children of the topbar. */
+.topbar-hamburger {
+  display: none;
+}
+.topbar-menu {
+  display: contents;
 }
 .brand {
   display: flex;
@@ -3488,17 +3497,59 @@ code.mono {
     gap: 6px 14px;
     padding: 8px 12px;
   }
-  /* On a phone the nav tabs sit on their own full-width row and scroll sideways within it, instead
-     of wrapping into a cramped/squished block (or overflowing the viewport and widening the page). */
-  .topnav {
-    flex-basis: 100%;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    gap: 6px;
-    -webkit-overflow-scrolling: touch;
+  /* On a phone the nav + user controls collapse behind a hamburger to save space. */
+  .topbar-hamburger {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-left: auto;
+    width: 42px;
+    height: 36px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-input);
+    color: var(--text);
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
   }
-  .topnav .nav-tab {
+  .topbar-menu {
+    display: none;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+    background: var(--bg-raised);
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 14px 30px color-mix(in srgb, #000 34%, transparent);
+    z-index: 60;
+  }
+  .topbar-menu.open {
+    display: flex;
+  }
+  .topbar-menu .topnav {
     flex: 0 0 auto;
+    flex-basis: auto;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    overflow-x: visible;
+    gap: 4px;
+    min-width: 0;
+  }
+  .topbar-menu .topnav .nav-tab {
+    width: 100%;
+  }
+  .topbar-menu .who {
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    margin-left: 0;
+    gap: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border);
   }
   .who {
     margin-left: 0;
