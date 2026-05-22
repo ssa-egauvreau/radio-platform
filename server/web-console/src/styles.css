@@ -1086,14 +1086,16 @@ code.mono {
 .channel-card.workspace[data-tier="0"] .ch-card-body.workspace-dense > .tx-button,
 .channel-card.workspace[data-tier="1"] .ch-card-body.workspace-dense > .tx-button,
 .channel-card.workspace[data-tier="2"] .ch-card-body.workspace-dense > .tx-button {
-  flex: 1 1 0;
-  min-height: 0;
+  /* Tiles size to content now, so don't flex the PTT button to fill a (non-existent) fixed
+     height — it would collapse to nothing. Give it its natural button height. */
+  flex: 0 0 auto;
+  min-height: 56px;
   grid-column: auto;
 }
 .channel-card.workspace[data-tier="0"] .tx-button-integrated,
 .channel-card.workspace[data-tier="1"] .tx-button-integrated,
 .channel-card.workspace[data-tier="2"] .tx-button-integrated {
-  min-height: 0;
+  min-height: 56px;
   padding: 6px;
 }
 .channel-card.workspace[data-tier="0"] .tx-button-integrated .tx-main {
@@ -1415,9 +1417,6 @@ code.mono {
 }
 .channel-workspace-tile .channel-card.workspace .tx-button-integrated {
   min-height: 56px;
-}
-.channel-workspace-tile .channel-card.workspace[data-tier="0"] .tx-button-integrated {
-  min-height: 0;
 }
 .channel-workspace-tile .channel-card.workspace .roster {
   flex: 1 1 auto;
