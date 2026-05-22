@@ -15,7 +15,7 @@ import {
 const STATE_KEY = "securityradio.console.state";
 
 /** Bump when workspace layout rules change — triggers one-time localStorage migration. */
-const CURRENT_LAYOUT_VERSION = 4;
+const CURRENT_LAYOUT_VERSION = 5;
 const MAX_STATE_STORAGE_BYTES = 256 * 1024;
 const MAX_OPEN_CHANNELS = 16;
 const MAX_DOCKED_CHANNELS = 12;
@@ -553,7 +553,37 @@ function snapWorkspaceColSpan(colSpan: number, width: number): number {
 export const WORKSPACE_SLOT_COL_SPAN = Math.floor(WORKSPACE_COLS / WORKSPACE_MAX_PER_ROW);
 
 /**
- * Packs channels into up to four columns; short tiles leave room for another channel below.
+ * After vertical packing, widen every channel row so tiles share the full 12 columns
+ * (1 → full width, 2 → 50/50, 3 → thirds, 4 → quarters).
+ */
+function applyEqualWidthRows(layout: Record<string, WorkspaceTileLayout>): void {
+  const byStartRow = new Map<number, string[]>();
+  for (const [key, tile] of Object.entries(layout)) {
+    const list = byStartRow.get(tile.row) ?? [];
+    list.push(key);
+    byStartRow.set(tile.row, list);
+  }
+  for (const keys of byStartRow.values()) {
+    keys.sort((a, b) => layout[a]!.col - layout[b]!.col);
+    const n = keys.length;
+    if (n <= 0) {
+      continue;
+    }
+    const baseSpan = Math.max(WORKSPACE_MIN_COL_SPAN, Math.floor(WORKSPACE_COLS / n));
+    let col = 0;
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i]!;
+      const tile = layout[key]!;
+      const colSpan = i === keys.length - 1 ? WORKSPACE_COLS - col : baseSpan;
+      layout[key] = { ...tile, col, colSpan };
+      col += colSpan;
+    }
+  }
+}
+
+/**
+ * Packs channels into up to four columns; short tiles stack below. Each row of tiles
+ * is stretched to fill the workspace width with equal column spans.
  */
 export function packWorkspaceLayout(
   expandedIds: number[],
@@ -580,6 +610,7 @@ export function packWorkspaceLayout(
     };
     columnBottom[slot] = row + rowSpan;
   }
+  applyEqualWidthRows(out);
   return out;
 }
 
@@ -604,9 +635,9 @@ function withPackedWorkspaceLayout(s: ConsoleState): ConsoleState {
 
 export function getWorkspaceTile(id: number): WorkspaceTileLayout {
   const key = layoutKey(id);
-  const tile = state.workspaceLayout[key];
-  if (tile) {
-    return tile;
+  const packed = packWorkspaceLayout(state.expanded, state.workspaceLayout);
+  if (packed[key]) {
+    return packed[key]!;
   }
   if (state.expanded.indexOf(id) < 0) {
     return {

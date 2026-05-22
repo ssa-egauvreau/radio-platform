@@ -876,6 +876,7 @@ code.mono {
 .channel-workspace-tile {
   position: relative;
   min-width: 0;
+  width: 100%;
   min-height: 0;
   align-self: stretch;
   box-sizing: border-box;
