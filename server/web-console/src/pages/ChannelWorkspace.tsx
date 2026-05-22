@@ -10,10 +10,12 @@ import {
 } from "react";
 import type { UserChannel } from "../api";
 import { ChannelPanel } from "./ChannelPanel";
-import { previewWorkspaceOrder } from "./channelWorkspaceOrder";
+import { previewWorkspaceOrder, type WorkspaceDropEdge } from "./channelWorkspaceOrder";
 import {
+  columnMajorOrderFromDom,
   findWorkspaceDropTarget,
   insertIndexFromPointer,
+  orderAfterDrop,
   workspaceGridRowSlots,
 } from "./channelWorkspaceDrag";
 import {
@@ -22,7 +24,7 @@ import {
   cycleWorkspaceTileSize,
   getWorkspaceTile,
   moveWorkspaceTileToEnd,
-  reorderWorkspaceTile,
+  setWorkspaceChannelOrder,
   syncWorkspaceTilesForViewport,
   useConsoleState,
   workspaceColsForWidth,
@@ -92,6 +94,7 @@ export function ChannelWorkspace({
   const [dragOverChannelId, setDragOverChannelId] = useState<number | null>(null);
   const [dropEdge, setDropEdge] = useState<WorkspaceDropEdge | null>(null);
   const [insertAtEnd, setInsertAtEnd] = useState(false);
+  const [dragLayoutOrder, setDragLayoutOrder] = useState<number[]>([]);
   const [cols, setCols] = useState(1);
 
   const { workspaceLayout } = useConsoleState();
@@ -106,16 +109,19 @@ export function ChannelWorkspace({
     return map;
   }, [dockedChannels, workspaceLayout]);
 
+  const orderForPreview =
+    moveChannelId !== null && dragLayoutOrder.length > 0 ? dragLayoutOrder : channelIds;
+
   const previewIds = useMemo(
     () =>
       previewWorkspaceOrder(
-        channelIds,
+        orderForPreview,
         moveChannelId,
         dragOverChannelId,
         dropEdge,
         insertAtEnd,
       ),
-    [channelIds, moveChannelId, dragOverChannelId, dropEdge, insertAtEnd],
+    [orderForPreview, moveChannelId, dragOverChannelId, dropEdge, insertAtEnd],
   );
 
   const displayChannels = useMemo(
@@ -187,13 +193,19 @@ export function ChannelWorkspace({
     handle.setPointerCapture(e.pointerId);
     setMoveChannelId(channelId);
     clearDragOver();
+    const rootAtStart = rootRef.current;
+    if (rootAtStart) {
+      setDragLayoutOrder(columnMajorOrderFromDom(rootAtStart, channelIds, channelId));
+    }
 
     const onMove = (ev: globalThis.PointerEvent) => {
       const root = rootRef.current;
       if (!root) {
         return;
       }
-      const drop = findWorkspaceDropTarget(root, ev.clientX, ev.clientY, channelId);
+      const visual = columnMajorOrderFromDom(root, channelIds, channelId);
+      setDragLayoutOrder(visual);
+      const drop = findWorkspaceDropTarget(root, ev.clientX, ev.clientY, visual, channelId);
       if (drop) {
         setInsertAtEnd(false);
         setDragOverChannelId(drop.targetId);
@@ -217,12 +229,16 @@ export function ChannelWorkspace({
       const root = rootRef.current;
       if (!root) {
         setMoveChannelId(null);
+        setDragLayoutOrder([]);
         clearDragOver();
         return;
       }
-      const drop = findWorkspaceDropTarget(root, ev.clientX, ev.clientY, channelId);
+      const visual = columnMajorOrderFromDom(root, channelIds, channelId);
+      const drop = findWorkspaceDropTarget(root, ev.clientX, ev.clientY, visual, channelId);
       if (drop) {
-        reorderWorkspaceTile(channelId, drop.targetId, drop.edge);
+        setWorkspaceChannelOrder(
+          orderAfterDrop(visual, channelId, drop.targetId, drop.edge),
+        );
       } else {
         const rootRect = root.getBoundingClientRect();
         const inRoot =
@@ -235,6 +251,7 @@ export function ChannelWorkspace({
         }
       }
       setMoveChannelId(null);
+      setDragLayoutOrder([]);
       clearDragOver();
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onEnd);
@@ -262,7 +279,11 @@ export function ChannelWorkspace({
         data-channel-id={channel.id}
         className={`channel-workspace-tile widget-${size}${!monitoring ? " channel-off" : ""}${
           isDragging ? " moving" : ""
-        }${isDropTarget ? ` drag-target drop-${dropEdge}` : ""}`}
+        }${
+          isDropTarget
+            ? ` drag-target drop-${dropEdge}${dropEdge === "after" ? " drop-stack-under" : ""}`
+            : ""
+        }`}
         style={{ gridColumn: `span ${colSpan}` }}
         title={`${channel.name} · ${footprint}`}
       >
@@ -347,7 +368,7 @@ export function ChannelWorkspace({
         <div className="channel-workspace-empty">
           <p>Tap a channel in the list to open it here — or drag it in.</p>
           <p className="muted">
-            Drag the channel name bar to reorder (tiles stack in columns) · S / M / L · ✕ close.
+            Drag the name bar to reorder — drop below a channel to stack under it · S / M / L · ✕.
           </p>
         </div>
       ) : (

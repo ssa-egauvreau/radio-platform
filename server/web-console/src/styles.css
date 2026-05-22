@@ -1045,6 +1045,19 @@ code.mono {
     0 6px 16px color-mix(in srgb, var(--accent) 35%, transparent);
   outline: none;
 }
+.channel-workspace-tile.drag-target.drop-stack-under::after {
+  content: "";
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: -3px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 55%, transparent);
+  pointer-events: none;
+  z-index: 12;
+}
 .channel-workspace-drop-placeholder {
   min-height: 72px;
   border: 2px dashed color-mix(in srgb, var(--accent) 70%, var(--border));

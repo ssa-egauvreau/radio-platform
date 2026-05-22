@@ -700,18 +700,25 @@ export function reorderWorkspaceTile(
   commitWorkspaceIfChanged(expanded, workspaceLayout);
 }
 
+/** Replace docked channel order (column-major sequence for the workspace grid). */
+export function setWorkspaceChannelOrder(expanded: number[]): void {
+  const safe = expanded.filter((id) => state.expanded.includes(id));
+  if (safe.length !== state.expanded.length) {
+    return;
+  }
+  if (expandedOrderEqual(safe, state.expanded)) {
+    return;
+  }
+  const workspaceLayout = relayoutWorkspace(safe, state.workspaceLayout);
+  commitWorkspaceIfChanged(safe, workspaceLayout);
+}
+
 /** Move a docked tile to the end of the sequence (drag onto empty workspace area). */
 export function moveWorkspaceTileToEnd(sourceId: number): void {
   if (!state.expanded.includes(sourceId)) {
     return;
   }
-  const without = state.expanded.filter((id) => id !== sourceId);
-  const expanded = [...without, sourceId];
-  if (expandedOrderEqual(expanded, state.expanded)) {
-    return;
-  }
-  const workspaceLayout = relayoutWorkspace(expanded, state.workspaceLayout);
-  commitWorkspaceIfChanged(expanded, workspaceLayout);
+  setWorkspaceChannelOrder([...state.expanded.filter((id) => id !== sourceId), sourceId]);
 }
 
 /** Dock a channel on the workspace; optional insert index (left-to-right order). */
