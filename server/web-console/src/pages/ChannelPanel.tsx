@@ -12,6 +12,7 @@ import { AudioLevelMeter } from "../voice/AudioLevelMeter";
 import { ChannelMemberCount } from "../components/ChannelMemberCount";
 import { ChannelRoster } from "./ChannelRoster";
 import { LatestChannelTransmission } from "../components/LatestChannelTransmission";
+import { useChannelRoster } from "../hooks/useChannelRoster";
 import type { WorkspaceWidgetSize } from "../consoleStore";
 import { sounds } from "../sounds";
 import { useToneOuts, loadTonePcm, ToneOutBadge } from "../toneOuts";
@@ -503,10 +504,10 @@ export function ChannelPanel({
   const wsSize = workspace ? workspaceWidgetSize : "large";
   const wsIcon = workspace
     ? wsSize === "small"
-      ? { toolbar: 11, volume: 11, radio: 10, txMain: 14, action: 11, tone: 10, badge: 10, member: 10 }
+      ? { toolbar: 12, volume: 12, radio: 14, txMain: 18, action: 11, tone: 10, badge: 10, member: 10 }
       : wsSize === "medium"
-        ? { toolbar: 12, volume: 12, radio: 11, txMain: 16, action: 12, tone: 11, badge: 11, member: 11 }
-        : { toolbar: 13, volume: 12, radio: 12, txMain: 18, action: 12, tone: 11, badge: 11, member: 12 }
+        ? { toolbar: 13, volume: 13, radio: 16, txMain: 20, action: 12, tone: 11, badge: 11, member: 11 }
+        : { toolbar: 14, volume: 14, radio: 18, txMain: 22, action: 12, tone: 11, badge: 11, member: 12 }
     : null;
   const showToolbar = true;
   const volumeInToolbar = workspace && (wsSize === "medium" || wsSize === "large");
@@ -533,9 +534,14 @@ export function ChannelPanel({
   const showLiveTx = workspace;
   const showRoster = workspace && (wsSize === "medium" || wsSize === "large");
   const showAiToggle = workspace && (wsSize === "medium" || wsSize === "large");
+  const rosterPollEnabled = monitoring && (showRoster || showMemberCount);
+  const { members: rosterMembers, count: rosterCount } = useChannelRoster(
+    channel.name,
+    rosterPollEnabled,
+  );
   const showStopAllTop = workspace && wsSize === "large";
-  /** Full XMIT pad only on large — S/M use the toolbar PTT. */
-  const showMainTxButton = !workspace || wsSize === "large";
+  /** Workspace tiles use the body XMIT pad only (no toolbar PTT). */
+  const showMainTxButton = true;
   const showActionNotes =
     !workspace
       ? marker || aiDispatchHint || (aiDispatch && !aiDispatchHint)
@@ -605,25 +611,6 @@ export function ChannelPanel({
           <IconHeadphones size={wsIcon?.toolbar ?? 16} />
           <span>{monitoring ? "ON" : "OFF"}</span>
         </button>
-        <button
-          type="button"
-          className={`ch-quick-ptt${transmitting ? " active" : ""}${workspace && wsSize !== "small" ? " ch-quick-ptt--center" : ""}`}
-          disabled={!monitoring || !connected || !canTransmit}
-          onPointerDown={beginTransmit}
-          onPointerUp={endTransmit}
-          onPointerCancel={endTransmit}
-          onLostPointerCapture={stopTx}
-          title={
-            !monitoring
-              ? "Turn the channel on to talk"
-              : !canTransmit
-                ? "Listen-only on this channel"
-                : "Hold to talk"
-          }
-        >
-          <IconBolt size={wsIcon?.toolbar ?? 16} />
-          <span>{transmitting ? "ON AIR" : "PTT"}</span>
-        </button>
       </div>
     </div>
   ) : null;
@@ -648,7 +635,7 @@ export function ChannelPanel({
                   : undefined
               }
               onPointerDownCapture={workspaceChrome?.onDragPointerDown}
-              title={workspaceChrome ? "Drag the name bar to reorder (not PTT or S / M / L)" : undefined}
+              title={workspaceChrome ? "Drag the name bar to reorder (not XMIT or S / M / L)" : undefined}
             >
               <div className="ch-card-title-main">
                 <div className="ch-card-name ch-card-name-static">
@@ -660,6 +647,7 @@ export function ChannelPanel({
                   <ChannelMemberCount
                     channelName={channel.name}
                     iconSize={wsIcon?.member ?? 14}
+                    count={rosterCount}
                   />
                 )}
               </div>
@@ -778,14 +766,68 @@ export function ChannelPanel({
 
       {expanded && (
       <div className={`ch-card-body${workspace ? " workspace-dense" : ""}`}>
-      {showControlRow && (
-        <div className={`ch-control-row${workspace ? " workspace-control-row" : ""}`}>
-          {showPermission && (
-            <div className="live-meta">
-              Permission: <strong>{PERMISSION_LABEL[permission]}</strong>
-            </div>
-          )}
+      {volumeRow}
 
+      {showMainTxButton && workspace && (
+        <section className="ch-ws-section ch-ws-section--xmit" aria-label="Transmit">
+          <button
+            type="button"
+            className={`tx-button tx-button-integrated tx-button-ws--${wsSize}${
+              transmitting ? " active" : receiving ? " busy" : ""
+            }`}
+            disabled={!monitoring || !connected || !canTransmit}
+            onPointerDown={beginTransmit}
+            onPointerUp={endTransmit}
+            onPointerCancel={endTransmit}
+            onLostPointerCapture={stopTx}
+            title={
+              !monitoring
+                ? "Turn the channel on to transmit"
+                : !canTransmit
+                  ? "Listen-only on this channel"
+                  : "Hold to transmit"
+            }
+          >
+            <div
+              className={`tx-button-wave${transmitting ? " tx" : receiving ? " rx" : ""}`}
+              aria-hidden
+            >
+              <AudioLevelMeter
+                getLevel={() => clientRef.current?.getLevel() ?? 0}
+                active={transmitting || receiving}
+                variant={transmitting ? "tx" : "rx"}
+                className="audio-level-meter--tx-fill"
+              />
+            </div>
+            <span className="tx-main">
+              <IconBolt size={wsIcon?.txMain ?? 22} />
+              {transmitting ? "ON AIR" : !canTransmit ? "LISTEN ONLY" : receiving ? "BUSY" : "XMIT"}
+            </span>
+            <span className="tx-sub">
+              {transmitting
+                ? "Release to stop"
+                : !canTransmit
+                  ? "No transmit permission"
+                  : !connected
+                    ? "Connecting…"
+                    : !monitoring
+                      ? "Turn channel on first"
+                      : wsSize === "small"
+                        ? primary
+                          ? `Hold · ${keyLabel(pttCode)}`
+                          : "Hold to talk"
+                        : primary
+                          ? `Hold to talk · ${keyLabel(pttCode)}`
+                          : "Hold to talk"}
+            </span>
+          </button>
+        </section>
+      )}
+
+      {showControlRow && (
+        workspace && showPermission ? (
+        <div className="ch-ws-meta-row">
+          <span className="ch-ws-permission">{PERMISSION_LABEL[permission]}</span>
           {showPttAssign && (
             <div className="cp-ptt-assign">
               {primary ? (
@@ -805,9 +847,34 @@ export function ChannelPanel({
             </div>
           )}
         </div>
+        ) : (
+        <div className={`ch-control-row${workspace ? " workspace-control-row" : ""}`}>
+          {showPermission && (
+            <div className="live-meta">
+              Permission: <strong>{PERMISSION_LABEL[permission]}</strong>
+            </div>
+          )}
+          {showPttAssign && (
+            <div className="cp-ptt-assign">
+              {primary ? (
+                <span className="cp-primary" title="Keyboard PTT controls this channel">
+                  Keyboard PTT
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="ch-setprimary"
+                  onClick={onMakePrimary}
+                  title="Use the keyboard PTT for this channel"
+                >
+                  Set keyboard PTT
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+        )
       )}
-
-      {volumeRow}
 
       {showAudioOut && (
       <label className="audio-out-row">
@@ -832,49 +899,32 @@ export function ChannelPanel({
         <div className={`banner ${voiceState === "error" ? "error" : "info"}`}>{voiceDetail}</div>
       )}
 
-      {showMainTxButton && (
+      {showMainTxButton && !workspace && (
       <button
-        className={`tx-button${workspace ? " tx-button-integrated" : ""}${
-          transmitting ? " active" : receiving ? " busy" : ""
-        }`}
+        className={`tx-button${transmitting ? " active" : receiving ? " busy" : ""}`}
         disabled={!connected || !canTransmit}
         onPointerDown={beginTransmit}
         onPointerUp={endTransmit}
         onPointerCancel={endTransmit}
         onLostPointerCapture={stopTx}
       >
-        {workspace && (
-          <div
-            className={`tx-button-wave${transmitting ? " tx" : receiving ? " rx" : ""}`}
-            aria-hidden
-          >
-            <AudioLevelMeter
-              getLevel={() => clientRef.current?.getLevel() ?? 0}
-              active={transmitting || receiving}
-              variant={transmitting ? "tx" : "rx"}
-              className="audio-level-meter--tx-fill"
-            />
-          </div>
-        )}
         <span className="tx-main">
-          <IconBolt size={wsIcon?.txMain ?? 26} />
+          <IconBolt size={26} />
           {transmitting ? "ON AIR" : !canTransmit ? "LISTEN ONLY" : receiving ? "BUSY" : "XMIT"}
         </span>
-        {(!workspace || wsSize === "large") && (
-          <span className="tx-sub">
-            {transmitting
-              ? "release to stop"
-              : !canTransmit
-                ? "no transmit permission"
-                : !connected
-                  ? "connecting…"
-                  : receiving
-                    ? "channel busy — another unit transmitting"
-                    : primary
-                      ? `hold to talk · ${keyLabel(pttCode)}`
-                      : "hold to talk"}
-          </span>
-        )}
+        <span className="tx-sub">
+          {transmitting
+            ? "release to stop"
+            : !canTransmit
+              ? "no transmit permission"
+              : !connected
+                ? "connecting…"
+                : receiving
+                  ? "channel busy — another unit transmitting"
+                  : primary
+                    ? `hold to talk · ${keyLabel(pttCode)}`
+                    : "hold to talk"}
+        </span>
       </button>
       )}
 
@@ -890,42 +940,46 @@ export function ChannelPanel({
       )}
 
       {showLiveTx && monitoring && (
-        <LatestChannelTransmission
-          variant="console"
-          channelName={channel.name}
-          active={monitoring && connected}
-          homeReceiving={receiving && !transmitting}
-          workspaceSize={workspace ? wsSize : undefined}
-          logHint={
-            wsSize === "large"
-              ? "Open the transmission log below for full history."
-              : ""
-          }
-        />
+        <section className="ch-ws-section ch-ws-section--transmissions" aria-label="Transmissions">
+          <LatestChannelTransmission
+            variant="console"
+            channelName={channel.name}
+            active={monitoring && connected}
+            homeReceiving={receiving && !transmitting}
+            workspaceSize={workspace ? wsSize : undefined}
+            logHint={
+              wsSize === "large"
+                ? "Full history is in the transmission log below."
+                : ""
+            }
+          />
+        </section>
       )}
 
       {showAiToggle && (
-        <div className="ws-ai-row">
-          <span className="ws-ai-label">AI dispatch</span>
-          <div className="ws-ai-controls">
-            <span className={`ws-ai-state${aiDispatch ? " on" : ""}`}>
-              {aiDispatch ? "On" : "Off"}
-            </span>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={aiDispatch}
-              aria-label={`AI dispatch ${aiDispatch ? "on" : "off"}`}
-              className={`ws-toggle${aiDispatch ? " on" : ""}`}
-              disabled={!aiDispatchReady}
-              onClick={toggleAiDispatch}
-              title={
-                aiDispatchHint ??
-                "When on, unit transmissions on this channel can trigger an AI dispatcher reply on the air."
-              }
-            />
+        <section className="ch-ws-section ch-ws-section--ai" aria-label="AI dispatch">
+          <div className="ws-ai-row">
+            <span className="ws-ai-label">AI dispatch</span>
+            <div className="ws-ai-controls">
+              <span className={`ws-ai-state${aiDispatch ? " on" : ""}`}>
+                {aiDispatch ? "On" : "Off"}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={aiDispatch}
+                aria-label={`AI dispatch ${aiDispatch ? "on" : "off"}`}
+                className={`ws-toggle${aiDispatch ? " on" : ""}`}
+                disabled={!aiDispatchReady}
+                onClick={toggleAiDispatch}
+                title={
+                  aiDispatchHint ??
+                  "When on, unit transmissions on this channel can trigger an AI dispatcher reply on the air."
+                }
+              />
+            </div>
           </div>
-        </div>
+        </section>
       )}
 
       {showActionsGrid && (
@@ -1050,7 +1104,13 @@ export function ChannelPanel({
       )}
 
       {showRoster && (
-        <ChannelRoster channelName={channel.name} compact={workspace && wsSize !== "large"} />
+        <section className="ch-ws-section ch-ws-section--roster" aria-label="Users on channel">
+          <ChannelRoster
+            channelName={channel.name}
+            compact={workspace && wsSize !== "large"}
+            members={rosterMembers}
+          />
+        </section>
       )}
       </div>
       )}
