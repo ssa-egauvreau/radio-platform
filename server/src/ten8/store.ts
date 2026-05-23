@@ -3,7 +3,14 @@ import { requirePool } from "../db.js";
 // AI-created seed rows exist only to bridge the short gap until the real 10-8 webhook lands.
 // If that webhook never arrives, the seed should age out so we don't keep matching/posting to
 // stale calls indefinitely.
-const AI_DISPATCH_SEED_MAX_AGE_MINUTES = 15;
+export const AI_DISPATCH_SEED_MAX_AGE_MINUTES = 15;
+
+// Marker the AI dispatcher writes onto its bridge rows (see engine.ts). The active-incidents
+// query below filters on this exact `payload.seeded_by = 'ai_dispatch_create'` string, so a
+// drift between writer and reader silently breaks expiry — every seed lingers forever, or
+// real CAD-sourced rows get expired by mistake.
+export const AI_DISPATCH_SEED_PAYLOAD_KEY = "seeded_by";
+export const AI_DISPATCH_SEED_PAYLOAD_VALUE = "ai_dispatch_create";
 
 export async function upsertTen8Incident(row: {
   agencyId: number;
@@ -55,30 +62,48 @@ export async function insertTen8WebhookLog(row: {
   );
 }
 
-export async function listTen8ActiveIncidents(agencyId: number): Promise<
-  Array<{
-    call_id: string;
-    incident_type: string | null;
-    priority: string | null;
-    status: string | null;
-    location: string | null;
-    payload: unknown;
-    updated_at: string;
-  }>
-> {
-  const res = await requirePool().query(
-    `SELECT call_id, incident_type, priority, status, location, payload, updated_at
+export type Ten8ActiveIncidentRow = {
+  call_id: string;
+  incident_type: string | null;
+  priority: string | null;
+  status: string | null;
+  location: string | null;
+  payload: unknown;
+  updated_at: string;
+};
+
+/**
+ * Build the SQL + bind values for the active-incidents read. Exposed (rather than
+ * inlining inside {@link listTen8ActiveIncidents}) so the stale-seed expiry filter
+ * can be regression-tested without standing up a live Postgres — the rule that
+ * AI-seed bridge rows older than {@link AI_DISPATCH_SEED_MAX_AGE_MINUTES} minutes
+ * must be excluded is otherwise invisible to anything that does not actually run
+ * the query.
+ */
+export function buildListTen8ActiveIncidentsQuery(agencyId: number): {
+  text: string;
+  values: [number, number];
+} {
+  return {
+    text: `SELECT call_id, incident_type, priority, status, location, payload, updated_at
        FROM ten8_incidents
       WHERE agency_id = $1
         AND is_closed = FALSE
         AND NOT (
-          payload->>'seeded_by' = 'ai_dispatch_create'
+          payload->>'${AI_DISPATCH_SEED_PAYLOAD_KEY}' = '${AI_DISPATCH_SEED_PAYLOAD_VALUE}'
           AND updated_at < now() - ($2::int * interval '1 minute')
         )
       ORDER BY updated_at DESC
       LIMIT 100;`,
-    [agencyId, AI_DISPATCH_SEED_MAX_AGE_MINUTES],
-  );
+    values: [agencyId, AI_DISPATCH_SEED_MAX_AGE_MINUTES],
+  };
+}
+
+export async function listTen8ActiveIncidents(
+  agencyId: number,
+): Promise<Array<Ten8ActiveIncidentRow>> {
+  const q = buildListTen8ActiveIncidentsQuery(agencyId);
+  const res = await requirePool().query(q.text, q.values);
   return res.rows;
 }
 
