@@ -1815,6 +1815,19 @@ code.mono {
   gap: 4px;
   min-width: 0;
 }
+.ch-toolbar-volume .vol-mute {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  flex-shrink: 0;
+  line-height: 0;
+}
+.ch-toolbar-volume .vol-mute svg {
+  display: block;
+}
 .ch-toolbar-volume .vol-slider {
   flex: 1 1 auto;
   min-width: 0;
