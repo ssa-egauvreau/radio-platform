@@ -94,7 +94,7 @@ export async function listTen8ActiveIncidents(agencyId: number): Promise<Ten8Act
       WHERE agency_id = $1
         AND is_closed = FALSE
         AND NOT (
-          payload->>'seeded_by' = 'ai_dispatch_create'
+          COALESCE(payload->>'seeded_by', '') = 'ai_dispatch_create'
           AND updated_at < now() - ($2::int * interval '1 minute')
         )
       ORDER BY updated_at DESC
