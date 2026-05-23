@@ -45,7 +45,6 @@ function makePos(unit_id: string, over: Partial<RadioPosition> = {}): RadioPosit
 
 // ---------- parseUnitLocationSubject ------------------------------------
 
-test("parseUnitLocationSubject returns null on blank / missing subject", () => {
 function pos(unit_id: string): RadioPosition {
   return {
     unit_id,
@@ -145,6 +144,8 @@ test("findRadioMapPosition: returns null when nothing matches", () => {
 
 test("findRadioMapPosition: empty position list returns null without crashing", () => {
   assert.equal(findRadioMapPosition([], "352"), null);
+});
+
 test("parseUnitLocationSubject: bare unit number returns the number", () => {
   const got = parseUnitLocationSubject("2009");
   assert.deepEqual(got, { targetUnit: "2009", wantFullAddress: false });

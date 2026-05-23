@@ -36,14 +36,10 @@ import { buildDeterministicDispatchAck } from "../../src/aiDispatch/dispatchAck.
 import type { AiDispatchParseResult } from "../../src/aiDispatch/parse.js";
 
 function makeParsed(over: Partial<AiDispatchParseResult> = {}): AiDispatchParseResult {
-function parsed(overrides: Partial<AiDispatchParseResult>): AiDispatchParseResult {
   return {
     actionable: true,
     intent: "dispatch",
     unit: "27-040",
-    summary: "",
-    confidence: 0.9,
-    dispatcher_response: "LLM RAW RESPONSE (must be overridden)",
     summary: "test",
     confidence: 0.9,
     dispatcher_response: null,
@@ -58,6 +54,10 @@ function parsed(overrides: Partial<AiDispatchParseResult>): AiDispatchParseResul
     ...over,
   };
 }
+
+// Alias kept so the second batch of tests (merged in from a parallel branch)
+// that called the helper `parsed(...)` keeps compiling without a rename.
+const parsed = makeParsed;
 
 // ---------- guard clauses ------------------------------------------------
 
@@ -245,9 +245,8 @@ test("buildDeterministicDispatchAck: on_scene + non-OUT-W comment is NOT treated
       }),
     ),
     "Copy 040, on scene at 1805 Main.",
-    ...overrides,
-  };
-}
+  );
+});
 
 test("returns null when intent is not dispatch/on_scene", () => {
   for (const intent of ["clear", "chitchat", "acknowledgment", "request_info", "unknown"]) {

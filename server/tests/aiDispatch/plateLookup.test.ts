@@ -34,7 +34,10 @@ import {
   buildPlateReadback,
   buildVinReadback,
   consumePendingPlateRequest,
+  lookupVin,
   notePendingPlateRequest,
+  runPlateLookup,
+  type PlateLookupResult,
 } from "../../src/aiDispatch/plateLookup.js";
 
 // Each test uses a unique agency+unit pair so the process-global pendingPlate
@@ -233,16 +236,7 @@ test("repeated notePendingPlateRequest refreshes the timestamp instead of stacki
   notePendingPlateRequest(agencyId, "27-205");
   assert.equal(consumePendingPlateRequest(agencyId, "27-205"), true);
   assert.equal(consumePendingPlateRequest(agencyId, "27-205"), false);
-  lookupVin,
-  notePendingPlateRequest,
-  runPlateLookup,
-  type PlateLookupResult,
-} from "../../src/aiDispatch/plateLookup.js";
-
-let UNIQ = 0;
-function uniqAgency(): number {
-  return 950_000 + Math.floor(Date.now() % 100_000) + UNIQ++;
-}
+});
 
 test("lookupVin: rejects malformed VINs before any network call", async () => {
   for (const bad of ["", "ABCDEFGHJKLM", "1HGBH41JXMN10918", "1HGBH41JXMN109186I"]) {
