@@ -21,6 +21,44 @@ export function clampTen8Priority(value: unknown, fallback = 4): number {
 }
 
 /**
+ * Google Maps' geocoder (which 10-8 uses to resolve `location`) is picky: "1586 N. Batavia
+ * St" comes back UNAVAILABLE, but its own autocomplete returns "1586 N Batavia St" with
+ * NO period after the directional. Strip the period after directional and common street
+ * type abbreviations, and collapse runs of whitespace, so what we send geocodes cleanly.
+ */
+const DIRECTIONAL = /\b([NSEW]|NE|NW|SE|SW)\.(?=\s)/gi;
+const STREET_TYPES = new Set([
+  "st",
+  "ave",
+  "blvd",
+  "dr",
+  "rd",
+  "ln",
+  "ct",
+  "pl",
+  "hwy",
+  "pkwy",
+  "fwy",
+  "ter",
+  "trl",
+  "cir",
+  "way",
+]);
+export function normalizeAddressForTen8(input: string | null | undefined): string {
+  const s = (input ?? "").trim();
+  if (!s) {
+    return "";
+  }
+  return s
+    .replace(DIRECTIONAL, "$1")
+    .replace(/\b([A-Za-z]+)\.(?=\s|,|$)/g, (m, word: string) =>
+      STREET_TYPES.has(word.toLowerCase()) ? word : m,
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
  * Build the single `location` line and split fields the way Google Maps / 10-8 expect:
  * "2000 E Gene Autry Way, Anaheim, CA 92806"
  */
@@ -33,8 +71,8 @@ export function formatLocationForTen8(parts: {
   locnotes?: string | null;
   county?: string | null;
 }): Ten8LocationFields | null {
-  const street = parts.street?.trim() || "";
-  const city = parts.city?.trim() || "";
+  const street = normalizeAddressForTen8(parts.street);
+  const city = normalizeAddressForTen8(parts.city);
   let state = (parts.state?.trim() || "CA").toUpperCase();
   if (state.length > 2) {
     state = state.slice(0, 2);
@@ -260,6 +298,19 @@ export function finalizeTen8NewIncidentBody(body: Record<string, unknown>): Reco
   out.priority = clampTen8Priority(out.priority, 4);
   if (typeof out.type === "string") {
     out.type = out.type.trim();
+  }
+  // Run every address-shaped field through the Google-friendly normalizer so a pre-formed
+  // body coming from any code path (Google web search, parseUsAddressLine, hand-rolled,
+  // etc.) lands as "1586 N Batavia St" not "1586 N. Batavia St" — 10-8's geocoder fails
+  // on the latter and the call ends up with Coordinates: UNAVAILABLE.
+  if (typeof out.location === "string") {
+    out.location = normalizeAddressForTen8(out.location);
+  }
+  if (typeof out.streetAddress === "string") {
+    out.streetAddress = normalizeAddressForTen8(out.streetAddress);
+  }
+  if (typeof out.city === "string") {
+    out.city = normalizeAddressForTen8(out.city);
   }
   if (
     typeof out.streetAddress === "string" &&
