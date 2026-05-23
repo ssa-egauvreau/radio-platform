@@ -54,6 +54,23 @@ export function workspaceGhostWidthPx(colSpan: number, gap = WORKSPACE_GRID_GAP_
   return span * WORKSPACE_MIN_COL_PX + (span - 1) * gap;
 }
 
+/** Cursor follower payload for a docked workspace tile (S / M / L). */
+export function railDragPreviewFromChannel(
+  channel: UserChannel,
+  tile: { colSpan: number; rowSpan: number },
+  availableCols: number,
+): RailDragPreview {
+  const size = workspaceTileSize(tile);
+  return {
+    channelId: channel.id,
+    channelName: channel.name,
+    color: channel.color,
+    simulcast: !!channel.simulcast,
+    size,
+    colSpan: Math.max(1, Math.min(tile.colSpan, availableCols)),
+  };
+}
+
 const SIZE_LABEL: Record<WorkspaceWidgetSize, string> = {
   small: "S",
   medium: "M",

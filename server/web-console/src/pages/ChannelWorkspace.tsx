@@ -28,6 +28,7 @@ import {
 } from "./channelWorkspaceDrag";
 import {
   getRailDragPreview,
+  railDragPreviewFromChannel,
   subscribeRailDragPreview,
   setRailDragPreview,
 } from "./workspaceRailDrag";
@@ -115,9 +116,15 @@ export function ChannelWorkspace({
   const [dropEdge, setDropEdge] = useState<WorkspaceDropEdge | null>(null);
   const [dragInsertIndex, setDragInsertIndex] = useState<number | null>(null);
   const [dragLayoutOrder, setDragLayoutOrder] = useState<number[]>([]);
+  const dragLayoutOrderRef = useRef<number[]>([]);
   const [railDragPointer, setRailDragPointer] = useState<{ x: number; y: number } | null>(
     null,
   );
+  /** Cursor position while reordering a tile already in the workspace. */
+  const [workspaceDragPointer, setWorkspaceDragPointer] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const [cols, setCols] = useState(1);
   /** Tile the user last clicked — kept above neighbors so it does not look hidden. */
   const [frontChannelId, setFrontChannelId] = useState<number | null>(null);
@@ -173,6 +180,18 @@ export function ChannelWorkspace({
   const placeholderIndex =
     moveChannelId !== null ? previewIds.indexOf(moveChannelId) : -1;
 
+  const reorderDragPreview = useMemo(() => {
+    if (moveChannelId === null) {
+      return null;
+    }
+    const channel = byId.get(moveChannelId);
+    if (!channel) {
+      return null;
+    }
+    const tile = tilesById.get(moveChannelId) ?? getWorkspaceTile(moveChannelId);
+    return railDragPreviewFromChannel(channel, tile, cols);
+  }, [moveChannelId, byId, tilesById, cols]);
+
   const clearDragOver = useCallback(() => {
     setDragOverChannelId(null);
     setDropEdge(null);
@@ -192,6 +211,8 @@ export function ChannelWorkspace({
       }
       setMoveChannelId(null);
       setDragLayoutOrder([]);
+      dragLayoutOrderRef.current = [];
+      setWorkspaceDragPointer(null);
       clearDragOver();
     }
     window.addEventListener("pointerup", clearStuckReorder);
@@ -291,19 +312,23 @@ export function ChannelWorkspace({
         ev.preventDefault();
         handle.setPointerCapture(ev.pointerId);
         setMoveChannelId(channelId);
+        setWorkspaceDragPointer({ x: ev.clientX, y: ev.clientY });
         clearDragOver();
         const rootAtStart = rootRef.current;
         if (rootAtStart) {
-          setDragLayoutOrder(rowMajorOrderFromDom(rootAtStart, channelIds, channelId));
+          const frozen = rowMajorOrderFromDom(rootAtStart, channelIds, channelId);
+          dragLayoutOrderRef.current = frozen;
+          setDragLayoutOrder(frozen);
         }
       }
+      setWorkspaceDragPointer({ x: ev.clientX, y: ev.clientY });
       const root = rootRef.current;
       if (!root) {
         return;
       }
-      const visual = rowMajorOrderFromDom(root, channelIds, channelId);
-      setDragLayoutOrder(visual);
-      const drop = findWorkspaceDropTarget(root, ev.clientX, ev.clientY, visual, channelId);
+      const layoutBase =
+        dragLayoutOrderRef.current.length > 0 ? dragLayoutOrderRef.current : channelIds;
+      const drop = findWorkspaceDropTarget(root, ev.clientX, ev.clientY, layoutBase, channelId);
       if (drop) {
         setDragInsertIndex(null);
         setDragOverChannelId(drop.targetId);
@@ -319,7 +344,13 @@ export function ChannelWorkspace({
         setDropEdge(null);
         if (inRoot) {
           setDragInsertIndex(
-            computeInsertIndexFromPointer(root, ev.clientX, ev.clientY, visual, channelId),
+            computeInsertIndexFromPointer(
+              root,
+              ev.clientX,
+              ev.clientY,
+              layoutBase,
+              channelId,
+            ),
           );
         } else {
           setDragInsertIndex(null);
@@ -341,6 +372,8 @@ export function ChannelWorkspace({
       if (!root) {
         setMoveChannelId(null);
         setDragLayoutOrder([]);
+        dragLayoutOrderRef.current = [];
+        setWorkspaceDragPointer(null);
         clearDragOver();
         handle.removeEventListener("pointermove", onMove);
         handle.removeEventListener("pointerup", onEnd);
@@ -376,6 +409,8 @@ export function ChannelWorkspace({
       }
       setMoveChannelId(null);
       setDragLayoutOrder([]);
+      dragLayoutOrderRef.current = [];
+      setWorkspaceDragPointer(null);
       clearDragOver();
       handle.removeEventListener("pointermove", onMove);
       handle.removeEventListener("pointerup", onEnd);
@@ -471,7 +506,9 @@ export function ChannelWorkspace({
       if (index === placeholderIndex) {
         gridChildren.push(renderDropPlaceholder(phSpan, phRows, "drop-placeholder"));
       }
-      gridChildren.push(renderTile(channel));
+      if (channel.id !== moveChannelId) {
+        gridChildren.push(renderTile(channel));
+      }
     });
   } else if (railDrag && dockDragOver) {
     const phSpan = Math.max(1, Math.min(railDrag.colSpan, cols));
@@ -512,9 +549,22 @@ export function ChannelWorkspace({
         )
       : null;
 
+  const reorderFollower =
+    reorderDragPreview && workspaceDragPointer && typeof document !== "undefined"
+      ? createPortal(
+          <ChannelRailDragFollower
+            preview={reorderDragPreview}
+            clientX={workspaceDragPointer.x}
+            clientY={workspaceDragPointer.y}
+          />,
+          document.body,
+        )
+      : null;
+
   return (
     <>
     {railFollower}
+    {reorderFollower}
     <section
       ref={rootRef}
       className={`channel-workspace-rows channel-workspace-grid${

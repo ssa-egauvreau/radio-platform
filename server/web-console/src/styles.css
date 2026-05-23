@@ -1052,8 +1052,9 @@ code.mono {
   align-self: start;
   min-height: 0;
 }
-.channel-workspace-rows.reordering .channel-workspace-tile:not(.moving) {
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
+/* Avoid transition jank while mixed S/M/L tiles reflow during reorder. */
+.channel-workspace-rows.reordering .channel-workspace-tile:not(.channel-workspace-drop-placeholder) {
+  transition: none;
 }
 .channel-workspace-tile.drag-source {
   opacity: 0.4;
