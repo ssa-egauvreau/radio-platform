@@ -286,6 +286,13 @@ export function ChannelPanel({
     void startTx();
   }
 
+  function endTransmit(event: PointerEvent<HTMLButtonElement>) {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    stopTx();
+  }
+
   useEffect(() => {
     // The AI dispatch toggle only lives in the expanded body — don't fetch its
     // status for every collapsed row.
@@ -516,6 +523,9 @@ export function ChannelPanel({
       voiceState === "closed");
   const showMemberCount = workspace && wsSize === "large";
   const showMeta = !workspace || wsSize === "large";
+  const showPermission = !workspace || wsSize === "large";
+  const showPttAssign = monitoring && (!workspace || wsSize === "medium" || wsSize === "large");
+  const showControlRow = showPermission || showPttAssign;
   const showAudioOut = !workspace || wsSize === "large";
   const showActionsGrid = !workspace || wsSize === "large";
   const showTones = workspace && wsSize === "large";
@@ -600,8 +610,9 @@ export function ChannelPanel({
           className={`ch-quick-ptt${transmitting ? " active" : ""}${workspace && wsSize !== "small" ? " ch-quick-ptt--center" : ""}`}
           disabled={!monitoring || !connected || !canTransmit}
           onPointerDown={beginTransmit}
-          onPointerUp={stopTx}
-          onPointerCancel={stopTx}
+          onPointerUp={endTransmit}
+          onPointerCancel={endTransmit}
+          onLostPointerCapture={stopTx}
           title={
             !monitoring
               ? "Turn the channel on to talk"
@@ -747,8 +758,9 @@ export function ChannelPanel({
               className={transmitting ? "ch-quick-ptt active" : "ch-quick-ptt"}
               disabled={!monitoring || !connected || !canTransmit}
               onPointerDown={beginTransmit}
-              onPointerUp={stopTx}
-              onPointerCancel={stopTx}
+              onPointerUp={endTransmit}
+              onPointerCancel={endTransmit}
+              onLostPointerCapture={stopTx}
               title={
                 !monitoring
                   ? "Turn the channel on to talk"
@@ -766,26 +778,31 @@ export function ChannelPanel({
 
       {expanded && (
       <div className={`ch-card-body${workspace ? " workspace-dense" : ""}`}>
-      {showMeta && (
-        <div className="live-meta">
-          Permission: <strong>{PERMISSION_LABEL[permission]}</strong>
-        </div>
-      )}
+      {showControlRow && (
+        <div className={`ch-control-row${workspace ? " workspace-control-row" : ""}`}>
+          {showPermission && (
+            <div className="live-meta">
+              Permission: <strong>{PERMISSION_LABEL[permission]}</strong>
+            </div>
+          )}
 
-      {showMeta && monitoring && (
-        <div className="cp-ptt-assign">
-          {primary ? (
-            <span className="cp-primary" title="Keyboard PTT controls this channel">
-              Keyboard PTT
-            </span>
-          ) : (
-            <button
-              className="ch-setprimary"
-              onClick={onMakePrimary}
-              title="Use the keyboard PTT for this channel"
-            >
-              Set as keyboard PTT
-            </button>
+          {showPttAssign && (
+            <div className="cp-ptt-assign">
+              {primary ? (
+                <span className="cp-primary" title="Keyboard PTT controls this channel">
+                  Keyboard PTT
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="ch-setprimary"
+                  onClick={onMakePrimary}
+                  title="Use the keyboard PTT for this channel"
+                >
+                  Set keyboard PTT
+                </button>
+              )}
+            </div>
           )}
         </div>
       )}
@@ -822,8 +839,9 @@ export function ChannelPanel({
         }`}
         disabled={!connected || !canTransmit}
         onPointerDown={beginTransmit}
-        onPointerUp={stopTx}
-        onPointerCancel={stopTx}
+        onPointerUp={endTransmit}
+        onPointerCancel={endTransmit}
+        onLostPointerCapture={stopTx}
       >
         {workspace && (
           <div

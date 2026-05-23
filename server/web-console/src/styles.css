@@ -2540,15 +2540,60 @@ code.mono {
   gap: 4px;
   width: 100%;
 }
+.channel-workspace-tile .channel-card.workspace .ch-actions-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 0;
+}
 .channel-workspace-tile .channel-card.workspace .ch-action-cell {
   min-width: 0;
   max-width: 100%;
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.channel-workspace-tile .channel-card.workspace .ch-action-cell,
+.channel-workspace-tile .channel-card.workspace .ws-ai-row,
+.channel-workspace-tile .channel-card.workspace .live-tx-card--ws {
+  border-color: color-mix(in srgb, var(--border) 82%, var(--text-dim) 18%);
+  background: color-mix(in srgb, var(--bg-input) 88%, var(--bg-raised));
+}
+.channel-workspace-tile .channel-card.workspace .ch-action-cell:not(:disabled):hover,
+.channel-workspace-tile .channel-card.workspace .live-tx-play-btn:not(:disabled):hover {
+  border-color: var(--accent-2);
+  color: var(--text);
+}
 .channel-workspace-tile .channel-card.workspace .ch-card-toolbar .ch-power,
 .channel-workspace-tile .channel-card.workspace .ch-card-toolbar .ch-quick-ptt {
   flex-shrink: 0;
+}
+.channel-workspace-tile .channel-card.workspace .ch-card-toolbar .ch-power.active {
+  background: color-mix(in srgb, var(--green) 12%, var(--bg-input));
+}
+.channel-workspace-tile .channel-card.workspace .ch-card-toolbar .ch-quick-ptt:not(:disabled) {
+  border-color: color-mix(in srgb, var(--green) 38%, var(--border));
+  background: color-mix(in srgb, var(--green) 8%, var(--bg-input));
+}
+.channel-workspace-tile .channel-card.workspace .ch-card-toolbar .ch-quick-ptt.active,
+.channel-workspace-tile .channel-card.workspace .tx-button-integrated.active {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #fff 28%, transparent);
+}
+.channel-workspace-tile .channel-card.workspace .tx-button-integrated:not(:disabled) {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-input) 96%, #fff 4%),
+      color-mix(in srgb, var(--bg-input) 86%, #000 14%)
+    );
+}
+.channel-workspace-tile.widget-medium .channel-card.workspace .workspace-control-row {
+  padding: 3px 5px;
+}
+.channel-workspace-tile.widget-medium .channel-card.workspace .workspace-control-row .cp-ptt-assign {
+  flex: 1 1 auto;
+}
+.channel-workspace-tile.widget-medium .channel-card.workspace .workspace-control-row .ch-setprimary,
+.channel-workspace-tile.widget-medium .channel-card.workspace .workspace-control-row .cp-primary {
+  width: 100%;
+  justify-content: center;
 }
 .channel-workspace-tile.widget-large .channel-card.workspace .tx-button-integrated {
   flex: 0 0 auto;
@@ -2805,6 +2850,34 @@ code.mono {
 .channel-card.workspace .ch-card-toolbar .state-chip {
   margin-right: auto;
 }
+.channel-card.workspace .workspace-control-row {
+  margin: 0;
+  padding: 4px 6px;
+  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-input) 80%, transparent);
+}
+.channel-card.workspace .workspace-control-row .live-meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 9px;
+}
+.channel-card.workspace .workspace-control-row .cp-ptt-assign {
+  flex: 0 1 auto;
+}
+.channel-card.workspace .workspace-control-row .ch-setprimary,
+.channel-card.workspace .workspace-control-row .cp-primary {
+  max-width: 100%;
+  min-height: 18px;
+  padding: 1px 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 8px;
+}
 
 /* Workspace grid: more panels per row on wider monitors */
 @media (min-width: 1180px) {
@@ -2938,10 +3011,14 @@ code.mono {
 }
 .ch-setprimary {
   flex: 0 0 auto;
-  padding: 2px 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 20px;
+  padding: 2px 8px;
   border: 1px solid var(--border);
-  border-radius: 3px;
-  background: transparent;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-input) 72%, transparent);
   color: var(--text-muted);
   cursor: pointer;
   font-size: 9px;
@@ -2952,6 +3029,7 @@ code.mono {
 .ch-setprimary:hover {
   border-color: var(--accent);
   color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-input));
 }
 .ch-card-body {
   display: grid;
@@ -2961,6 +3039,7 @@ code.mono {
 }
 /* Full-width rows inside the compact expanded panel */
 .ch-card-body > .live-meta,
+.ch-card-body > .ch-control-row,
 .ch-card-body > .cp-ptt-assign,
 .ch-card-body > .volume-row,
 .ch-card-body > .banner,
@@ -3036,18 +3115,38 @@ code.mono {
 .ch-mini-wave.rx {
   border-color: var(--accent);
 }
-.cp-ptt-assign {
+.ch-control-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 12px;
+  min-width: 0;
+}
+.ch-control-row .live-meta,
+.ch-control-row .cp-ptt-assign {
+  margin: 0;
+}
+.cp-ptt-assign {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: 12px;
+  min-width: 0;
 }
 .cp-primary {
   flex: 0 0 auto;
-  padding: 1px 6px;
-  border-radius: 3px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  padding: 1px 7px;
+  border-radius: 999px;
   background: var(--accent);
-  color: var(--bg);
+  color: var(--accent-ink);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.07em;
+  text-transform: uppercase;
 }
 .cp-close {
   flex: 0 0 auto;
