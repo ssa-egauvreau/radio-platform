@@ -150,6 +150,8 @@ test("extractCallIdFromCreateResponse returns null on missing / blank / wrong-sh
   // Empty string in id must not count — that would post comments to "".
   assert.equal(extractCallIdFromCreateResponse({ incident_id: "" }), null);
   assert.equal(extractCallIdFromCreateResponse({ incident_id: "   " }), null);
+});
+
 test("formatTen8RadioComment joins callsign and transcript with a space", () => {
   assert.equal(
     formatTen8RadioComment("27-040", "10-97 on scene"),

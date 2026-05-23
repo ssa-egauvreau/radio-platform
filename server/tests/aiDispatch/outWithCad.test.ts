@@ -48,12 +48,6 @@ function makeParsed(over: Partial<AiDispatchParseResult> = {}): AiDispatchParseR
     intent: "unknown",
     unit: "27-040",
     summary: "test transmission",
-function parsed(overrides: Partial<AiDispatchParseResult> = {}): AiDispatchParseResult {
-  return {
-    actionable: true,
-    intent: "dispatch",
-    unit: "27-040",
-    summary: "test",
     confidence: 0.9,
     dispatcher_response: null,
     trigger_emergency_tone: false,
@@ -68,12 +62,19 @@ function parsed(overrides: Partial<AiDispatchParseResult> = {}): AiDispatchParse
   };
 }
 
+// Alias kept so the second batch of tests (merged in from a parallel branch)
+// that called the helper `parsed(...)` keeps compiling without a rename.
+const parsed = makeParsed;
+
 function makeActiveIncident(unit: string, callId = "C-001") {
   return {
     call_id: callId,
     payload: {
       action: "create",
-    ...overrides,
+      incident: {
+        units: [{ unit }],
+      },
+    },
   };
 }
 
@@ -237,6 +238,8 @@ test("unitHasActiveAssignedCall matches when unit is in the incident units list"
 test("unitHasActiveAssignedCall returns false when unit is not assigned", () => {
   const active = [makeActiveIncident("352")];
   assert.equal(unitHasActiveAssignedCall(active, "999"), false);
+});
+
 // -- isOutWithTransmission ------------------------------------------------
 
 test("isOutWithTransmission matches the standard SSA phrasings", () => {
@@ -404,10 +407,6 @@ test("applyOutWithCadRules: no-op when transcript is not an out-with transmissio
   assert.equal(out, parsed, "should return the SAME object reference when not applicable");
 });
 
-test("applyOutWithCadRules: no-op for SKIP_INTENTS even with an out-with transcript", () => {
-  // If the LLM already labeled this as plate_request / emergency / clear, we
-  // trust that and do NOT rewrite to dispatch/on_scene — otherwise an
-  // emergency_clear could be silently converted to a new dispatch.
 // -- applyOutWithCadRules -------------------------------------------------
 
 test("applyOutWithCadRules: pass-through when transcript is not an out-with line", () => {
@@ -482,12 +481,29 @@ test("applyOutWithCadRules: preserves an LLM-provided comment_text on the active
 });
 
 test("applyOutWithCadRules: no active call → 'dispatch' with inferred code (961 for vehicle)", () => {
-  const parsed = makeParsed({ intent: "unknown" });
+  const p = makeParsed({ intent: "unknown" });
   const out = applyOutWithCadRules(
-    parsed,
+    p,
     "27-040 out with a white Honda Civic",
-  ]) {
-    const p = parsed({ intent });
+    [],
+    "27-040",
+  );
+  assert.equal(out.intent, "dispatch");
+  assert.equal(out.code, "961");
+});
+
+test("applyOutWithCadRules: skip-list intents are left alone even with out-with text", () => {
+  for (const intent of [
+    "clear",
+    "emergency",
+    "emergency_clear",
+    "plate_request",
+    "plate_transmit",
+    "request_info",
+    "info_request_912",
+    "info_clear_913",
+  ] as const) {
+    const p = makeParsed({ intent });
     const out = applyOutWithCadRules(p, "out with a white sedan", [], "27-040");
     assert.equal(out, p, `intent=${intent} must not be rewritten`);
   }
@@ -549,22 +565,12 @@ test("applyOutWithCadRules: no active call → self-dispatch with inferred call 
   assert.equal(out.intent, "dispatch");
   assert.equal(out.actionable, true);
   assert.equal(out.code, "961");
-  assert.equal(out.comment_text, "OUT W/ A WHITE HONDA CIVIC");
+  assert.equal(out.comment_text, "OUT W/ A WHITE SEDAN");
   assert.match(out.recommended_action ?? "", /Create new 961 call/);
 });
 
-test("applyOutWithCadRules: no active call → 'dispatch' with inferred 'ped' for a person", () => {
-  const parsed = makeParsed({ intent: "unknown" });
-  const out = applyOutWithCadRules(
-    parsed,
-    "27-040 out with a male subject loitering",
-  assert.equal(out.code, "961");
-  assert.equal(out.actionable, true);
-  assert.match(out.comment_text ?? "", /OUT W\/ A WHITE SEDAN/);
-  assert.match(out.recommended_action ?? "", /Create new 961 call/);
-  // Summary is rewritten for non-dispatch upstream intents.
-  assert.match(out.summary, /27-040 self-dispatch via out-with \(new call\)/);
-});
+// Note: the "no active call → ped fallback" assertion is covered by the next
+// test block. An earlier merge left a half-spliced duplicate here; removed.
 
 test("applyOutWithCadRules: no active call → ped fallback for person words", () => {
   const out = applyOutWithCadRules(
@@ -578,10 +584,18 @@ test("applyOutWithCadRules: no active call → ped fallback for person words", (
 });
 
 test("applyOutWithCadRules: no active call and no inferable code → recommended_action says to use AI-inferred type", () => {
-  const parsed = makeParsed({ intent: "unknown", code: null });
+  const p = makeParsed({ intent: "unknown", code: null });
   const out = applyOutWithCadRules(
-    parsed,
+    p,
     "27-040 out with checking the perimeter",
+    [],
+    "27-040",
+  );
+  assert.equal(out.intent, "dispatch");
+  assert.equal(out.code, null);
+  assert.match(out.recommended_action ?? "", /AI-inferred type/);
+});
+
 test("applyOutWithCadRules: keeps the AI-chosen code when inference returns null", () => {
   // Tail is too generic to infer; if the LLM already chose a code we keep it.
   const out = applyOutWithCadRules(
@@ -591,11 +605,7 @@ test("applyOutWithCadRules: keeps the AI-chosen code when inference returns null
     "27-040",
   );
   assert.equal(out.intent, "dispatch");
-  assert.equal(out.code, null);
-  assert.match(
-    out.recommended_action ?? "",
-    /AI-inferred type/,
-  );
+  assert.equal((out.code ?? "").toLowerCase(), "415");
 });
 
 test("applyOutWithCadRules: no active call → existing AI-supplied code is kept (lowercased) when no inference fires", () => {
@@ -622,12 +632,14 @@ test("applyOutWithCadRules: uses fallbackUnit when parsed.unit is missing", () =
 
 test("applyOutWithCadRules: 'dispatch' intent on active-call path rewrites summary to mark it as comment-only", () => {
   const active = [makeActiveIncident("040", "C-1234")];
-  const parsed = makeParsed({
+  const p = makeParsed({
     intent: "dispatch",
+    code: "415",
     summary: "27-040 out with the RP",
   });
-  const out = applyOutWithCadRules(parsed, "27-040 out with the RP", active, "27-040");
+  const out = applyOutWithCadRules(p, "27-040 out with the RP", active, "27-040");
   assert.match(out.summary, /out-with update on current assignment \(comment only\)/);
+  // Pre-existing code is preserved through the rewrite; only intent + summary change.
   assert.equal(out.code, "415");
 });
 

@@ -237,6 +237,7 @@ test("formatTen8VehicleLookupComment caps comment at 4000 characters", () => {
   });
   assert.ok(out);
   assert.equal(out!.length, 4000);
+});
 
 function lookup(overrides: Partial<PlateLookupResult> = {}): PlateLookupResult {
   return { ok: true, ...overrides };
