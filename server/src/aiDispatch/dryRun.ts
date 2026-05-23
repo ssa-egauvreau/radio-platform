@@ -77,6 +77,35 @@ export interface AiDispatchDryRunResult {
   errors: string[];
 }
 
+export interface AiDispatchDryRunWritePolicyInput {
+  requestedSendForReal: boolean;
+  platformEnabled: boolean;
+  channelAiDispatchEnabled: boolean;
+}
+
+export interface AiDispatchDryRunWritePolicy {
+  allowWrites: boolean;
+  blockedReasons: string[];
+}
+
+export function resolveDryRunWritePolicy(
+  input: AiDispatchDryRunWritePolicyInput,
+): AiDispatchDryRunWritePolicy {
+  if (!input.requestedSendForReal) {
+    return { allowWrites: false, blockedReasons: [] };
+  }
+  const blockedReasons: string[] = [];
+  if (!input.platformEnabled) {
+    blockedReasons.push(
+      "SEND FOR REAL blocked: AI dispatch platform is OFF (AI_DISPATCH_ENABLED).",
+    );
+  }
+  if (!input.channelAiDispatchEnabled) {
+    blockedReasons.push("SEND FOR REAL blocked: AI dispatch is OFF for this channel.");
+  }
+  return { allowWrites: blockedReasons.length === 0, blockedReasons };
+}
+
 function defaultTen33Callout(channelName: string): string {
   return `All units 10-33 on ${channelName}, all units 10-33 on ${channelName}.`;
 }
@@ -136,7 +165,7 @@ export async function runAiDispatchDryRun(
   const t0 = Date.now();
   const trace: AiDispatchDryRunTraceEntry[] = [];
   const errors: string[] = [];
-  const sendForReal = opts.sendForReal === true;
+  const requestedSendForReal = opts.sendForReal === true;
   const synthesizeTts = opts.synthesizeTts !== false;
   const ten8Actions: Record<string, unknown> = {};
 
@@ -149,7 +178,7 @@ export async function runAiDispatchDryRun(
       transcript,
       channelName,
       unitId,
-      sendForReal,
+      sendForReal: requestedSendForReal,
       synthesizeTts,
     },
     durationMs: 0,
@@ -192,6 +221,15 @@ export async function runAiDispatchDryRun(
     if (!platform.enabled) {
       errors.push("AI dispatch platform is OFF for this server (AI_DISPATCH_ENABLED).");
     }
+    const writePolicy = resolveDryRunWritePolicy({
+      requestedSendForReal,
+      platformEnabled: platform.enabled,
+      channelAiDispatchEnabled: result.channelAiDispatchEnabled,
+    });
+    if (writePolicy.blockedReasons.length > 0) {
+      errors.push(...writePolicy.blockedReasons);
+    }
+    const sendForReal = writePolicy.allowWrites;
 
     const systemPrompt = await phase("system_prompt", () =>
       resolveAiDispatchSystemPrompt(opts.agencyId),
