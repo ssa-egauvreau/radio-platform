@@ -995,10 +995,23 @@ code.mono {
   width: 100%;
   height: 100%;
   min-height: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
 }
 .channel-workspace-widget-board .react-grid-item {
   border-radius: 14px;
   transition: box-shadow 0.15s ease;
+  box-sizing: border-box;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.channel-workspace-widget-board .react-grid-item > .widget-board-item {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 .channel-workspace-widget-board .react-grid-item.react-draggable-dragging {
   z-index: 80;
@@ -1239,7 +1252,7 @@ code.mono {
   min-height: calc(2 * var(--ws-row-unit, 72px) + 16px);
 }
 .channel-workspace-rail-drag-follower.widget-large {
-  min-height: calc(2 * var(--ws-row-unit, 72px) + 24px);
+  min-height: calc(4 * var(--ws-row-unit, 68px) + 24px);
 }
 .channel-workspace-rail-drag-follower-head {
   display: flex;
@@ -1459,7 +1472,8 @@ code.mono {
   flex-direction: column;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  height: 100%;
+  overflow: hidden;
   -webkit-user-drag: none;
 }
 .channel-workspace-tile-inner input,
@@ -1471,12 +1485,14 @@ code.mono {
   -webkit-user-drag: none;
 }
 .channel-workspace-tile .channel-card.workspace {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   width: 100%;
   max-width: 100%;
+  height: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  overflow: visible;
+  overflow: hidden;
   box-sizing: border-box;
   border: none;
   border-radius: 0;
@@ -1492,9 +1508,12 @@ code.mono {
   min-width: 0;
 }
 .channel-workspace-tile .channel-card.workspace .ch-card-body {
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   min-width: 0;
-  overflow: visible;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1505,8 +1524,8 @@ code.mono {
   grid-template-columns: 1fr 1fr;
   gap: 4px 6px;
 }
-/* Single-column dense stack only for narrow (small / phone full-width) tiles. Wide tiles
-   (medium & large on desktop) keep the 2-column control grid so they don't waste the width. */
+/* Single-column stack for narrow tiles; wide (2+ cols) uses 2-column body grid. */
+.channel-card.workspace[data-widget-size="small"]:not([data-width="wide"]) .ch-card-body.workspace-dense,
 .channel-card.workspace[data-tier="0"]:not([data-width="wide"]) .ch-card-body.workspace-dense,
 .channel-card.workspace[data-tier="1"]:not([data-width="wide"]) .ch-card-body.workspace-dense,
 .channel-card.workspace[data-tier="2"]:not([data-width="wide"]) .ch-card-body.workspace-dense {
@@ -1627,10 +1646,6 @@ code.mono {
 .channel-card.workspace[data-widget-size="medium"] .ch-card-toolbar .ch-quick-ptt {
   min-height: 30px;
 }
-.channel-workspace-tile.widget-small .channel-card.workspace,
-.channel-workspace-tile.widget-medium .channel-card.workspace {
-  font-size: 11px;
-}
 .channel-card.workspace[data-widget-size="medium"] .ch-card-body.workspace-dense {
   padding: 4px 6px 6px;
 }
@@ -1650,6 +1665,64 @@ code.mono {
 }
 .channel-card.workspace[data-widget-size="medium"] .live-tx-log-hint {
   display: none;
+}
+/* --- Workspace widget sizes: content fits inside react-grid-layout cells --- */
+.channel-workspace-tile.widget-small .channel-card.workspace {
+  font-size: 11px;
+}
+.channel-workspace-tile.widget-small .ch-card-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
+}
+.channel-workspace-tile.widget-small .ch-card-body.workspace-dense:empty {
+  display: none;
+  flex: 0 0 0;
+  padding: 0;
+  margin: 0;
+}
+.channel-workspace-tile.widget-medium .channel-card.workspace .ch-card-body.workspace-dense {
+  gap: 3px;
+}
+.channel-workspace-tile.widget-medium .ch-card-toolbar {
+  flex-shrink: 0;
+}
+.channel-workspace-tile.widget-medium .toneout.workspace-tones-compact {
+  flex-shrink: 0;
+}
+.channel-workspace-tile.widget-large .channel-card.workspace .ch-card-body.workspace-dense {
+  gap: 5px;
+  padding: 4px 8px 6px;
+}
+.channel-workspace-tile.widget-large .channel-card.workspace .ch-card-toolbar,
+.channel-workspace-tile.widget-large .channel-card.workspace .volume-row,
+.channel-workspace-tile.widget-large .channel-card.workspace .tx-button-integrated,
+.channel-workspace-tile.widget-large .channel-card.workspace .ch-actions-grid,
+.channel-workspace-tile.widget-large .channel-card.workspace .toneout {
+  flex-shrink: 0;
+}
+.channel-workspace-tile.widget-large .channel-card.workspace .live-tx-console {
+  flex-shrink: 0;
+  max-height: 5rem;
+  overflow: hidden;
+}
+.channel-workspace-tile.widget-large .tx-button-integrated {
+  max-height: 4.5rem;
+}
+.channel-workspace-tile.widget-large .ch-actions-grid .ch-action-cell {
+  font-size: 10px;
+  padding: 5px 6px;
+}
+.channel-workspace-tile .channel-card.workspace .state-chip {
+  font-size: 9px;
+  padding: 2px 5px;
+}
+.channel-workspace-tile .channel-card.workspace .ch-quick-ptt,
+.channel-workspace-tile .channel-card.workspace .ch-power {
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 10px;
 }
 .toneout.workspace-tones-compact .ch-tone-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1975,10 +2048,20 @@ code.mono {
   flex: 0 0 auto;
 }
 .channel-workspace-tile .channel-card.workspace .roster {
-  flex: 0 1 auto;
-  max-height: min(220px, 35vh);
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  margin-top: 4px;
+  padding: 6px 8px;
   overflow-y: auto;
   overflow-x: hidden;
+}
+.channel-workspace-tile.widget-large .channel-card.workspace .roster {
+  flex: 1 1 0;
+  min-height: 3.5rem;
+}
+.channel-workspace-tile.widget-medium .channel-card.workspace .roster {
+  display: none;
 }
 
 .channel-dock {

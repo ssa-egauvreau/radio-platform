@@ -46,9 +46,9 @@ function nextSizeTitle(size: WorkspaceWidgetSize, gridCols: number): string {
     case "small":
       return `${foot.colSpan}×${foot.rowSpan} — compact. Tap for medium.`;
     case "medium":
-      return `${foot.colSpan}×${foot.rowSpan} — Tap for large (wide).`;
+      return `${foot.colSpan}×${foot.rowSpan} — Tap for large.`;
     default:
-      return `${foot.colSpan}×${foot.rowSpan} — Tap for small.`;
+      return `${foot.colSpan}×${foot.rowSpan} — full panel. Tap for small.`;
   }
 }
 
@@ -222,7 +222,7 @@ export function ChannelWorkspace({
             <>
               <p>Tap a channel in the list to open it here — or drag it in.</p>
               <p className="muted">
-                iOS-style grid: S = 1×1 · M = 2×2 · L = 4×2 (wide). Drag the colored name bar.
+                iOS-style grid: S = 1×1 · M = 2×2 · L = up to 4×4. Drag the colored name bar.
               </p>
             </>
           }

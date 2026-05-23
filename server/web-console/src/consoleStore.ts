@@ -16,7 +16,7 @@ import {
 const STATE_KEY = "securityradio.console.state";
 
 /** Bump when workspace layout rules change — triggers one-time localStorage migration. */
-const CURRENT_LAYOUT_VERSION = 15;
+const CURRENT_LAYOUT_VERSION = 16;
 const MAX_STATE_STORAGE_BYTES = 256 * 1024;
 const MAX_OPEN_CHANNELS = 16;
 const MAX_DOCKED_CHANNELS = 12;
@@ -27,7 +27,7 @@ const COMMIT_STORM_WINDOW_MS = 2000;
  * One channel tile on the workspace puzzle grid (fixed cell units):
  *   - small:  1×1
  *   - medium: 2×2
- *   - large:  4×2 (wide widget; width clamps on narrow screens)
+ *   - large:  up to 4×4 wide×tall (width clamps on narrow screens)
  */
 export interface WorkspaceTileLayout {
   colSpan: number;
@@ -47,8 +47,8 @@ export const WORKSPACE_GRID_MAX_COLS = 10;
 export const WORKSPACE_GRID_CELL_PX = 88;
 /** Grid gap (px); kept in sync with layout math. */
 export const WORKSPACE_GRID_GAP_PX = 8;
-/** Height of one grid row unit (px). */
-export const WORKSPACE_GRID_ROW_PX = 72;
+/** Height of one grid row unit (px) — one “box” tall in the widget grid. */
+export const WORKSPACE_GRID_ROW_PX = 68;
 /** @deprecated Use WORKSPACE_GRID_CELL_PX — kept for older imports. */
 export const WORKSPACE_MIN_COL_PX = WORKSPACE_GRID_CELL_PX;
 /** @deprecated Use WORKSPACE_GRID_MAX_COLS. */
@@ -60,8 +60,9 @@ export const WORKSPACE_SMALL_COLS = 1;
 export const WORKSPACE_SMALL_ROWS = 1;
 export const WORKSPACE_MEDIUM_COLS = 2;
 export const WORKSPACE_MEDIUM_ROWS = 2;
+/** Large tiles span up to 4 columns when space allows; always 4 rows tall for controls. */
 export const WORKSPACE_LARGE_COLS = 4;
-export const WORKSPACE_LARGE_ROWS = 2;
+export const WORKSPACE_LARGE_ROWS = 4;
 
 /** New tiles dock as medium (2×2). */
 export const WORKSPACE_DEFAULT_WIDGET_SIZE: WorkspaceWidgetSize = "medium";
