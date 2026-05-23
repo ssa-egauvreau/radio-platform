@@ -1612,6 +1612,7 @@ code.mono {
 /* --- Workspace widget sizes: fit inside grid cells (no inner scroll) --- */
 .channel-workspace-tile .channel-card.workspace .ch-card-body.workspace-dense > .volume-row,
 .channel-workspace-tile .channel-card.workspace .ch-card-body.workspace-dense > .ch-card-toolbar,
+.channel-workspace-tile .channel-card.workspace .ch-card-body.workspace-dense > .ch-ws-section--xmit,
 .channel-workspace-tile .channel-card.workspace .ch-card-body.workspace-dense > .tx-button {
   flex-shrink: 0;
 }
@@ -1788,11 +1789,11 @@ code.mono {
   opacity: 0.45;
   cursor: not-allowed;
 }
-/* Workspace toolbar: volume on the row with ON/PTT; PTT centered on M/L. */
+/* Workspace toolbar: volume + monitor ON (transmit is the body XMIT pad). */
 .ch-card-toolbar.workspace-toolbar--medium,
 .ch-card-toolbar.workspace-toolbar--large {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, max-content);
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 6px 8px;
   padding: 5px 7px 6px;
@@ -1801,18 +1802,17 @@ code.mono {
 }
 .ch-card-toolbar.workspace-toolbar--small {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
   padding: 4px 6px 5px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-input) 55%, transparent);
 }
 .ch-card-toolbar.workspace-toolbar--small .ch-toolbar-transport {
-  flex: 1 1 auto;
-  width: 100%;
-  justify-content: stretch;
-}
-.ch-card-toolbar.workspace-toolbar--small .ch-toolbar-transport .ch-power,
-.ch-card-toolbar.workspace-toolbar--small .ch-toolbar-transport .ch-quick-ptt {
-  flex: 1 1 0;
+  flex: 0 0 auto;
+  margin-left: auto;
 }
 .ch-toolbar-volume.volume-row {
   grid-column: 1;
@@ -1845,9 +1845,48 @@ code.mono {
   gap: 4px;
   flex-wrap: nowrap;
 }
-.ch-card-toolbar.workspace-toolbar .ch-quick-ptt--center {
-  min-width: 3.2rem;
-  font-weight: 700;
+.ch-ws-section--xmit {
+  flex-shrink: 0;
+}
+.ch-ws-section--xmit .tx-button-integrated {
+  width: 100%;
+  box-sizing: border-box;
+}
+.channel-card.workspace[data-widget-size="small"] .tx-button-ws--small {
+  min-height: 36px;
+  padding: 6px 8px;
+}
+.channel-card.workspace[data-widget-size="small"] .tx-button-ws--small .tx-main {
+  font-size: 12px;
+  font-weight: 800;
+  gap: 5px;
+}
+.channel-card.workspace[data-widget-size="small"] .tx-button-ws--small .tx-sub {
+  font-size: 9px;
+}
+.channel-card.workspace[data-widget-size="medium"] .tx-button-ws--medium {
+  min-height: 42px;
+  padding: 7px 10px;
+}
+.channel-card.workspace[data-widget-size="medium"] .tx-button-ws--medium .tx-main {
+  font-size: 13px;
+  font-weight: 800;
+  gap: 6px;
+}
+.channel-card.workspace[data-widget-size="medium"] .tx-button-ws--medium .tx-sub {
+  font-size: 9px;
+}
+.channel-card.workspace[data-widget-size="large"] .tx-button-ws--large {
+  min-height: 48px;
+  padding: 9px 12px;
+}
+.channel-card.workspace[data-widget-size="large"] .tx-button-ws--large .tx-main {
+  font-size: 15px;
+  font-weight: 800;
+  gap: 7px;
+}
+.channel-card.workspace[data-widget-size="large"] .tx-button-ws--large .tx-sub {
+  font-size: 10px;
 }
 .channel-workspace-tile.widget-small .vol-mute {
   display: inline-flex;
@@ -2131,21 +2170,21 @@ code.mono {
   gap: 2px;
 }
 .channel-workspace-tile .channel-card.workspace .ch-card-title-row {
-  min-height: 26px;
+  min-height: 32px;
   border-radius: 6px 6px 0 0;
 }
 .channel-workspace-tile .channel-card.workspace .ch-card-title-main {
-  min-height: 26px;
-  padding: 3px 46px 3px 6px;
-  gap: 3px 5px;
+  min-height: 32px;
+  padding: 5px 48px 5px 8px;
+  gap: 4px 6px;
 }
 .channel-workspace-tile .channel-card.workspace .ch-card-title-main {
   flex-wrap: nowrap;
   align-items: center;
 }
 .channel-workspace-tile .channel-card.workspace .ch-card-title-row .ch-card-name {
-  font-size: 10px;
-  gap: 3px;
+  font-size: 13px;
+  gap: 5px;
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
@@ -2156,7 +2195,9 @@ code.mono {
   overflow: hidden;
   text-overflow: ellipsis;
   word-break: normal;
-  line-height: 1.2;
+  line-height: 1.15;
+  font-weight: 800;
+  letter-spacing: 0.01em;
 }
 .channel-workspace-tile .channel-card.workspace .ch-member-count {
   margin-left: 0;
@@ -2187,18 +2228,20 @@ code.mono {
   padding: 1px 4px;
 }
 .channel-workspace-tile .tx-button.tx-button-integrated {
-  min-height: 0;
-  padding: 3px 5px;
-  border-radius: 5px;
-  gap: 1px;
+  border-radius: 7px;
+  gap: 2px;
+  touch-action: none;
+  user-select: none;
 }
 .channel-workspace-tile .tx-button-integrated .tx-main {
-  font-size: 11px;
-  gap: 4px;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
 }
 .channel-workspace-tile .tx-button-integrated .tx-sub {
-  font-size: 8px;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0.02em;
+  font-weight: 500;
 }
 .channel-workspace-tile .ch-action-cell,
 .channel-workspace-tile .txmode-btn.ch-action-cell,
@@ -2263,16 +2306,15 @@ code.mono {
 }
 .channel-workspace-tile.widget-small .channel-card.workspace .ch-card-title-row,
 .channel-workspace-tile.widget-small .channel-card.workspace .ch-card-title-main {
-  min-height: 22px;
+  min-height: 28px;
 }
 .channel-workspace-tile.widget-small .channel-card.workspace .ch-card-title-row .ch-card-name {
-  font-size: 9px;
+  font-size: 12px;
 }
-.channel-workspace-tile.widget-small .channel-card.workspace .ch-card-toolbar .ch-power,
-.channel-workspace-tile.widget-small .channel-card.workspace .ch-card-toolbar .ch-quick-ptt {
-  min-height: 20px;
-  font-size: 7px;
-  padding: 2px 4px;
+.channel-workspace-tile.widget-small .channel-card.workspace .ch-card-toolbar .ch-power {
+  min-height: 24px;
+  font-size: 8px;
+  padding: 3px 8px;
 }
 .channel-workspace-tile.widget-small .live-tx-console .btn.sm.live-tx-replay {
   display: none;
@@ -2280,8 +2322,12 @@ code.mono {
 .channel-workspace-tile.widget-medium .channel-card.workspace {
   font-size: 10px;
 }
-.channel-workspace-tile.widget-medium .channel-card.workspace .ch-card-toolbar .ch-quick-ptt {
-  min-height: 22px;
+.channel-workspace-tile.widget-medium .channel-card.workspace .ch-card-title-row .ch-card-name {
+  font-size: 14px;
+}
+.channel-workspace-tile.widget-medium .channel-card.workspace .ch-card-title-row,
+.channel-workspace-tile.widget-medium .channel-card.workspace .ch-card-title-main {
+  min-height: 34px;
 }
 .channel-workspace-tile.widget-medium .live-tx-console .btn.sm.live-tx-replay {
   padding: 2px 4px;
@@ -2290,12 +2336,13 @@ code.mono {
 .channel-workspace-tile.widget-large .channel-card.workspace {
   font-size: 10px;
 }
-.channel-workspace-tile.widget-large .tx-button-integrated {
-  min-height: 32px;
-  max-height: 36px;
+.channel-workspace-tile.widget-large .channel-card.workspace .ch-card-title-row .ch-card-name {
+  font-size: 16px;
 }
-.channel-workspace-tile.widget-large .tx-button-integrated .tx-main {
-  font-size: 12px;
+.channel-workspace-tile.widget-large .channel-card.workspace .ch-card-title-row,
+.channel-workspace-tile.widget-large .channel-card.workspace .ch-card-title-main {
+  min-height: 38px;
+  padding-right: 52px;
 }
 .channel-workspace-tile.widget-large .ch-actions-grid .ch-action-cell {
   font-size: 8px;
@@ -2878,8 +2925,8 @@ code.mono {
 .channel-card.workspace .ch-card-title-row .ch-card-name {
   flex: 1 1 auto;
   min-width: 0;
-  font-size: 10px;
-  font-weight: 700;
+  font-size: 14px;
+  font-weight: 800;
 }
 .channel-card.workspace .ch-card-title-row .ch-card-label {
   white-space: nowrap;
@@ -2898,10 +2945,14 @@ code.mono {
   padding: 4px 6px 5px;
   min-width: 0;
 }
-.channel-card.workspace .ch-card-toolbar .ch-power,
+.channel-card.workspace .ch-card-toolbar .ch-power {
+  padding: 4px 10px;
+  font-size: 9px;
+  min-height: 26px;
+}
+/* Workspace transmit is only the body XMIT pad — hide legacy toolbar PTT if present. */
 .channel-card.workspace .ch-card-toolbar .ch-quick-ptt {
-  padding: 2px 5px;
-  font-size: 8px;
+  display: none !important;
 }
 .channel-card.workspace .ch-card-toolbar .ch-mini-wave {
   width: 48px;
