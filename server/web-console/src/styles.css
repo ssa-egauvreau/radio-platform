@@ -1517,65 +1517,16 @@ code.mono {
   gap: 3px;
   box-sizing: border-box;
 }
-.channel-workspace-tile .channel-card.workspace[data-width="wide"] .ch-card-body.workspace-dense {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px 6px;
-}
-/* Single-column stack for narrow tiles; wide (2+ cols) uses 2-column body grid. */
-.channel-card.workspace[data-widget-size="small"]:not([data-width="wide"]) .ch-card-body.workspace-dense,
-.channel-card.workspace[data-tier="0"]:not([data-width="wide"]) .ch-card-body.workspace-dense,
-.channel-card.workspace[data-tier="1"]:not([data-width="wide"]) .ch-card-body.workspace-dense,
-.channel-card.workspace[data-tier="2"]:not([data-width="wide"]) .ch-card-body.workspace-dense {
+/* Workspace tile body: always one vertical stack (no split-column grid). */
+.channel-card.workspace .ch-card-body.workspace-dense {
   display: flex;
   flex-direction: column;
   align-content: stretch;
-  grid-template-columns: none;
-  gap: 4px;
-  padding: 4px 6px 6px;
-}
-.channel-card.workspace[data-tier="0"] .ch-card-body.workspace-dense > .volume-row,
-.channel-card.workspace[data-tier="1"] .ch-card-body.workspace-dense > .volume-row {
-  flex: 0 0 auto;
-  margin: 0;
-}
-.channel-card.workspace[data-tier="0"]:not([data-width="wide"]) .ch-card-body.workspace-dense > .tx-button,
-.channel-card.workspace[data-tier="1"]:not([data-width="wide"]) .ch-card-body.workspace-dense > .tx-button,
-.channel-card.workspace[data-tier="2"]:not([data-width="wide"]) .ch-card-body.workspace-dense > .tx-button {
-  /* Tiles size to content now, so don't flex the PTT button to fill a (non-existent) fixed
-     height — it would collapse to nothing. Give it its natural button height. */
-  flex: 0 0 auto;
-  min-height: 56px;
-  grid-column: auto;
-}
-.channel-card.workspace[data-tier="0"] .tx-button-integrated,
-.channel-card.workspace[data-tier="1"] .tx-button-integrated,
-.channel-card.workspace[data-tier="2"] .tx-button-integrated {
-  min-height: 56px;
-  padding: 6px;
-}
-.channel-card.workspace[data-tier="0"] .tx-button-integrated .tx-main {
-  font-size: 15px;
-}
-.channel-card.workspace[data-tier="0"] .tx-sub,
-.channel-card.workspace[data-tier="1"] .tx-sub {
-  display: none;
-}
-.channel-card.workspace[data-tier="0"] .ch-card-head.workspace-head,
-.channel-card.workspace[data-tier="1"] .ch-card-head.workspace-head {
-  flex: 0 0 auto;
-}
-.channel-card.workspace[data-tier="0"] .ch-card-toolbar,
-.channel-card.workspace[data-tier="1"] .ch-card-toolbar {
-  padding: 2px 4px 3px;
+  gap: 3px;
 }
 /* Widget size S / M / L — visibility is driven in ChannelPanel; these rules tighten layout. */
 .channel-card.workspace[data-widget-size="small"] .ch-card-title-row {
-  flex-wrap: wrap;
-  gap: 4px;
-}
-.channel-card.workspace[data-widget-size="small"] .ch-member-count {
-  margin-left: auto;
+  flex-wrap: nowrap;
 }
 .ch-member-count {
   display: inline-flex;
@@ -1593,13 +1544,6 @@ code.mono {
 .ch-member-count-num {
   min-width: 1ch;
   text-align: center;
-}
-.channel-card.workspace[data-widget-size="small"]:not([data-width="wide"]) .ch-card-body.workspace-dense,
-.channel-card.workspace[data-widget-size="medium"]:not([data-width="wide"]) .ch-card-body.workspace-dense {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 4px 6px 6px;
 }
 .channel-card.workspace[data-widget-size="small"] .ch-card-toolbar {
   padding: 2px 4px 3px;
@@ -1665,33 +1609,31 @@ code.mono {
   display: none;
 }
 /* --- Workspace widget sizes: fit inside grid cells (no inner scroll) --- */
-.channel-workspace-tile .channel-card.workspace .ch-card-body.workspace-dense > * {
+.channel-workspace-tile .channel-card.workspace .ch-card-body.workspace-dense > .volume-row,
+.channel-workspace-tile .channel-card.workspace .ch-card-body.workspace-dense > .ch-card-toolbar,
+.channel-workspace-tile .channel-card.workspace .ch-card-body.workspace-dense > .tx-button {
   flex-shrink: 0;
+}
+.channel-workspace-tile .channel-card.workspace .ch-card-body.workspace-dense > .live-tx-console,
+.channel-workspace-tile .channel-card.workspace .ch-card-body.workspace-dense > .roster {
+  flex: 0 1 auto;
   min-height: 0;
+  overflow: hidden;
 }
 .channel-workspace-tile.widget-small .channel-card.workspace {
   font-size: 9px;
 }
-.channel-workspace-tile.widget-small .ch-card-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .channel-workspace-tile.widget-small .ch-card-body.workspace-dense {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 3px 5px;
   padding: 3px 5px 4px;
-  align-content: start;
 }
 .channel-workspace-tile.widget-small .ch-card-body.workspace-dense > .volume-row {
-  grid-column: 1 / -1;
   margin: 0;
   padding: 0;
 }
 .channel-workspace-tile.widget-small .ch-card-body.workspace-dense > .live-tx-console {
-  grid-column: 1 / -1;
+  flex: 0 1 auto;
   min-height: 0;
+  overflow: hidden;
 }
 .channel-workspace-tile.widget-small .live-tx-transcript {
   display: -webkit-box;
@@ -1803,9 +1745,27 @@ code.mono {
   padding: 3px 46px 3px 6px;
   gap: 3px 5px;
 }
+.channel-workspace-tile .channel-card.workspace .ch-card-title-main {
+  flex-wrap: nowrap;
+  align-items: center;
+}
 .channel-workspace-tile .channel-card.workspace .ch-card-title-row .ch-card-name {
   font-size: 10px;
   gap: 3px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.channel-workspace-tile .channel-card.workspace .ch-card-title-row .ch-card-label {
+  display: block;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: normal;
+  line-height: 1.2;
+}
+.channel-workspace-tile .channel-card.workspace .ch-member-count {
+  margin-left: 0;
 }
 .channel-workspace-tile .channel-card.workspace .ch-card-title-row .chan-sim-tag {
   font-size: 8px;
@@ -1850,11 +1810,21 @@ code.mono {
 .channel-workspace-tile .txmode-btn.ch-action-cell,
 .channel-workspace-tile .marker-button.ch-action-cell,
 .channel-workspace-tile .toneout-btn.ch-action-cell {
+  width: auto;
+  margin-top: 0 !important;
   min-height: 0;
   padding: 3px 4px;
   font-size: 8px;
   gap: 2px;
   border-radius: 4px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.channel-workspace-tile .toneout.workspace-tones-compact .toneout-btn {
+  flex-direction: row;
+  gap: 3px;
+  letter-spacing: 0;
 }
 .channel-workspace-tile .ch-action-cell strong,
 .channel-workspace-tile .txmode-btn.ch-action-cell strong {
@@ -1893,13 +1863,6 @@ code.mono {
 .channel-workspace-tile .live-tx-console .live-tx-log-hint {
   font-size: 8px;
   margin: 2px 0 0;
-}
-.channel-workspace-tile .channel-card.workspace[data-tier] .tx-button-integrated {
-  min-height: 0;
-  padding: 3px 5px;
-}
-.channel-workspace-tile .channel-card.workspace[data-tier] .tx-button-integrated .tx-main {
-  font-size: 11px;
 }
 .channel-workspace-tile.widget-small .channel-card.workspace {
   font-size: 9px;
@@ -2234,12 +2197,6 @@ code.mono {
   border-color: color-mix(in srgb, #38bdf8 40%, var(--border));
 }
 
-.channel-workspace-tile .channel-card.workspace .ch-card-body,
-.channel-workspace-tile .channel-card.workspace .ch-card-body.workspace-dense {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  align-content: start;
-  /* gap/padding: set per widget-small / medium / large above */
-}
 .channel-workspace-tile .channel-card.workspace .ch-card-body > * {
   min-width: 0;
   max-width: 100%;
@@ -2258,14 +2215,6 @@ code.mono {
 .channel-workspace-tile .channel-card.workspace .ch-card-toolbar .ch-power,
 .channel-workspace-tile .channel-card.workspace .ch-card-toolbar .ch-quick-ptt {
   flex-shrink: 0;
-}
-.channel-workspace-tile .channel-card.workspace .ch-card-body > .tx-button,
-.channel-workspace-tile .channel-card.workspace .ch-card-body > .live-tx,
-.channel-workspace-tile .channel-card.workspace .ch-card-body > .ch-actions-grid,
-.channel-workspace-tile .channel-card.workspace .ch-card-body > .ch-action-notes,
-.channel-workspace-tile .channel-card.workspace .ch-card-body > .toneout,
-.channel-workspace-tile .channel-card.workspace .ch-card-body > .audio-out-row {
-  grid-column: 1 / -1;
 }
 .channel-workspace-tile.widget-large .channel-card.workspace .tx-button-integrated {
   flex: 0 0 auto;
@@ -2418,7 +2367,7 @@ code.mono {
   flex: 1 1 auto;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 3px 5px;
   min-width: 0;
   min-height: 26px;
@@ -2494,11 +2443,12 @@ code.mono {
   font-weight: 700;
 }
 .channel-card.workspace .ch-card-title-row .ch-card-label {
-  white-space: normal;
-  overflow: visible;
-  text-overflow: unset;
-  line-height: 1.25;
-  word-break: break-word;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.2;
+  word-break: normal;
+  min-width: 0;
 }
 .channel-card.workspace .ch-card-toolbar {
   display: flex;

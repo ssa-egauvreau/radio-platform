@@ -498,7 +498,7 @@ export function ChannelPanel({
   const showToolbar = true;
   const showVolume = true;
   const showStatusChip = workspace && wsSize !== "small";
-  const showMemberCount = workspace;
+  const showMemberCount = workspace && wsSize !== "small";
   const showMeta = !workspace || wsSize === "large";
   const showAudioOut = !workspace || wsSize === "large";
   const showActions = !workspace || wsSize === "large";
@@ -909,27 +909,33 @@ export function ChannelPanel({
             className="toneout-btn ch-action-cell"
             disabled={!connected || !canTransmit}
             onClick={() => sendTone("routine")}
+            aria-label="Routine tone"
+            title="Routine tone"
           >
             <IconToneRoutine size={wsIcon?.tone ?? (workspace ? 13 : 16)} />
-            Routine
+            {showTonesCompact ? "Rtn" : "Routine"}
           </button>
           <button
             type="button"
             className="toneout-btn priority ch-action-cell"
             disabled={!connected || !canTransmit}
             onClick={() => sendTone("priority")}
+            aria-label="Priority tone"
+            title="Priority tone"
           >
             <IconTonePriority size={wsIcon?.tone ?? (workspace ? 13 : 16)} />
-            Priority
+            {showTonesCompact ? "Pri" : "Priority"}
           </button>
           <button
             type="button"
             className="toneout-btn ch-action-cell"
             disabled={!connected || !canTransmit}
             onClick={() => sendTone("status")}
+            aria-label="Status tone"
+            title="Status tone"
           >
             <IconToneStatus size={wsIcon?.tone ?? (workspace ? 13 : 16)} />
-            Status
+            {showTonesCompact ? "Sts" : "Status"}
           </button>
         </div>
         {showToneCustom && toneOuts.some((t) => t.has_audio) && (
