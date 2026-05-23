@@ -6639,3 +6639,454 @@ code.mono {
 .channel-workspace-tile.widget-large .ws-ai-state {
   font-size: 8px;
 }
+
+/* =============================================================
+ * Channel-box polish — clearer hierarchy, smoother controls, and
+ * a more "real radio" feel inside each Mission Control tile.
+ * Additive overrides only — no JSX/structure changes required.
+ * ============================================================= */
+
+/* The body sits flush under the colored title bar.  Add a thin inner
+ * top border so the header band reads as the title and the body reads
+ * as the controls area instead of one continuous wall. */
+.channel-workspace-tile .channel-card.workspace .ch-card-body.workspace-dense {
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-raised) 92%, transparent) 0%,
+    color-mix(in srgb, var(--bg) 75%, var(--bg-raised) 25%) 100%
+  );
+  border-top: 1px solid color-mix(in srgb, #fff 6%, var(--border));
+  gap: 5px;
+}
+.channel-workspace-tile.widget-small .channel-card.workspace .ch-card-body.workspace-dense {
+  gap: 3px;
+}
+.channel-workspace-tile.widget-medium .channel-card.workspace .ch-card-body.workspace-dense {
+  gap: 4px;
+}
+
+/* Toolbar (volume + ON/PTT) — give it a thin divider below so the
+ * channel "transport" reads as its own strip instead of bleeding into
+ * the body controls underneath. */
+.channel-workspace-tile .channel-card.workspace .ch-card-toolbar {
+  background: color-mix(in srgb, var(--bg-raised) 70%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, #fff 5%, var(--border));
+}
+
+/* Volume slider — custom thumb so it actually looks like a control
+ * instead of a faint hairline.  Track + thumb work in both themes. */
+.channel-workspace-tile .channel-card.workspace .vol-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: color-mix(in srgb, var(--accent) 22%, var(--border));
+  border-radius: 999px;
+  outline: none;
+  cursor: pointer;
+}
+.channel-workspace-tile .channel-card.workspace .vol-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 1px solid color-mix(in srgb, #fff 35%, var(--accent));
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 35%, transparent);
+  cursor: pointer;
+  transition: transform 0.1s ease;
+}
+.channel-workspace-tile .channel-card.workspace .vol-slider:hover::-webkit-slider-thumb,
+.channel-workspace-tile .channel-card.workspace .vol-slider:focus::-webkit-slider-thumb {
+  transform: scale(1.15);
+}
+.channel-workspace-tile .channel-card.workspace .vol-slider::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  border: 1px solid color-mix(in srgb, #fff 35%, var(--accent));
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 35%, transparent);
+  cursor: pointer;
+}
+.channel-workspace-tile .channel-card.workspace .vol-mute {
+  border-radius: 6px;
+  border-color: color-mix(in srgb, var(--border) 75%, transparent);
+  background: color-mix(in srgb, var(--bg-input) 80%, transparent);
+}
+.channel-workspace-tile .channel-card.workspace .vol-mute:hover {
+  border-color: var(--accent-2);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-input));
+}
+
+/* ON/PTT pill buttons in the toolbar — clearer pill shape + a soft
+ * "live" glow when actively transmitting. */
+.channel-workspace-tile .channel-card.workspace .ch-power,
+.channel-workspace-tile .channel-card.workspace .ch-quick-ptt {
+  border-radius: 999px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--bg-input) 80%, transparent);
+}
+.channel-workspace-tile .channel-card.workspace .ch-power.active {
+  background: color-mix(in srgb, var(--green) 18%, var(--bg-input));
+  border-color: var(--green);
+  color: var(--green);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--green) 35%, transparent);
+}
+.channel-workspace-tile .channel-card.workspace .ch-quick-ptt.active {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--red) 40%, transparent);
+  animation: ch-ptt-pulse 1.1s ease-in-out infinite;
+}
+@keyframes ch-ptt-pulse {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2px color-mix(in srgb, var(--red) 40%, transparent),
+      0 0 12px color-mix(in srgb, var(--red) 0%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 3px color-mix(in srgb, var(--red) 55%, transparent),
+      0 0 16px color-mix(in srgb, var(--red) 35%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .channel-workspace-tile .channel-card.workspace .ch-quick-ptt.active {
+    animation: none;
+  }
+}
+
+/* State chip in the toolbar — clearer pill with a steady-on dot for
+ * RX/BUSY and a pulsing dot for ON AIR. */
+.channel-workspace-tile .channel-card.workspace .state-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border-radius: 999px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  background: color-mix(in srgb, var(--bg-raised) 70%, transparent);
+}
+.channel-workspace-tile .channel-card.workspace .state-chip::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+  opacity: 0.85;
+}
+.channel-workspace-tile .channel-card.workspace .state-chip.tx::before,
+.channel-workspace-tile .channel-card.workspace .state-chip.transmitting::before {
+  animation: ch-state-pulse 0.9s ease-in-out infinite;
+}
+.channel-workspace-tile .channel-card.workspace .state-chip.tx,
+.channel-workspace-tile .channel-card.workspace .state-chip.transmitting {
+  background: color-mix(in srgb, var(--red) 22%, var(--bg-raised));
+  border-color: var(--red);
+  color: #fff;
+}
+@keyframes ch-state-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scale(0.9);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .channel-workspace-tile .channel-card.workspace .state-chip.tx::before,
+  .channel-workspace-tile .channel-card.workspace .state-chip.transmitting::before {
+    animation: none;
+  }
+}
+
+/* The .workspace-control-row container (added in JSX) already wraps
+ * "Permission" + "Set keyboard PTT" / "Keyboard PTT" with a soft
+ * pill background and rounded child chips. Nothing further to add
+ * here — let the base rules drive the chip look. */
+
+/* Audio-out row inside a workspace tile — compact, inline, clearly a
+ * settings widget rather than form copy. */
+.channel-workspace-tile .channel-card.workspace .audio-out-row {
+  align-items: center;
+  gap: 6px;
+  font-size: 10px;
+  padding: 3px 6px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-input) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.channel-workspace-tile .channel-card.workspace .audio-out-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-weight: 700;
+}
+.channel-workspace-tile .channel-card.workspace .audio-out-select {
+  font-size: 10px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--bg-input) 85%, transparent);
+  border-color: color-mix(in srgb, var(--border) 75%, transparent);
+  cursor: pointer;
+}
+.channel-workspace-tile .channel-card.workspace .audio-out-select:hover {
+  border-color: var(--accent-2);
+}
+
+/* AI dispatch toggle row — flatter, integrates with the surrounding
+ * controls instead of jumping out as a separate panel. */
+.channel-workspace-tile .channel-card.workspace .ws-ai-row {
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--bg-input) 55%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+.channel-workspace-tile .channel-card.workspace .ws-ai-label {
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.channel-workspace-tile .channel-card.workspace .ws-toggle {
+  width: 32px;
+  height: 18px;
+  background: color-mix(in srgb, var(--bg-input) 90%, var(--bg));
+}
+.channel-workspace-tile .channel-card.workspace .ws-toggle.on {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+
+/* The big XMIT pad — softer corners, a vertical gradient that reads as
+ * a physical key, and a clear "On Air" gradient while transmitting.
+ * The audio-level wave that fills the button stays clearly visible. */
+.channel-workspace-tile .tx-button.tx-button-integrated {
+  position: relative;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-raised) 80%, transparent) 0%,
+      color-mix(in srgb, var(--bg-input) 95%, transparent) 100%
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent),
+    0 1px 0 color-mix(in srgb, #000 25%, transparent);
+  transition:
+    transform 0.08s ease,
+    background 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.channel-workspace-tile .tx-button.tx-button-integrated:not(:disabled):hover {
+  border-color: var(--green);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--green) 8%, var(--bg-raised)) 0%,
+      color-mix(in srgb, var(--green) 4%, var(--bg-input)) 100%
+    );
+}
+.channel-workspace-tile .tx-button.tx-button-integrated:not(:disabled):active {
+  transform: translateY(1px);
+  box-shadow:
+    inset 0 2px 5px color-mix(in srgb, #000 38%, transparent);
+}
+.channel-workspace-tile .tx-button.tx-button-integrated.active {
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--red) 92%, #000) 0%,
+      color-mix(in srgb, var(--red) 78%, #000) 100%
+    );
+  border-color: color-mix(in srgb, var(--red) 80%, #000);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #fff 25%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--red) 45%, transparent),
+    0 0 18px color-mix(in srgb, var(--red) 35%, transparent);
+}
+.channel-workspace-tile .tx-button.tx-button-integrated.busy {
+  border-color: var(--amber);
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--amber) 10%, var(--bg-raised)) 0%,
+      color-mix(in srgb, var(--amber) 5%, var(--bg-input)) 100%
+    );
+  color: var(--amber);
+}
+.channel-workspace-tile .tx-button.tx-button-integrated:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.channel-workspace-tile .tx-button.tx-button-integrated .tx-main {
+  text-shadow: 0 1px 1px color-mix(in srgb, #000 35%, transparent);
+}
+
+/* Action grid (TX mode + 10-33) — make the two pills look like equal
+ * partners with a subtle kicker label and a clearer active state. */
+.channel-workspace-tile .channel-card.workspace .ch-actions-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.channel-workspace-tile .channel-card.workspace .ch-action-cell {
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-input) 70%, transparent);
+  color: var(--text-dim);
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease,
+    transform 0.08s ease;
+}
+.channel-workspace-tile .channel-card.workspace .ch-action-cell:not(:disabled):hover {
+  border-color: var(--accent-2);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-input));
+  color: var(--text);
+}
+.channel-workspace-tile .channel-card.workspace .ch-action-cell:not(:disabled):active {
+  transform: translateY(1px);
+}
+.channel-workspace-tile .channel-card.workspace .txmode-btn.ch-action-cell strong {
+  color: var(--accent-2);
+  font-weight: 800;
+  letter-spacing: 0.05em;
+}
+.channel-workspace-tile .channel-card.workspace .marker-button.ch-action-cell.active {
+  border-color: var(--amber);
+  background: color-mix(in srgb, var(--amber) 18%, var(--bg-input));
+  color: var(--amber);
+}
+
+/* Tone-outs — keep the 3-up grid but unify the pill look with the
+ * action grid above so the whole bottom of the box reads as one set
+ * of buttons. */
+.channel-workspace-tile .channel-card.workspace .ch-tone-grid {
+  gap: 4px;
+}
+.channel-workspace-tile .channel-card.workspace .toneout-btn.ch-action-cell {
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  background: color-mix(in srgb, var(--bg-input) 70%, transparent);
+  color: var(--text-dim);
+  font-weight: 700;
+}
+.channel-workspace-tile .channel-card.workspace .toneout-btn.ch-action-cell:not(:disabled):hover {
+  border-color: var(--accent-2);
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-input));
+  color: var(--text);
+}
+.channel-workspace-tile .channel-card.workspace .toneout-btn.priority.ch-action-cell:not(:disabled) {
+  color: var(--amber);
+  border-color: color-mix(in srgb, var(--amber) 60%, var(--border));
+  background: color-mix(in srgb, var(--amber) 10%, var(--bg-input));
+}
+.channel-workspace-tile .channel-card.workspace .toneout-btn.priority.ch-action-cell:not(:disabled):hover {
+  background: color-mix(in srgb, var(--amber) 18%, var(--bg-input));
+  border-color: var(--amber);
+}
+.channel-workspace-tile .channel-card.workspace .toneout-btn.custom.ch-action-cell.looping {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-input));
+  color: var(--text);
+  animation: ch-tone-loop-pulse 1.6s ease-in-out infinite;
+}
+@keyframes ch-tone-loop-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 40%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 0%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .channel-workspace-tile .channel-card.workspace .toneout-btn.custom.ch-action-cell.looping {
+    animation: none;
+  }
+}
+
+/* "Stop all sounds" — toned down to a small utility button instead of a
+ * full-width red alarm so it doesn't dominate the box visually. */
+.channel-workspace-tile .channel-card.workspace .stopall-btn--workspace-top {
+  width: max-content;
+  align-self: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  background: color-mix(in srgb, var(--danger-bg) 70%, transparent);
+  border-color: color-mix(in srgb, var(--danger-border) 80%, transparent);
+  color: var(--danger-text);
+  box-shadow: none;
+}
+.channel-workspace-tile .channel-card.workspace .stopall-btn--workspace-top:hover {
+  background: var(--danger-bg);
+  border-color: var(--red);
+}
+
+/* Roster ("ON THIS CHANNEL") — tighter rows, clearer separators, and a
+ * sticky header label so the section reads as a list and not as more
+ * body text. */
+.channel-workspace-tile .channel-card.workspace .roster {
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--border) 75%, transparent);
+  background: color-mix(in srgb, var(--bg-raised) 75%, transparent);
+  padding: 5px 8px;
+}
+.channel-workspace-tile .channel-card.workspace .roster-head {
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+.channel-workspace-tile .channel-card.workspace .roster-row + .roster-row {
+  border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+}
+.channel-workspace-tile .channel-card.workspace .roster-row {
+  align-items: center;
+}
+.channel-workspace-tile .channel-card.workspace .roster-name {
+  color: var(--text);
+}
+.channel-workspace-tile .channel-card.workspace .roster-time {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Inline banners inside a workspace tile (e.g. voice errors / busy
+ * notes) — compact so they don't dominate the body. */
+.channel-workspace-tile .channel-card.workspace .banner {
+  padding: 4px 8px;
+  font-size: 10px;
+  line-height: 1.3;
+  border-radius: 6px;
+}
+
+/* Channel-off state — slightly less heavy overlay so the box content
+ * still reads as "available but muted" rather than disabled. */
+.channel-workspace-tile.channel-off .channel-off-overlay {
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  opacity: 0.55;
+  border-radius: inherit;
+}
+
+/* Focus ring for keyboard users on every interactive control inside a
+ * tile — uses the accent so it shows on every theme. */
+.channel-workspace-tile .channel-card.workspace button:focus-visible,
+.channel-workspace-tile .channel-card.workspace select:focus-visible,
+.channel-workspace-tile .channel-card.workspace input:focus-visible {
+  outline: 2px solid var(--accent-2);
+  outline-offset: 1px;
+  border-radius: 6px;
+}
