@@ -418,6 +418,12 @@ export function ChannelPanel({
   function stopAllSounds() {
     clientRef.current?.stopAllTones();
     sounds.stopAll();
+    // 10-33 runs server-side on a repeating timer, so clear it there too.
+    if (marker) {
+      void api.setChannelTen33(channel.name, false).catch(() => {
+        setMarker(true);
+      });
+    }
     setMarker(false);
     setLoopingIds(new Set());
   }
@@ -883,18 +889,24 @@ export function ChannelPanel({
       {showAiToggle && (
         <div className="ws-ai-row">
           <span className="ws-ai-label">AI dispatch</span>
-          <button
-            type="button"
-            role="switch"
-            aria-checked={aiDispatch}
-            className={`ws-toggle${aiDispatch ? " on" : ""}`}
-            disabled={!aiDispatchReady}
-            onClick={toggleAiDispatch}
-            title={
-              aiDispatchHint ??
-              "When on, unit transmissions on this channel can trigger an AI dispatcher reply on the air."
-            }
-          />
+          <div className="ws-ai-controls">
+            <span className={`ws-ai-state${aiDispatch ? " on" : ""}`}>
+              {aiDispatch ? "On" : "Off"}
+            </span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={aiDispatch}
+              aria-label={`AI dispatch ${aiDispatch ? "on" : "off"}`}
+              className={`ws-toggle${aiDispatch ? " on" : ""}`}
+              disabled={!aiDispatchReady}
+              onClick={toggleAiDispatch}
+              title={
+                aiDispatchHint ??
+                "When on, unit transmissions on this channel can trigger an AI dispatcher reply on the air."
+              }
+            />
+          </div>
         </div>
       )}
 
