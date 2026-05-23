@@ -13,11 +13,17 @@ import { createPortal } from "react-dom";
 import { ChannelRailDragFollower } from "../components/ChannelRailDragFollower";
 import type { UserChannel } from "../api";
 import { ChannelPanel } from "./ChannelPanel";
-import { previewWorkspaceOrder, type WorkspaceDropEdge } from "./channelWorkspaceOrder";
 import {
+  previewWorkspaceOrder,
+  previewWorkspaceOrderAtIndex,
+  type WorkspaceDropEdge,
+} from "./channelWorkspaceOrder";
+import {
+  computeInsertIndexFromPointer,
   findWorkspaceDropTarget,
   insertIndexFromPointer,
   orderAfterDrop,
+  orderFromInsertIndex,
   rowMajorOrderFromDom,
 } from "./channelWorkspaceDrag";
 import {
@@ -30,7 +36,6 @@ import {
   WORKSPACE_MIN_COL_PX,
   cycleWorkspaceTileSize,
   getWorkspaceTile,
-  moveWorkspaceTileToEnd,
   setWorkspaceChannelOrder,
   syncWorkspaceTilesForViewport,
   useConsoleState,
@@ -48,7 +53,7 @@ const SIZE_LABEL: Record<WorkspaceWidgetSize, string> = {
 };
 
 /** Pixels the pointer must move before a title-bar press becomes a drag (avoids “click to hide”). */
-const WORKSPACE_DRAG_THRESHOLD_PX = 6;
+const WORKSPACE_DRAG_THRESHOLD_PX = 4;
 
 function nextSizeTitle(size: WorkspaceWidgetSize, tile: WorkspaceTileLayout): string {
   const foot = workspaceTileFootprintLabel(tile);
@@ -105,7 +110,7 @@ export function ChannelWorkspace({
   moveChannelIdRef.current = moveChannelId;
   const [dragOverChannelId, setDragOverChannelId] = useState<number | null>(null);
   const [dropEdge, setDropEdge] = useState<WorkspaceDropEdge | null>(null);
-  const [insertAtEnd, setInsertAtEnd] = useState(false);
+  const [dragInsertIndex, setDragInsertIndex] = useState<number | null>(null);
   const [dragLayoutOrder, setDragLayoutOrder] = useState<number[]>([]);
   const [railDragPointer, setRailDragPointer] = useState<{ x: number; y: number } | null>(
     null,
@@ -135,17 +140,24 @@ export function ChannelWorkspace({
   const orderForPreview =
     moveChannelId !== null && dragLayoutOrder.length > 0 ? dragLayoutOrder : channelIds;
 
-  const previewIds = useMemo(
-    () =>
-      previewWorkspaceOrder(
+  const previewIds = useMemo(() => {
+    if (moveChannelId === null) {
+      return orderForPreview;
+    }
+    if (dragOverChannelId !== null && dropEdge !== null) {
+      return previewWorkspaceOrder(
         orderForPreview,
         moveChannelId,
         dragOverChannelId,
         dropEdge,
-        insertAtEnd,
-      ),
-    [orderForPreview, moveChannelId, dragOverChannelId, dropEdge, insertAtEnd],
-  );
+        false,
+      );
+    }
+    if (dragInsertIndex !== null) {
+      return previewWorkspaceOrderAtIndex(orderForPreview, moveChannelId, dragInsertIndex);
+    }
+    return orderForPreview;
+  }, [orderForPreview, moveChannelId, dragOverChannelId, dropEdge, dragInsertIndex]);
 
   const displayChannels = useMemo(
     () =>
@@ -161,7 +173,7 @@ export function ChannelWorkspace({
   const clearDragOver = useCallback(() => {
     setDragOverChannelId(null);
     setDropEdge(null);
-    setInsertAtEnd(false);
+    setDragInsertIndex(null);
   }, []);
 
   useEffect(() => {
@@ -245,6 +257,13 @@ export function ChannelWorkspace({
     if (e.button !== 0) {
       return;
     }
+    const target = e.target;
+    if (
+      target instanceof Element &&
+      target.closest(".ch-card-chrome, .channel-workspace-size-btn, .ch-workspace-close, button")
+    ) {
+      return;
+    }
     e.stopPropagation();
     const handle = e.currentTarget;
     const startX = e.clientX;
@@ -277,7 +296,7 @@ export function ChannelWorkspace({
       setDragLayoutOrder(visual);
       const drop = findWorkspaceDropTarget(root, ev.clientX, ev.clientY, visual, channelId);
       if (drop) {
-        setInsertAtEnd(false);
+        setDragInsertIndex(null);
         setDragOverChannelId(drop.targetId);
         setDropEdge(drop.edge);
       } else {
@@ -287,9 +306,14 @@ export function ChannelWorkspace({
           ev.clientX <= rootRect.right &&
           ev.clientY >= rootRect.top &&
           ev.clientY <= rootRect.bottom;
-        clearDragOver();
+        setDragOverChannelId(null);
+        setDropEdge(null);
         if (inRoot) {
-          setInsertAtEnd(true);
+          setDragInsertIndex(
+            computeInsertIndexFromPointer(root, ev.clientX, ev.clientY, visual, channelId),
+          );
+        } else {
+          setDragInsertIndex(null);
         }
       }
     };
@@ -328,7 +352,14 @@ export function ChannelWorkspace({
           ev.clientY >= rootRect.top &&
           ev.clientY <= rootRect.bottom;
         if (inRoot) {
-          moveWorkspaceTileToEnd(channelId);
+          const insertAt = computeInsertIndexFromPointer(
+            root,
+            ev.clientX,
+            ev.clientY,
+            visual,
+            channelId,
+          );
+          setWorkspaceChannelOrder(orderFromInsertIndex(visual, channelId, insertAt));
         }
       }
       setMoveChannelId(null);

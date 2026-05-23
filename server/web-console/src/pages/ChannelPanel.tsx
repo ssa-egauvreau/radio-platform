@@ -589,7 +589,7 @@ export function ChannelPanel({
                   ? { background: channel.color, color: "#fff", borderColor: channel.color }
                   : undefined
               }
-              onPointerDown={workspaceChrome?.onDragPointerDown}
+              onPointerDownCapture={workspaceChrome?.onDragPointerDown}
               title={workspaceChrome ? "Drag the name bar to reorder (not PTT or S / M / L)" : undefined}
             >
               <div className="ch-card-title-main">

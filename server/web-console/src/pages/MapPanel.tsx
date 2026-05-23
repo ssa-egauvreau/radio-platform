@@ -461,7 +461,6 @@ export function MapView({ variant = "embedded", onPopOut }: MapViewProps) {
         const seenCalls = new Set<string>();
         for (const inc of calls) {
           seenCalls.add(inc.call_id);
-          const labelKey = inc.label;
           let entry = cadMarkers.get(inc.call_id);
           if (!entry) {
             entry = L.marker([inc.lat, inc.lon], { icon: cadDivIcon(inc.label) });

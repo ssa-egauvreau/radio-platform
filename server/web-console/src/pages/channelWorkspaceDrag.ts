@@ -241,6 +241,56 @@ export function findWorkspaceDropTarget(
   };
 }
 
+/**
+ * Row-major insert index from pointer — works in empty gaps beside/between channels,
+ * not only when hovering directly on a tile.
+ */
+export function computeInsertIndexFromPointer(
+  root: HTMLElement,
+  clientX: number,
+  clientY: number,
+  channelIds: number[],
+  excludeId: number | null = null,
+): number {
+  const visual = rowMajorOrderFromDom(root, channelIds, excludeId);
+  const drop = findWorkspaceDropTarget(root, clientX, clientY, visual, excludeId);
+  if (drop) {
+    const idx = visual.indexOf(drop.targetId);
+    if (idx >= 0) {
+      return drop.edge === "after" ? idx + 1 : idx;
+    }
+  }
+
+  const tiles = readTileRects(root, channelIds, excludeId);
+  if (tiles.length === 0) {
+    return 0;
+  }
+
+  const rows = clusterRows(tiles);
+  const rowIdx = pickRowIndex(rows, clientY);
+  let insertAt = 0;
+  for (let i = 0; i < rowIdx; i++) {
+    insertAt += rows[i]!.length;
+  }
+
+  const row = rows[rowIdx]!;
+  const band = rowBounds(row);
+
+  if (clientX > band.right + ROW_BAND_PAD_X) {
+    return insertAt + row.length;
+  }
+
+  for (const tile of row) {
+    if (clientX > tile.right + ROW_BAND_PAD_X / 2) {
+      insertAt += 1;
+    } else {
+      break;
+    }
+  }
+
+  return Math.max(0, Math.min(insertAt, visual.length));
+}
+
 /** Insert index when dropping a rail channel onto the workspace (row-major). */
 export function insertIndexFromPointer(
   clientX: number,
@@ -248,16 +298,18 @@ export function insertIndexFromPointer(
   root: HTMLElement,
   channelIds: number[],
 ): number {
-  const visual = rowMajorOrderFromDom(root, channelIds, null);
-  const drop = findWorkspaceDropTarget(root, clientX, clientY, visual, null);
-  if (!drop) {
-    return channelIds.length;
-  }
-  const idx = visual.indexOf(drop.targetId);
-  if (idx < 0) {
-    return channelIds.length;
-  }
-  return drop.edge === "after" ? idx + 1 : idx;
+  return computeInsertIndexFromPointer(root, clientX, clientY, channelIds, null);
+}
+
+/** Build dock order after moving a channel to the pointer insert index. */
+export function orderFromInsertIndex(
+  channelIds: number[],
+  sourceId: number,
+  insertAt: number,
+): number[] {
+  const without = channelIds.filter((id) => id !== sourceId);
+  const at = Math.max(0, Math.min(insertAt, without.length));
+  return [...without.slice(0, at), sourceId, ...without.slice(at)];
 }
 
 /** Apply row-major order after preview insert (for commit on drop). */

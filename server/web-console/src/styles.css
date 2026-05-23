@@ -951,12 +951,12 @@ code.mono {
   font-size: 9px;
 }
 
-/* --- Mission Control: row-dense grid — tiles pack side-by-side and stack in rows --- */
+/* --- Mission Control: row grid — DOM order left-to-right, then next row (no dense backfill) --- */
 .channel-workspace-rows.channel-workspace-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(172px, 1fr));
   grid-auto-rows: minmax(min-content, auto);
-  grid-auto-flow: row dense;
+  grid-auto-flow: row;
   align-items: start;
   gap: 8px;
   align-content: start;
@@ -2048,11 +2048,6 @@ code.mono {
   min-width: 0;
   min-height: 32px;
   padding: 5px 52px 5px 8px;
-  pointer-events: none;
-}
-.channel-card.workspace .ch-card-title-main .ch-card-name,
-.channel-card.workspace .ch-card-title-main .chan-sim-tag {
-  pointer-events: auto;
 }
 .channel-card.workspace .ch-card-chrome {
   position: absolute;

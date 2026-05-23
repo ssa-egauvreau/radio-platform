@@ -32,3 +32,18 @@ export function previewWorkspaceOrder(
   }
   return [...without.slice(0, insertAt), sourceId, ...without.slice(insertAt)];
 }
+
+/** Preview order while dragging when the placeholder is at a computed insert index. */
+export function previewWorkspaceOrderAtIndex(
+  order: number[],
+  sourceId: number,
+  insertAt: number,
+): number[] {
+  const from = order.indexOf(sourceId);
+  if (from < 0) {
+    return order;
+  }
+  const without = order.filter((id) => id !== sourceId);
+  const at = Math.max(0, Math.min(insertAt, without.length));
+  return [...without.slice(0, at), sourceId, ...without.slice(at)];
+}
