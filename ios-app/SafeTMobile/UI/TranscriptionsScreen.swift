@@ -180,12 +180,26 @@ struct TranscriptionsScreen: View {
             Text("TRANSCRIBING…")
                 .font(.system(size: 10, weight: .heavy, design: .monospaced))
                 .foregroundColor(.safetAmber)
-        case "error":
+        case "failed":
+            // Server emits "failed" when Whisper errored on this clip (not
+            // "error" — earlier mapping was wrong, falling into default and
+            // rendering nothing).
             Text("TRANSCRIPT FAILED")
                 .font(.system(size: 10, weight: .heavy, design: .monospaced))
                 .foregroundColor(.safetRed)
+        case "disabled":
+            // Transcription is globally off for this agency. Operators need
+            // to know the silence is intentional, not a missing transcript.
+            Text("TRANSCRIPTION OFF")
+                .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                .foregroundColor(.safetTextDim)
         default:
-            EmptyView()
+            // Defensive — should never hit. If the server adds a new status
+            // value, render it raw so it's visible in the field instead of
+            // silently disappearing.
+            Text(tx.transcriptStatus.uppercased())
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundColor(.safetTextDim)
         }
     }
 

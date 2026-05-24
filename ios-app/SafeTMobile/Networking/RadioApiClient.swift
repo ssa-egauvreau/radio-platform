@@ -28,8 +28,10 @@ struct InboxResponse: Decodable {
 }
 
 /// One row from `GET /v1/transmissions`. Maps the server `TransmissionRow`.
-/// `transcriptStatus` is one of "pending" | "done" | "error" — UI shows a
-/// spinner / dash / transcript text accordingly.
+/// `transcriptStatus` is one of `"pending"` | `"done"` | `"failed"` |
+/// `"disabled"` (see server/src/store.ts and aiDispatch/engine.ts). UI
+/// renders a spinner, the text, an error tag, or a "transcription off"
+/// note accordingly.
 struct Transmission: Decodable, Identifiable, Hashable {
     let id: Int
     let channelName: String
