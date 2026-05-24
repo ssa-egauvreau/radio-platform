@@ -43,6 +43,21 @@ struct Transmission: Decodable, Identifiable, Hashable {
     let transcriptStatus: String
 }
 
+/// One row from `GET /v1/tone-outs` — soundboard entry metadata. Audio bytes
+/// are fetched on demand via `toneOutAudio(id:)`. `playMode` is one of
+/// "single" | "loop" | "once_per_press" (server-side enum); we only use the
+/// name here for display.
+struct ToneOut: Decodable, Identifiable, Hashable {
+    let id: Int
+    let name: String
+    let playMode: String
+    let iconKind: String
+    let iconColor: String
+    let hasImage: Bool
+    let hasAudio: Bool
+    let sortOrder: Int
+}
+
 /// One row from `GET /v1/locations`. Mirrors server `RadioPosition`. All
 /// position fields are required; channel / display / accuracy / heading /
 /// speed / device type are optional metadata.
@@ -157,6 +172,40 @@ final class RadioApiClient {
         ]
         if let channel { query.append(URLQueryItem(name: "channel", value: channel)) }
         return try await get("v1/radio/inbox", query: query, as: InboxResponse.self)
+    }
+
+    // MARK: - dispatch (operator role required server-side)
+
+    /// `GET /v1/channels/ten33?channel=X` — current 10-33 (emergency-traffic)
+    /// state for a channel. 403 if the caller isn't admin/dispatcher.
+    func ten33Status(channel: String) async throws -> Bool {
+        struct Response: Decodable { let active: Bool }
+        let query = [URLQueryItem(name: "channel", value: channel)]
+        return try await get("v1/channels/ten33", query: query, as: Response.self).active
+    }
+
+    /// `POST /v1/channels/ten33` — set the 10-33 marker for a channel. Server
+    /// applies the marker via the AI-dispatch loopback so radios on that
+    /// channel see it in their next inbox poll.
+    func setTen33(channel: String, active: Bool) async throws {
+        struct Body: Encodable { let channel: String; let active: Bool }
+        try await post("v1/channels/ten33", body: Body(channel: channel, active: active))
+    }
+
+    /// `GET /v1/tone-outs` — list metadata for every soundboard entry in the
+    /// caller's agency. Available to all agency members; admin role required
+    /// to create / update / delete (POST /v1/admin/tone-outs).
+    func toneOuts() async throws -> [ToneOut] {
+        struct Response: Decodable { let toneOuts: [ToneOut] }
+        return try await get("v1/tone-outs", as: Response.self).toneOuts
+    }
+
+    /// `GET /v1/tone-outs/:id/audio` — raw audio bytes (typically WAV or MP3)
+    /// for a tone-out, suitable for local AVAudioPlayer playback.
+    func toneOutAudio(id: Int) async throws -> Data {
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1/tone-outs/\(id)/audio"))
+        applyAuth(&request)
+        return try await sendDiscardingBody(request)
     }
 
     /// `GET /v1/locations` — every reporting unit in this user's agency with
