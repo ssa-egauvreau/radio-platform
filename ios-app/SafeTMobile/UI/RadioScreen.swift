@@ -32,6 +32,14 @@ struct RadioScreen: View {
                         .toolbar {
                             ToolbarItem(placement: .navigationBarLeading) {
                                 Button("CLOSE") { showingDispatch = false }
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(.safetText)
+                            }
+                        }
+                }
+                .preferredColorScheme(.dark)
+            }
+        }
         .sheet(isPresented: $showingMap) {
             if let token = session.token {
                 NavigationStack {

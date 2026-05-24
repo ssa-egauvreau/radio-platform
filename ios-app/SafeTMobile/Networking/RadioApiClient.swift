@@ -56,6 +56,8 @@ struct ToneOut: Decodable, Identifiable, Hashable {
     let hasImage: Bool
     let hasAudio: Bool
     let sortOrder: Int
+}
+
 /// One row from `GET /v1/locations`. Mirrors server `RadioPosition`. All
 /// position fields are required; channel / display / accuracy / heading /
 /// speed / device type are optional metadata.
