@@ -109,7 +109,11 @@ struct DispatchScreen: View {
         let isActive: Bool = {
             if case .known(let on) = cell { return on } else { return false }
         }()
-        let isUnknown = cell == .failed
+        // Treat BOTH .failed (read errored) and .none (initial load not yet
+        // returned) as "unknown" — letting the operator toggle during the
+        // initial load could POST a value before we've ever read the real
+        // server state, overwriting an active 10-33 with stale local default.
+        let isKnown: Bool = { if case .known = cell { return true } else { return false } }()
         return HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(channel)
@@ -122,11 +126,12 @@ struct DispatchScreen: View {
             Spacer()
             if busy {
                 ProgressView().tint(.safetText)
-            } else if isUnknown {
+            } else if !isKnown {
                 // Don't expose a toggle when we don't trust our local state —
                 // flipping it would POST a value that could silently overwrite
-                // a real on-channel 10-33 we haven't read yet. Offer a refresh
-                // instead so the operator can re-query and unblock the toggle.
+                // a real on-channel 10-33 we haven't read yet. Covers both
+                // .failed AND .none (initial load not returned). Offer a
+                // refresh instead so the operator can re-query and unblock.
                 Button {
                     Task { await refreshTen33All() }
                 } label: {
@@ -201,13 +206,33 @@ struct DispatchScreen: View {
                 .font(.system(size: 10))
                 .foregroundColor(.safetTextDim)
                 .padding(.bottom, 4)
+            // Render error banner regardless of whether the list is loaded —
+            // preview download/playback failures fire AFTER the list is
+            // populated, and operators were getting silent failures (tap →
+            // nothing happens, no feedback). Tap the X to dismiss.
+            if let toneOutsError {
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.safetRed)
+                    Text(toneOutsError)
+                        .font(.system(size: 10, weight: .heavy, design: .monospaced))
+                        .foregroundColor(.safetRed)
+                    Spacer()
+                    Button {
+                        self.toneOutsError = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundColor(.safetTextDim)
+                    }
+                }
+                .padding(8)
+                .background(Color.safetRed.opacity(0.10))
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.safetRed, lineWidth: 1))
+                .cornerRadius(6)
+                .padding(.bottom, 4)
+            }
             if toneOutsLoading && toneOuts.isEmpty {
                 ProgressView().tint(.safetText).frame(maxWidth: .infinity).padding(.vertical, 24)
-            } else if let toneOutsError, toneOuts.isEmpty {
-                Text(toneOutsError)
-                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
-                    .foregroundColor(.safetRed)
-            } else if toneOuts.isEmpty {
+            } else if toneOuts.isEmpty && toneOutsError == nil {
                 Text("NO TONE-OUTS CONFIGURED")
                     .font(.system(size: 11, weight: .heavy, design: .monospaced))
                     .foregroundColor(.safetTextDim)
