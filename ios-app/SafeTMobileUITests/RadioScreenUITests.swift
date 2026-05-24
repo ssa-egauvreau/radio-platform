@@ -34,8 +34,10 @@ final class RadioScreenUITests: XCTestCase {
         // The PTT bar shows HOLD TO TALK in the idle state.
         XCTAssertTrue(app.staticTexts["HOLD TO TALK"].exists)
 
-        // The emergency button is always rendered in the idle layout.
-        XCTAssertTrue(app.staticTexts["EMERGENCY"].exists)
+        // The emergency button is always rendered in the idle layout. SwiftUI
+        // exposes a `Button { ... } label: { Text(...) }` as a button (with the
+        // Text as its accessibility label), not as a separate staticText.
+        XCTAssertTrue(app.buttons["EMERGENCY"].exists)
 
         // The sign-out chip is visible on the operator strip.
         XCTAssertTrue(app.buttons["SIGN OUT"].exists)
