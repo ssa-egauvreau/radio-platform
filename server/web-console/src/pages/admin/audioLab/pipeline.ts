@@ -18,6 +18,16 @@ export type UpsampleMode = "duplicate" | "linear" | "polyphase";
 
 export interface AudioLabConfig {
   preImbe: {
+    windGateEnabled: boolean;
+    /** Wind-band / voice-band RMS ratio (dB) above which the wind ducker engages.
+     *  Higher = only the most lopsidedly wind-dominant frames trigger it. */
+    windGateThresholdDb: number;
+    /** How far to attenuate the wind band when the gate triggers (dB, negative). */
+    windGateAttenuationDb: number;
+    windHpfEnabled: boolean;
+    windHpfHz: number;
+    /** Filter order — 2, 4, or 6 (12 / 24 / 36 dB per octave). */
+    windHpfOrder: 2 | 4 | 6;
     hpfEnabled: boolean;
     hpfHz: number;
     lpfEnabled: boolean;
@@ -176,6 +186,86 @@ function applyClipAgc(pcm: Int16Array, targetRms: number, maxGain: number): void
   }
 }
 
+/** Pole-pair Q values for cascaded-biquad Butterworth high-pass.
+ *  Each row is a cascade of identical-cutoff biquads with these per-section Qs;
+ *  the product gives a maximally-flat passband at the target order. */
+const BUTTERWORTH_HPF_QS: Record<2 | 4 | 6, readonly number[]> = {
+  2: [0.7071067811865475],
+  4: [0.5411961001461969, 1.3065629648763766],
+  6: [0.5176380902050415, 0.7071067811865475, 1.9318516525781364],
+};
+
+/** Cascaded high-pass — gives 12 / 24 / 36 dB-per-octave Butterworth roll-off
+ *  for order 2 / 4 / 6. Used for wind reduction: a 4th-order HPF at 200 Hz kills
+ *  rumble dead while leaving male voice fundamentals intact. */
+function applyCascadedHpf(pcm: Int16Array, fc: number, order: 2 | 4 | 6, fs: number): void {
+  for (const q of BUTTERWORTH_HPF_QS[order]) {
+    applyBiquadInPlace(pcm, Biquad.highpass(fc, q, fs));
+  }
+}
+
+/** Adaptive wind-band ducker. Splits the signal into a wind band (≤150 Hz) and a
+ *  complementary voice band, then monitors their RMS ratio frame-by-frame. When
+ *  the wind band dominates by more than `thresholdDb`, the wind band is attenuated
+ *  by `attenuationDb` and summed back with the voice band. Smoothed gain transitions
+ *  (5 ms attack / 50 ms release) keep voice intelligible — quiet passages don't get
+ *  pumped, and the gate releases fast enough that talker breaths come through. */
+function applyWindGate(
+  pcm: Int16Array,
+  thresholdDb: number,
+  attenuationDb: number,
+  fs: number,
+): void {
+  if (pcm.length === 0) return;
+  const SPLIT_HZ = 150;
+  const FRAME = 320; // 20 ms @ 16 kHz
+  // Attack / release as one-pole smoothing coefficients on the per-frame target gain.
+  // alpha = 1 - exp(-frameDur / tau)
+  const FRAME_DUR_S = FRAME / fs;
+  const attackAlpha = 1 - Math.exp(-FRAME_DUR_S / 0.005);
+  const releaseAlpha = 1 - Math.exp(-FRAME_DUR_S / 0.05);
+  const attenLinear = Math.pow(10, attenuationDb / 20);
+
+  // Wind-band extractor: 2nd-order LPF @ 150 Hz. The complementary voice band is
+  // just (input - lowOut), which preserves overall phase well enough for re-summing.
+  const lp = Biquad.lowpass(SPLIT_HZ, 0.707, fs);
+
+  let smoothedGain = 1;
+  let frameLowSumSq = 0;
+  let frameHighSumSq = 0;
+  const lowBand = new Float32Array(FRAME);
+  const highBand = new Float32Array(FRAME);
+
+  for (let off = 0; off < pcm.length; off += FRAME) {
+    const end = Math.min(off + FRAME, pcm.length);
+    const len = end - off;
+    frameLowSumSq = 0;
+    frameHighSumSq = 0;
+    for (let i = 0; i < len; i++) {
+      const x = pcm[off + i];
+      const lo = lp.process(x);
+      const hi = x - lo;
+      lowBand[i] = lo;
+      highBand[i] = hi;
+      frameLowSumSq += lo * lo;
+      frameHighSumSq += hi * hi;
+    }
+    // Target gain based on this frame's band ratio. Add a small noise floor to
+    // both bands so pure silence doesn't pick a random direction.
+    const FLOOR = 16; // ≈ -66 dBFS, well below mic self-noise
+    const lowRms = Math.sqrt(frameLowSumSq / len) + FLOOR;
+    const highRms = Math.sqrt(frameHighSumSq / len) + FLOOR;
+    const ratioDb = 20 * Math.log10(lowRms / highRms);
+    const targetGain = ratioDb > thresholdDb ? attenLinear : 1;
+    // One-pole smoothing: attack (gain dropping) is faster than release.
+    const alpha = targetGain < smoothedGain ? attackAlpha : releaseAlpha;
+    smoothedGain += alpha * (targetGain - smoothedGain);
+    for (let i = 0; i < len; i++) {
+      pcm[off + i] = clamp16(highBand[i] + lowBand[i] * smoothedGain);
+    }
+  }
+}
+
 /** 16 kHz → 8 kHz by sample-pair averaging (matches encodeImbeFrames). */
 function downsample16To8(pcm16k: Int16Array): Int16Array {
   const out = new Int16Array(pcm16k.length >> 1);
@@ -271,6 +361,21 @@ function polyphaseKernel(): Float32Array {
 export async function processClip(input: Int16Array, cfg: AudioLabConfig): Promise<Int16Array> {
   // --- Stage 1: pre-IMBE conditioning ---
   const conditioned = input.slice();
+  // Wind reduction runs first so the rest of the chain (HPF, LPF, AGC) sees a
+  // signal with rumble / gust energy already suppressed. Gate before HPF: the
+  // gate preserves low-band voice when voice is dominant, the HPF kills whatever
+  // bass survives unconditionally.
+  if (cfg.preImbe.windGateEnabled) {
+    applyWindGate(
+      conditioned,
+      cfg.preImbe.windGateThresholdDb,
+      cfg.preImbe.windGateAttenuationDb,
+      FS,
+    );
+  }
+  if (cfg.preImbe.windHpfEnabled) {
+    applyCascadedHpf(conditioned, cfg.preImbe.windHpfHz, cfg.preImbe.windHpfOrder, FS);
+  }
   if (cfg.preImbe.hpfEnabled) {
     applyBiquadInPlace(conditioned, Biquad.highpass(cfg.preImbe.hpfHz, 0.707, FS));
   }
@@ -377,6 +482,12 @@ export async function processClipProduction(input: Int16Array): Promise<Int16Arr
  *  sample-duplicate upsample, no post-decode shaping). Starting point for A/B-ing tweaks. */
 export const DEFAULT_PRESET: AudioLabConfig = {
   preImbe: {
+    windGateEnabled: false,
+    windGateThresholdDb: 6,
+    windGateAttenuationDb: -18,
+    windHpfEnabled: false,
+    windHpfHz: 200,
+    windHpfOrder: 4,
     hpfEnabled: true,
     hpfHz: 180,
     lpfEnabled: true,
@@ -407,6 +518,12 @@ export const DEFAULT_PRESET: AudioLabConfig = {
  *  small top-end softening. Closer to AMBE+2's character than bare IMBE. */
 export const PHASE2_PRESET: AudioLabConfig = {
   preImbe: {
+    windGateEnabled: false,
+    windGateThresholdDb: 6,
+    windGateAttenuationDb: -18,
+    windHpfEnabled: false,
+    windHpfHz: 200,
+    windHpfOrder: 4,
     hpfEnabled: true,
     hpfHz: 300,
     lpfEnabled: true,
@@ -437,6 +554,12 @@ export const PHASE2_PRESET: AudioLabConfig = {
  *  which to compare any IMBE-flavoured preset. */
 export const BYPASS_PRESET: AudioLabConfig = {
   preImbe: {
+    windGateEnabled: false,
+    windGateThresholdDb: 6,
+    windGateAttenuationDb: -18,
+    windHpfEnabled: false,
+    windHpfHz: 200,
+    windHpfOrder: 4,
     hpfEnabled: true,
     hpfHz: 180,
     lpfEnabled: false,
@@ -470,6 +593,12 @@ export const BYPASS_PRESET: AudioLabConfig = {
  *  remaining edginess off the vocoder. */
 export const DEEP_MOBILE_PRESET: AudioLabConfig = {
   preImbe: {
+    windGateEnabled: false,
+    windGateThresholdDb: 6,
+    windGateAttenuationDb: -18,
+    windHpfEnabled: false,
+    windHpfHz: 200,
+    windHpfOrder: 4,
     hpfEnabled: true,
     hpfHz: 120,
     lpfEnabled: true,
@@ -501,6 +630,12 @@ export const DEEP_MOBILE_PRESET: AudioLabConfig = {
  *  boost to bring out consonants without re-introducing IMBE's harsh fizz. */
 export const CRISP_DISPATCHER_PRESET: AudioLabConfig = {
   preImbe: {
+    windGateEnabled: false,
+    windGateThresholdDb: 6,
+    windGateAttenuationDb: -18,
+    windHpfEnabled: false,
+    windHpfHz: 200,
+    windHpfOrder: 4,
     hpfEnabled: true,
     hpfHz: 180,
     lpfEnabled: true,
@@ -532,6 +667,12 @@ export const CRISP_DISPATCHER_PRESET: AudioLabConfig = {
  *  high-shelf cut to roll off vocoder grit. */
 export const WARM_PORTABLE_PRESET: AudioLabConfig = {
   preImbe: {
+    windGateEnabled: false,
+    windGateThresholdDb: 6,
+    windGateAttenuationDb: -18,
+    windHpfEnabled: false,
+    windHpfHz: 200,
+    windHpfOrder: 4,
     hpfEnabled: true,
     hpfHz: 180,
     lpfEnabled: true,
@@ -558,6 +699,48 @@ export const WARM_PORTABLE_PRESET: AudioLabConfig = {
   },
 };
 
+/** "Windy mobile" — Deep-P25-mobile tone (polyphase upsample + low-shelf bass)
+ *  paired with both wind defenses on: a 4th-order HPF at 200 Hz to nuke the
+ *  steady-state rumble, plus the adaptive wind-band gate to catch the gusts a
+ *  static HPF can't. Use this for officers in vehicles with the window down, or
+ *  anyone on a portable in an exposed outdoor scene. */
+export const WINDY_MOBILE_PRESET: AudioLabConfig = {
+  preImbe: {
+    windGateEnabled: true,
+    windGateThresholdDb: 6,
+    windGateAttenuationDb: -18,
+    windHpfEnabled: true,
+    windHpfHz: 200,
+    windHpfOrder: 4,
+    hpfEnabled: false,
+    hpfHz: 180,
+    lpfEnabled: true,
+    lpfHz: 3400,
+    agcEnabled: true,
+    agcTargetRms: 6000,
+    agcMaxGain: 6,
+  },
+  vocoder: {
+    bypass: false,
+  },
+  postDecode: {
+    upsampleMode: "polyphase",
+    hpfEnabled: false,
+    hpfHz: 250,
+    lpfEnabled: true,
+    lpfHz: 3300,
+    // Lower the low-shelf cutoff a bit — the 200 Hz wind HPF has already removed
+    // most of what a shelf at 200 Hz would have touched, so push the bass boost
+    // up into the 220-250 Hz range where it'll actually be audible.
+    lowShelfEnabled: true,
+    lowShelfHz: 240,
+    lowShelfDb: 6,
+    highShelfEnabled: true,
+    highShelfHz: 2800,
+    highShelfDb: -2,
+  },
+};
+
 export const BUILTIN_PRESETS: Record<string, AudioLabConfig> = {
   "Default IMBE": DEFAULT_PRESET,
   "Phase 2 voice": PHASE2_PRESET,
@@ -565,4 +748,5 @@ export const BUILTIN_PRESETS: Record<string, AudioLabConfig> = {
   "Deep P25 mobile": DEEP_MOBILE_PRESET,
   "Crisp dispatcher": CRISP_DISPATCHER_PRESET,
   "Warm portable": WARM_PORTABLE_PRESET,
+  "Windy mobile": WINDY_MOBILE_PRESET,
 };
