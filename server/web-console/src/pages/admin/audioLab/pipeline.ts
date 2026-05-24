@@ -35,6 +35,9 @@ export interface AudioLabConfig {
     hpfHz: number;
     lpfEnabled: boolean;
     lpfHz: number;
+    lowShelfEnabled: boolean;
+    lowShelfHz: number;
+    lowShelfDb: number;
     highShelfEnabled: boolean;
     highShelfHz: number;
     highShelfDb: number;
@@ -100,6 +103,25 @@ class Biquad {
       (A * (A + 1 + (A - 1) * cw - beta * sw)) / a0,
       (2 * (A - 1 - (A + 1) * cw)) / a0,
       (A + 1 - (A - 1) * cw - beta * sw) / a0,
+    );
+  }
+
+  /** RBJ low-shelf. Positive gainDb lifts the bass below fc, negative cuts.
+   *  Use a positive lift around 200 Hz to mimic the chest-thump bass that a real
+   *  P25 mobile speaker amp adds on the RX side. */
+  static lowshelf(fc: number, gainDb: number, fs: number): Biquad {
+    const A = Math.pow(10, gainDb / 40);
+    const w0 = (2 * Math.PI * fc) / fs;
+    const cw = Math.cos(w0);
+    const sw = Math.sin(w0);
+    const beta = Math.sqrt(A);
+    const a0 = A + 1 + (A - 1) * cw + beta * sw;
+    return new Biquad(
+      (A * (A + 1 - (A - 1) * cw + beta * sw)) / a0,
+      (2 * A * (A - 1 - (A + 1) * cw)) / a0,
+      (A * (A + 1 - (A - 1) * cw - beta * sw)) / a0,
+      (-2 * (A - 1 + (A + 1) * cw)) / a0,
+      (A + 1 + (A - 1) * cw - beta * sw) / a0,
     );
   }
 
@@ -298,6 +320,12 @@ export async function processClip(input: Int16Array, cfg: AudioLabConfig): Promi
   if (cfg.postDecode.lpfEnabled) {
     applyBiquadInPlace(shaped, Biquad.lowpass(cfg.postDecode.lpfHz, 0.707, FS));
   }
+  if (cfg.postDecode.lowShelfEnabled) {
+    applyBiquadInPlace(
+      shaped,
+      Biquad.lowshelf(cfg.postDecode.lowShelfHz, cfg.postDecode.lowShelfDb, FS),
+    );
+  }
   if (cfg.postDecode.highShelfEnabled) {
     applyBiquadInPlace(
       shaped,
@@ -366,6 +394,9 @@ export const DEFAULT_PRESET: AudioLabConfig = {
     hpfHz: 250,
     lpfEnabled: false,
     lpfHz: 3300,
+    lowShelfEnabled: false,
+    lowShelfHz: 200,
+    lowShelfDb: 0,
     highShelfEnabled: false,
     highShelfHz: 2500,
     highShelfDb: -2.5,
@@ -393,6 +424,9 @@ export const PHASE2_PRESET: AudioLabConfig = {
     hpfHz: 300,
     lpfEnabled: true,
     lpfHz: 3300,
+    lowShelfEnabled: false,
+    lowShelfHz: 200,
+    lowShelfDb: 0,
     highShelfEnabled: true,
     highShelfHz: 2500,
     highShelfDb: -2.5,
@@ -420,9 +454,107 @@ export const BYPASS_PRESET: AudioLabConfig = {
     hpfHz: 250,
     lpfEnabled: false,
     lpfHz: 3300,
+    lowShelfEnabled: false,
+    lowShelfHz: 200,
+    lowShelfDb: 0,
     highShelfEnabled: false,
     highShelfHz: 2500,
     highShelfDb: -2.5,
+  },
+};
+
+/** "Deep P25 mobile" — emulates the chest-thump sound of a real P25 mobile radio
+ *  speaker amp. Polyphase upsample kills the duplicate-mode static, no post-decode
+ *  HPF lets bass through, and a +6 dB low-shelf around 200 Hz fakes the bass that
+ *  a physical 4-inch dash speaker would push. A gentle high-shelf cut takes the
+ *  remaining edginess off the vocoder. */
+export const DEEP_MOBILE_PRESET: AudioLabConfig = {
+  preImbe: {
+    hpfEnabled: true,
+    hpfHz: 120,
+    lpfEnabled: true,
+    lpfHz: 3400,
+    agcEnabled: true,
+    agcTargetRms: 6000,
+    agcMaxGain: 6,
+  },
+  vocoder: {
+    bypass: false,
+  },
+  postDecode: {
+    upsampleMode: "polyphase",
+    hpfEnabled: false,
+    hpfHz: 250,
+    lpfEnabled: true,
+    lpfHz: 3300,
+    lowShelfEnabled: true,
+    lowShelfHz: 200,
+    lowShelfDb: 6,
+    highShelfEnabled: true,
+    highShelfHz: 2800,
+    highShelfDb: -2,
+  },
+};
+
+/** "Crisp dispatcher" — brighter, articulate sound for console-side listening.
+ *  Polyphase upsample + a modest low-shelf lift for body + a small high-shelf
+ *  boost to bring out consonants without re-introducing IMBE's harsh fizz. */
+export const CRISP_DISPATCHER_PRESET: AudioLabConfig = {
+  preImbe: {
+    hpfEnabled: true,
+    hpfHz: 180,
+    lpfEnabled: true,
+    lpfHz: 3500,
+    agcEnabled: true,
+    agcTargetRms: 6500,
+    agcMaxGain: 6,
+  },
+  vocoder: {
+    bypass: false,
+  },
+  postDecode: {
+    upsampleMode: "polyphase",
+    hpfEnabled: true,
+    hpfHz: 150,
+    lpfEnabled: false,
+    lpfHz: 3300,
+    lowShelfEnabled: true,
+    lowShelfHz: 250,
+    lowShelfDb: 3,
+    highShelfEnabled: true,
+    highShelfHz: 2500,
+    highShelfDb: 2,
+  },
+};
+
+/** "Warm portable" — soft, broadcast-y tone reminiscent of a quality handheld
+ *  with the volume knob turned up. Polyphase + slight bass bump + audible
+ *  high-shelf cut to roll off vocoder grit. */
+export const WARM_PORTABLE_PRESET: AudioLabConfig = {
+  preImbe: {
+    hpfEnabled: true,
+    hpfHz: 180,
+    lpfEnabled: true,
+    lpfHz: 3400,
+    agcEnabled: true,
+    agcTargetRms: 6000,
+    agcMaxGain: 6,
+  },
+  vocoder: {
+    bypass: false,
+  },
+  postDecode: {
+    upsampleMode: "polyphase",
+    hpfEnabled: false,
+    hpfHz: 250,
+    lpfEnabled: true,
+    lpfHz: 3200,
+    lowShelfEnabled: true,
+    lowShelfHz: 220,
+    lowShelfDb: 4,
+    highShelfEnabled: true,
+    highShelfHz: 2400,
+    highShelfDb: -4,
   },
 };
 
@@ -430,4 +562,7 @@ export const BUILTIN_PRESETS: Record<string, AudioLabConfig> = {
   "Default IMBE": DEFAULT_PRESET,
   "Phase 2 voice": PHASE2_PRESET,
   Bypass: BYPASS_PRESET,
+  "Deep P25 mobile": DEEP_MOBILE_PRESET,
+  "Crisp dispatcher": CRISP_DISPATCHER_PRESET,
+  "Warm portable": WARM_PORTABLE_PRESET,
 };

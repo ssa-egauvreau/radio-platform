@@ -632,12 +632,37 @@ export function AudioLabPanel() {
             onChange={(v) => updatePost("lpfHz", v)}
           />
           <Toggle
+            label="Low-shelf EQ"
+            value={config.postDecode.lowShelfEnabled}
+            onChange={(v) => updatePost("lowShelfEnabled", v)}
+          />
+          <RangeRow
+            label="Low-shelf cutoff"
+            unit="Hz"
+            min={80}
+            max={400}
+            step={10}
+            value={config.postDecode.lowShelfHz}
+            disabled={!config.postDecode.lowShelfEnabled}
+            onChange={(v) => updatePost("lowShelfHz", v)}
+          />
+          <RangeRow
+            label="Low-shelf gain"
+            unit="dB"
+            min={-6}
+            max={9}
+            step={0.5}
+            value={config.postDecode.lowShelfDb}
+            disabled={!config.postDecode.lowShelfEnabled}
+            onChange={(v) => updatePost("lowShelfDb", v)}
+          />
+          <Toggle
             label="High-shelf EQ"
             value={config.postDecode.highShelfEnabled}
             onChange={(v) => updatePost("highShelfEnabled", v)}
           />
           <RangeRow
-            label="Shelf cutoff"
+            label="High-shelf cutoff"
             unit="Hz"
             min={1500}
             max={3500}
@@ -647,7 +672,7 @@ export function AudioLabPanel() {
             onChange={(v) => updatePost("highShelfHz", v)}
           />
           <RangeRow
-            label="Shelf gain"
+            label="High-shelf gain"
             unit="dB"
             min={-6}
             max={4}

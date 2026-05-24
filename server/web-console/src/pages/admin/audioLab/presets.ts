@@ -1,7 +1,7 @@
 // Audio Lab preset storage. User-saved presets live in localStorage; built-ins are
 // read-only and always present at the top of the list.
 
-import { BUILTIN_PRESETS, type AudioLabConfig } from "./pipeline";
+import { BUILTIN_PRESETS, DEFAULT_PRESET, type AudioLabConfig } from "./pipeline";
 
 const STORAGE_KEY = "securityradio.audioLab.presets.v1";
 
@@ -29,6 +29,16 @@ export function listPresets(): PresetRecord[] {
   return [...builtins, ...user];
 }
 
+/** Backfills any newer fields (e.g. low-shelf, added after a user already saved presets)
+ *  with defaults so legacy localStorage entries keep working after a schema bump. */
+function migrateConfig(cfg: AudioLabConfig): AudioLabConfig {
+  return {
+    preImbe: { ...DEFAULT_PRESET.preImbe, ...cfg.preImbe },
+    vocoder: { ...DEFAULT_PRESET.vocoder, ...cfg.vocoder },
+    postDecode: { ...DEFAULT_PRESET.postDecode, ...cfg.postDecode },
+  };
+}
+
 function loadUserPresets(): PresetRecord[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -38,7 +48,7 @@ function loadUserPresets(): PresetRecord[] {
     return parsed
       .filter((p): p is { name: string; config: AudioLabConfig } => typeof p.name === "string" && !!p.config)
       .filter((p) => !isBuiltinName(p.name))
-      .map((p) => ({ name: p.name, config: p.config, builtin: false }));
+      .map((p) => ({ name: p.name, config: migrateConfig(p.config), builtin: false }));
   } catch {
     return [];
   }
