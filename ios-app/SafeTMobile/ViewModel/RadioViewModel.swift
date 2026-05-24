@@ -1,5 +1,6 @@
 import AVFoundation
 import Foundation
+import os
 
 /// Owns radio state, the server connection, presence/inbox polling, GPS, and
 /// the half-duplex voice transport (mic capture + WebSocket + playback).
@@ -13,6 +14,11 @@ final class RadioViewModel: ObservableObject {
     private let voiceAudio: VoiceAudio
     private let voiceTransport: VoiceTransport
     private let unitId: String
+    /// `os.Logger` for radio-state events. Visible in Console.app on a Mac
+    /// (filter on subsystem == com.safetptt.mobile) and in the Xcode debug
+    /// console. Use this rather than print() so log lines survive Release
+    /// builds and are queryable by category.
+    private let logger = Logger(subsystem: "com.safetptt.mobile", category: "radio")
 
     private var channelNames: [String] = []
     private var channelIndex = 0
@@ -233,6 +239,14 @@ final class RadioViewModel: ObservableObject {
         uiState.isEmergencyActive = activating
         uiState.statusMessage = activating ? "EMERGENCY — SENDING…" : "EMERGENCY — CLEARING…"
         let channel = currentChannel
+        // Log the outbound call up front so we can correlate the request with
+        // any failure that follows. Operator reports of "I pressed emergency
+        // and nothing happened" are otherwise un-debuggable — the failure path
+        // historically just showed "EMERGENCY SEND FAILED" with no hint at
+        // whether it was network, auth, or a server 500.
+        logger.notice(
+            "emergency request unit=\(self.unitId, privacy: .public) channel=\(channel ?? "<none>", privacy: .public) active=\(activating)"
+        )
         Task {
             do {
                 try await api.setEmergency(
@@ -241,12 +255,43 @@ final class RadioViewModel: ObservableObject {
                     active: activating,
                     message: activating ? "Emergency activated" : nil
                 )
+                logger.notice(
+                    "emergency OK unit=\(self.unitId, privacy: .public) active=\(activating)"
+                )
                 uiState.statusMessage = activating ? "EMERGENCY ACTIVE" : "EMERGENCY OFF"
             } catch {
+                let detail = String(describing: error)
+                logger.error(
+                    "emergency FAILED unit=\(self.unitId, privacy: .public) active=\(activating) error=\(detail, privacy: .public)"
+                )
                 uiState.isEmergencyActive = !activating
-                uiState.statusMessage = activating ? "EMERGENCY SEND FAILED" : "EMERGENCY CLEAR FAILED"
+                let prefix = activating ? "EMERGENCY SEND FAILED" : "EMERGENCY CLEAR FAILED"
+                // Surface a short error hint in the status strip so an operator
+                // sees something actionable without needing Console.app.
+                uiState.statusMessage = "\(prefix) — \(shortErrorTag(error))"
             }
         }
+    }
+
+    /// Compact, fixed-width error tag for the status strip. Keeps the message
+    /// readable on the small operator display while still distinguishing the
+    /// common failure modes (HTTP 4xx/5xx vs no network vs timeout).
+    private func shortErrorTag(_ error: Error) -> String {
+        if let radio = error as? RadioApiError {
+            switch radio {
+            case .invalidURL: return "BAD URL"
+            case .badStatus(let code): return "HTTP \(code)"
+            }
+        }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet: return "OFFLINE"
+            case .timedOut: return "TIMEOUT"
+            case .cannotFindHost, .cannotConnectToHost: return "NO HOST"
+            default: return "NET \(urlError.code.rawValue)"
+            }
+        }
+        return "ERR"
     }
 
     private func toggleGps() {
