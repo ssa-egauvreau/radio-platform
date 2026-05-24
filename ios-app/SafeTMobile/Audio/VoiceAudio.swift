@@ -22,9 +22,12 @@ final class VoiceAudio {
 
     /// Format used everywhere downstream of the mic tap and upstream of the
     /// player: float32 mono 16 kHz, non-interleaved (the player's native shape).
+    // Reference the concrete class name rather than `Self` — Swift forbids
+    // `Self` in stored property initializers (even on a `final` class), so
+    // `Self.sampleRate` fails to compile under Xcode 16.
     private let processingFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32,
-        sampleRate: Self.sampleRate,
+        sampleRate: VoiceAudio.sampleRate,
         channels: 1,
         interleaved: false
     )!
