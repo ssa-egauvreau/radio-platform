@@ -12,6 +12,7 @@ final class RadioViewModel: ObservableObject {
     private let user: AuthenticatedUser
     private let voiceAudio: VoiceAudio
     private let voiceTransport: VoiceTransport
+    private let sounds = RadioSounds()
     private let unitId: String
 
     private var channelNames: [String] = []
@@ -127,6 +128,7 @@ final class RadioViewModel: ObservableObject {
         guard !channelNames.isEmpty, !uiState.channelsLoading else { return }
         channelIndex = (channelIndex + delta + channelNames.count) % channelNames.count
         applyTuning()
+        sounds.play(.channelSwitch)
         uiState.statusMessage = delta > 0 ? "CHANNEL +" : "CHANNEL -"
         uiState.radiosOnlineOnChannel = nil
         uiState.canTransmit = false
@@ -176,13 +178,11 @@ final class RadioViewModel: ObservableObject {
     private func onPttPressed() async {
         uiState.isPttPressed = true
         guard uiState.networkLabel == "ONLINE" else {
-            uiState.pttBusyTone = true
-            uiState.statusMessage = "NO CONNECTION"
+            enterBusy("NO CONNECTION")
             return
         }
         guard uiState.canTransmit else {
-            uiState.pttBusyTone = true
-            uiState.statusMessage = "LISTEN ONLY ON THIS CHANNEL"
+            enterBusy("LISTEN ONLY ON THIS CHANNEL")
             return
         }
         // startVoiceIfNeeded() can leave the audio engine inert (mic denied, audio init
@@ -190,8 +190,7 @@ final class RadioViewModel: ObservableObject {
         // actually being captured or sent — confusing the operator and silently dropping
         // their transmission.
         guard voiceStarted else {
-            uiState.pttBusyTone = true
-            uiState.statusMessage = "VOICE UNAVAILABLE"
+            enterBusy("VOICE UNAVAILABLE")
             return
         }
         uiState.statusMessage = "AIR: CHECKING"
@@ -199,24 +198,41 @@ final class RadioViewModel: ObservableObject {
             let air = try await api.airState(channel: currentChannel)
             guard uiState.isPttPressed else { return }
             let busy = air.occupied && air.transmittingUnitId?.uppercased() != unitId
-            uiState.pttBusyTone = busy
             if busy {
-                uiState.statusMessage = "CHANNEL BUSY"
+                enterBusy("CHANNEL BUSY")
                 return
             }
+            // Air is clear — play the permit beep, then start capturing. The beep
+            // overlaps the first ~250 ms of mic capture; that's how Android does
+            // it too, and the listener side hasn't started decoding yet anyway.
+            sounds.play(.pttPermit)
             uiState.statusMessage = "ON AIR"
             uiState.isTransmitting = true
             voiceAudio.startCapture()
         } catch {
             guard uiState.isPttPressed else { return }
-            uiState.pttBusyTone = true
-            uiState.statusMessage = "AIR CHECK FAILED"
+            enterBusy("AIR CHECK FAILED")
         }
+    }
+
+    /// Single funnel for the "PTT denied" UX so the busy beep, the busy-tone
+    /// flag, and the status message stay in sync no matter which guard tripped.
+    private func enterBusy(_ message: String) {
+        uiState.pttBusyTone = true
+        uiState.statusMessage = message
+        sounds.play(.busy)
     }
 
     private func onPttReleased() {
         uiState.isPttPressed = false
         uiState.pttBusyTone = false
+        // Cut the busy cue immediately when PTT is released. Without this,
+        // releasing PTT before the ~2s busy clip finishes leaves audio still
+        // playing while the status strip already says "RX IDLE", which masks
+        // any subsequent cues (channel switch, next PTT) and confuses the
+        // operator. Safe to call unconditionally — stop() is a no-op when the
+        // cue isn't playing.
+        sounds.stop(.busy)
         if uiState.isTransmitting {
             voiceAudio.stopCapture()
             uiState.isTransmitting = false
@@ -232,6 +248,13 @@ final class RadioViewModel: ObservableObject {
         let activating = !uiState.isEmergencyActive
         uiState.isEmergencyActive = activating
         uiState.statusMessage = activating ? "EMERGENCY — SENDING…" : "EMERGENCY — CLEARING…"
+        // Local feedback fires immediately on the activating edge — the
+        // operator should hear the alert tone whether or not the server call
+        // round-trips. The Task below will roll back the UI state if the
+        // request fails, but the tone has already played as confirmation.
+        if activating {
+            sounds.play(.emergency)
+        }
         let channel = currentChannel
         Task {
             do {
