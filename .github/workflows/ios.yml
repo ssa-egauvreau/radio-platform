@@ -28,8 +28,8 @@ jobs:
       - name: Install XcodeGen
         run: brew install xcodegen
 
-      - name: Generate Xcode project
-        run: xcodegen generate
+      - name: Bootstrap and generate Xcode project
+        run: ./setup.sh
 
       - name: Resolve a destination
         id: dest

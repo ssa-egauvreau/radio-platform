@@ -23,6 +23,9 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: SafeTMobile
+    configFiles:
+      Debug: Local.xcconfig
+      Release: Local.xcconfig
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.safetptt.mobile
@@ -34,9 +37,10 @@ targets:
         CFBundleDisplayName: safeT Mobile
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        # Server connection — set these for your deployment.
-        APIBaseURL: "https://your-server.example.com"
-        RadioAPIKey: ""
+        # Server connection — real values live in `Local.xcconfig` (gitignored).
+        # See `Local.example.xcconfig` for the format.
+        APIBaseURL: "$(SAFET_API_BASE_URL)"
+        RadioAPIKey: "$(SAFET_RADIO_API_KEY)"
         NSLocationWhenInUseUsageDescription: "Your location is shared with dispatch so your unit appears on the live map."
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
