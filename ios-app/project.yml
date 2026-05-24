@@ -35,7 +35,7 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # Server connection — set these for your deployment.
-        APIBaseURL: "https://your-server.example.com"
+        APIBaseURL: "https://safet.up.railway.app"
         RadioAPIKey: ""
         NSLocationWhenInUseUsageDescription: "Your location is shared with dispatch so your unit appears on the live map."
         UILaunchScreen: {}
