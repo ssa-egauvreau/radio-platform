@@ -17,6 +17,13 @@ struct AuthenticatedUser: Codable, Equatable {
         if !trimmed.isEmpty { return trimmed.uppercased() }
         return username.uppercased()
     }
+
+    /// Whether this account can hit dispatcher-only endpoints (10-33 toggle,
+    /// admin/operator features). Mirrors the server's `requireAgencyOperator`
+    /// gate, which accepts both admin and dispatcher.
+    var isOperator: Bool {
+        role == "admin" || role == "dispatcher"
+    }
 }
 
 enum AuthError: Error, LocalizedError {

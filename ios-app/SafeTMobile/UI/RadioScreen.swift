@@ -6,6 +6,7 @@ struct RadioScreen: View {
     @StateObject var viewModel: RadioViewModel
     @EnvironmentObject private var session: AuthSession
     @State private var pttDown = false
+    @State private var showingDispatch = false
 
     var body: some View {
         let state = viewModel.uiState
@@ -21,6 +22,21 @@ struct RadioScreen: View {
                 pttBar(state)
             }
             .padding(16)
+        }
+        .sheet(isPresented: $showingDispatch) {
+            if let token = session.token {
+                NavigationStack {
+                    DispatchScreen(api: RadioApiClient(token: token))
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button("CLOSE") { showingDispatch = false }
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(.safetText)
+                            }
+                        }
+                }
+                .preferredColorScheme(.dark)
+            }
         }
     }
 
@@ -54,6 +70,22 @@ struct RadioScreen: View {
                     .lineLimit(1)
             }
             Spacer()
+            if session.currentUser?.isOperator == true {
+                Button {
+                    showingDispatch = true
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "shield.lefthalf.filled")
+                            .font(.system(size: 10, weight: .bold))
+                        Text("DISPATCH")
+                            .font(.system(size: 10, weight: .bold))
+                    }
+                    .foregroundColor(.safetAmber)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .overlay(Capsule().stroke(Color.safetAmber.opacity(0.7), lineWidth: 1))
+                }
+            }
             Button("SIGN OUT") { session.logout() }
                 .font(.system(size: 10, weight: .bold))
                 .foregroundColor(.safetTextDim)
