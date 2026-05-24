@@ -70,7 +70,11 @@ final class VoiceTransport {
 
     private func openSocket() {
         var components = URLComponents(url: baseURL.appendingPathComponent("v1/voice/stream"), resolvingAgainstBaseURL: false)
-        components?.scheme = (components?.scheme == "http") ? "ws" : "wss"
+        // Read the current scheme into a local first — Swift's exclusivity
+        // checker rejects reading and writing `components` in the same
+        // expression (overlapping access to a mutable optional).
+        let currentScheme = components?.scheme
+        components?.scheme = (currentScheme == "http") ? "ws" : "wss"
         components?.queryItems = [URLQueryItem(name: "token", value: token)]
         guard let url = components?.url else { return }
 
