@@ -1,10 +1,14 @@
 name: Android APK
 
-# Builds a signed release APK and publishes it to the server's OTA endpoint so the
-# sideloaded fleet self-updates. Runs whenever the Android app changes on main.
+# Builds a signed release APK on every push to main / android-app/ PR. The OTA
+# publish step is gated to `push` events only so PRs never deploy to the fleet.
 on:
   push:
     branches: [main]
+    paths:
+      - 'android-app/**'
+      - '.github/workflows/android-apk.yml'
+  pull_request:
     paths:
       - 'android-app/**'
       - '.github/workflows/android-apk.yml'
@@ -101,6 +105,8 @@ jobs:
           retention-days: 90
 
       - name: Publish to OTA endpoint
+        # PR builds skip the publish so a half-baked PR never lands on the fleet's handsets.
+        if: github.event_name == 'push'
         env:
           PUBLISH_URL: ${{ secrets.APP_UPDATE_PUBLISH_URL }}
           PUBLISH_TOKEN: ${{ secrets.APP_UPDATE_PUBLISH_TOKEN }}
