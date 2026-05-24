@@ -32,21 +32,21 @@ const SURFACES: Surface[] = [
     tag: "Android handset",
     name: "safeT Mobile",
     blurb:
-      "A rugged APX-style radio app for the field. Hardware PTT key, instant channel changes, and a one-press emergency button — on the phones your team already carries.",
+      "An APX-style radio app for the field, running on the Android phones your team already carries — or on rugged Inrico IRC590 and TM7 handsets with real hardware PTT, side keys, and a dedicated emergency button.",
     Icon: IconRadio,
   },
   {
     tag: "Dispatch console",
     name: "safeT Command",
     blurb:
-      "The web console where dispatch lives: monitor every channel, see units on a live map, tone-out pages, and review the full transmission log.",
+      "The web console where dispatch lives: monitor every channel, see units on a live map, tone-out pages, scan with priority, and review the full transmission log with searchable transcripts.",
     Icon: IconBeacon,
   },
   {
-    tag: "Admin panel",
+    tag: "Admin & Platform",
     name: "safeT Control",
     blurb:
-      "Provision accounts, build channel plans, assign units, and audit every action — all from one secured admin surface.",
+      "Provision accounts, build channel plans, assign units, and audit every action. Multi-agency parent organizations get the safeT Platform owner portal to stand up and manage tenants from one place.",
     Icon: IconShield,
   },
 ];
@@ -60,12 +60,12 @@ interface Feature {
 const FEATURES: Feature[] = [
   {
     name: "Instant push-to-talk",
-    blurb: "Sub-second voice across your whole agency. Talkgroups, scan, and priority channels work the way radio teams expect.",
+    blurb: "Sub-second voice across your whole agency. Talkgroups work the way radio teams expect, with per-channel talk-priority enforced server-side.",
     Icon: IconBolt,
   },
   {
     name: "Encrypted voice",
-    blurb: "Every transmission is carried over an authenticated, encrypted relay. Per-account sign-in — no shared passwords.",
+    blurb: "Every transmission is carried over an authenticated, encrypted relay. Per-account sign-in — and the newest sign-in wins, so a lost phone can't keep listening.",
     Icon: IconLock,
   },
   {
@@ -75,18 +75,33 @@ const FEATURES: Feature[] = [
   },
   {
     name: "Emergency alerts",
-    blurb: "A dedicated emergency button pushes a priority alert to dispatch and clears the channel for the unit in trouble.",
+    blurb: "A dedicated emergency button pushes a priority alert to dispatch, flashes the channel for every radio, and clears the air for the unit in trouble.",
     Icon: IconAlertTriangle,
   },
   {
-    name: "Recording & transcripts",
-    blurb: "Calls are recorded and transcribed automatically, so the transmission log is searchable for review and reporting.",
+    name: "Searchable call history",
+    blurb: "Calls are recorded and auto-transcribed. Replay any past message from the handset, and search the full transmission log from the console.",
     Icon: IconWaveform,
   },
   {
     name: "Dispatch tone-outs",
     blurb: "Page a channel with routine, priority, or status tones — the same workflow your dispatchers run on a real console.",
     Icon: IconHeadphones,
+  },
+  {
+    name: "Scan with priority",
+    blurb: "Monitor a watch-list of channels at once. Active traffic latches in, priority channels break through, and dispatch can see who's RX-ing in real time.",
+    Icon: IconBeacon,
+  },
+  {
+    name: "Hardware radio handsets",
+    blurb: "Run the same app on Inrico IRC590 (ultracompact) and TM7 / TM7 Plus radios — hardware PTT, side keys, volume knob, and Bluetooth headset all wired in.",
+    Icon: IconRadio,
+  },
+  {
+    name: "Live config & soft radio",
+    blurb: "Update channels, accounts, or talk-priority from the admin panel and the change pushes to every radio live — no reboot. Radio-role members get a browser-based soft radio with no app to install.",
+    Icon: IconShield,
   },
 ];
 
@@ -110,7 +125,7 @@ const STEPS: Step[] = [
   {
     n: "03",
     title: "Deploy to the field",
-    blurb: "Install the safeT Mobile APK on your Android devices. Each member signs in with their own account — no radio hardware to buy.",
+    blurb: "Sideload the signed safeT Mobile APK onto Android phones or Inrico IRC590 / TM7 handsets. Office staff can sign in on a browser as a soft radio — no app install required.",
   },
   {
     n: "04",
@@ -139,7 +154,8 @@ const PLANS: Plan[] = [
     features: [
       "Up to 25 radios",
       "Unlimited talkgroups",
-      "safeT Mobile + Command",
+      "Runs on Android phones or IRC590 / TM7 handsets",
+      "Scan with priority channels",
       "Emergency button & alerts",
       "30-day call recording",
       "Email support",
@@ -156,8 +172,9 @@ const PLANS: Plan[] = [
       "Up to 250 radios",
       "Everything in Patrol",
       "Live GPS unit mapping",
-      "Recording + auto-transcripts",
+      "Auto-transcribed call replay",
       "1-year searchable call history",
+      "Browser-based soft radio for office staff",
       "Priority support & onboarding",
     ],
     cta: "Request access",
@@ -168,10 +185,11 @@ const PLANS: Plan[] = [
     name: "Agency",
     price: "Custom",
     unit: "volume pricing",
-    blurb: "For multi-site agencies and enterprise security operations with compliance needs.",
+    blurb: "For multi-site agencies and parent organizations with compliance and tenancy needs.",
     features: [
       "Unlimited radios",
       "Everything in Department",
+      "safeT Platform multi-agency portal",
       "SSO & dedicated infrastructure",
       "Audit log exports & retention controls",
       "Uptime SLA",
@@ -201,6 +219,7 @@ export function LandingPage() {
             <a href="#features">Features</a>
             <a href="#how">How it works</a>
             <a href="#pricing">Pricing</a>
+            <Link to="/updates">Updates</Link>
           </nav>
           <div className="lp-nav-cta">
             {user ? (
@@ -232,9 +251,10 @@ export function LandingPage() {
                 Your whole team on one channel — <span className="lp-accent">instantly.</span>
               </h1>
               <p className="lp-lede">
-                safeT PTT turns the Android phones your officers already carry into a private,
-                encrypted radio network. Dispatch monitors every channel, sees units on a live map,
-                and answers emergencies from one console.
+                safeT PTT turns Android phones — or rugged Inrico IRC590 and TM7 handsets — into a
+                private, encrypted radio network. Dispatch monitors every channel, sees units on a
+                live map, and answers emergencies from one console. Office staff jump in from any
+                browser as a soft radio.
               </p>
               <div className="lp-hero-actions">
                 <a href="#pricing" className="lp-btn lp-btn-primary lp-btn-lg">
@@ -431,6 +451,7 @@ export function LandingPage() {
             <a href="#platform">Platform</a>
             <a href="#features">Features</a>
             <a href="#pricing">Pricing</a>
+            <Link to="/updates">Updates</Link>
             <Link to="/legal/terms">Terms</Link>
             <Link to="/legal/privacy">Privacy</Link>
             <Link to="/legal/eula">EULA</Link>

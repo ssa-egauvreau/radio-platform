@@ -1,27 +1,53 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useAuth } from "./auth";
 import { AGENCY_LOGO_CHANGED_EVENT, getToken } from "./api";
+import { consoleNavFromPath, consoleNavLabel } from "./consoleNav";
 import { ThemeToggle } from "./ThemeToggle";
-import { IconRadio, IconShield, IconLogOut, IconWaveform, SafetMark } from "./icons";
+import {
+  IconAi,
+  IconDashboard,
+  IconLogOut,
+  IconMobile,
+  IconSettings,
+  IconShield,
+  IconWaveform,
+  SafetMark,
+} from "./icons";
 
-/** Shared top menu bar with Command / Bridges / Control / Platform navigation. */
-export function Topbar({ section }: { section: "console" | "admin" | "owner" | "bridges" }) {
+/** Shared top menu bar with Mission Control / Bridges / Settings / Platform navigation. */
+export function Topbar({
+  section,
+}: {
+  section: "console" | "admin" | "owner" | "bridges" | "radio";
+}) {
   const { user, logout } = useAuth();
+  const location = useLocation();
+  const consoleNav = section === "console" ? consoleNavFromPath(location.pathname) : null;
+  const [menuOpen, setMenuOpen] = useState(false);
+
   const sectionLabel =
     section === "admin"
-      ? "Control"
+      ? "Settings"
       : section === "owner"
         ? "Platform"
         : section === "bridges"
           ? "Bridges"
-          : "Command";
+          : section === "radio"
+            ? "Mobile"
+            : consoleNav
+              ? consoleNavLabel(consoleNav)
+              : "Mission Control";
+  const isRadioRole = user?.role === "radio";
+
+  function navTabClass(active: boolean): string {
+    return active ? "nav-tab active" : "nav-tab";
+  }
 
   const [agencyLogo, setAgencyLogo] = useState<string | null>(null);
   const [logoNonce, setLogoNonce] = useState(0);
   const agencyId = user?.agencyId ?? null;
 
-  // Re-fetch the logo when the Branding tab uploads or removes one this session.
   useEffect(() => {
     const bump = () => setLogoNonce((n) => n + 1);
     window.addEventListener(AGENCY_LOGO_CHANGED_EVENT, bump);
@@ -55,6 +81,11 @@ export function Topbar({ section }: { section: "console" | "admin" | "owner" | "
     };
   }, [agencyId, logoNonce]);
 
+  // Close the mobile hamburger menu after navigating.
+  useEffect(() => {
+    setMenuOpen(false);
+  }, [location.pathname]);
+
   return (
     <header className="topbar">
       <div className="brand">
@@ -64,28 +95,70 @@ export function Topbar({ section }: { section: "console" | "admin" | "owner" | "
         </span>
         <span className="brand-section">{sectionLabel}</span>
       </div>
-      <nav className="topnav">
+      <button
+        type="button"
+        className="topbar-hamburger"
+        aria-label={menuOpen ? "Close menu" : "Open menu"}
+        aria-expanded={menuOpen}
+        onClick={() => setMenuOpen((open) => !open)}
+      >
+        {menuOpen ? "✕" : "☰"}
+      </button>
+      <div className={`topbar-menu${menuOpen ? " open" : ""}`}>
+      <nav className="topnav" onClick={() => setMenuOpen(false)}>
         {section !== "owner" && (
           <>
-            <Link className={section === "console" ? "nav-tab active" : "nav-tab"} to="/console">
-              <IconRadio size={15} /> Command
-            </Link>
-            <Link className={section === "bridges" ? "nav-tab active" : "nav-tab"} to="/bridges">
-              <IconWaveform size={15} /> Bridges
-            </Link>
-            {user?.role === "admin" && (
-              <Link className={section === "admin" ? "nav-tab active" : "nav-tab"} to="/admin">
-                <IconShield size={15} /> Control
+            {isRadioRole ? (
+              <Link className={navTabClass(section === "radio")} to="/radio">
+                <IconMobile size={15} /> Mobile
               </Link>
+            ) : (
+              <>
+                <Link
+                  className={navTabClass(section === "console" && consoleNav === "mission")}
+                  to="/console"
+                >
+                  <IconShield size={15} /> Mission Control
+                </Link>
+                <Link
+                  className={navTabClass(section === "console" && consoleNav === "dashboard")}
+                  to="/console/dashboard"
+                >
+                  <IconDashboard size={15} /> Dashboard
+                </Link>
+                <Link
+                  className={navTabClass(section === "console" && consoleNav === "ai-activity")}
+                  to="/console/ai-activity"
+                >
+                  <IconAi size={15} /> AI Log
+                </Link>
+                <Link className={navTabClass(section === "bridges")} to="/bridges">
+                  <IconWaveform size={15} /> Bridges
+                </Link>
+                <Link className={navTabClass(section === "radio")} to="/radio">
+                  <IconMobile size={15} /> Mobile
+                </Link>
+                {user?.role === "admin" && (
+                  <Link className={navTabClass(section === "admin")} to="/admin">
+                    <IconSettings size={15} /> Settings
+                  </Link>
+                )}
+              </>
             )}
           </>
         )}
       </nav>
       <div className="who">
         {user?.agencyName && (
-          <span className="agency-id" title={`Agency — ${user.agencyName}`}>
-            {agencyLogo && <img className="agency-logo" src={agencyLogo} alt="" />}
-            <span className="agency-name">{user.agencyName}</span>
+          <span
+            className={`agency-id${agencyLogo ? " has-logo" : ""}`}
+            title={`Agency — ${user.agencyName}`}
+          >
+            {agencyLogo ? (
+              <img className="agency-logo" src={agencyLogo} alt={user.agencyName} />
+            ) : (
+              <span className="agency-name">{user.agencyName}</span>
+            )}
           </span>
         )}
         <span className="role-chip">{user?.role}</span>
@@ -94,6 +167,7 @@ export function Topbar({ section }: { section: "console" | "admin" | "owner" | "
         <button className="btn sm icon-btn" onClick={logout}>
           <IconLogOut size={14} /> Sign out
         </button>
+      </div>
       </div>
     </header>
   );

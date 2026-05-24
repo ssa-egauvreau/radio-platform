@@ -14,6 +14,8 @@ export interface BridgeRunnerCallbacks {
   onKeyed: (keyed: boolean) => void;
   /** Inbound channel audio present — only meaningful for a bidirectional bridge. */
   onReceiving: (receiving: boolean) => void;
+  /** Smoothed input level (0–1) of the captured device — drives the audio meter. */
+  onLevel?: (level: number) => void;
 }
 
 export interface BridgeRunnerConfig {
@@ -76,6 +78,7 @@ export class BridgeRunnerClient {
   private playHead = 0;
 
   private lastVoxMs = 0;
+  private meterLevel = 0;
   private keyed = false;
   private lastInboundMs = 0;
   private receiving = false;
@@ -119,14 +122,26 @@ export class BridgeRunnerClient {
       return;
     }
 
+    // Connecting to the relay is the only retryable startup step: a socket failure already set a
+    // "closed" (ws.onerror) and a relay rejection a terminal "error" (handleControl), so just tear
+    // down — a server redeploy stays retryable and the runner row reconnects on its own.
     try {
       await this.openSocket();
+    } catch {
+      this.stop();
+      return;
+    }
+
+    // Local audio init, by contrast, is a non-transient fault (no input device, worklet/codec
+    // failure). Surface it as a terminal "error" so it shows a fixable problem instead of looping
+    // reconnect attempts forever as if the server were down.
+    try {
       await this.startCapture();
       if (this.config.bidirectional) {
         await this.startPlayback();
       }
     } catch {
-      this.setState("error", "Bridge runner failed to start.");
+      this.setState("error", "Could not start audio capture/playback.");
       this.stop();
       return;
     }
@@ -161,8 +176,12 @@ export class BridgeRunnerClient {
         }
       };
       ws.onerror = () => {
+        // A socket-level failure (server redeploying, network blip) is transient: surface it as a
+        // retryable "closed" so the runner row reconnects on its own instead of giving up. A fatal
+        // rejection (bad bridge config / auth) arrives as a relay control "error" message and is
+        // handled in handleControl, not here.
         if (this.state !== "closed" && this.state !== "error") {
-          this.setState("error", "Voice connection error.");
+          this.setState("closed", "Voice connection lost — reconnecting…");
         }
         reject(new Error("socket"));
       };
@@ -194,6 +213,11 @@ export class BridgeRunnerClient {
 
   private async startCapture(): Promise<void> {
     this.capCtx = new AudioContext({ sampleRate: TARGET_RATE });
+    // After a page reload the context can come up suspended (autoplay policy); a suspended context
+    // never pulls the capture worklet, so resume it so an auto-resumed bridge actually captures.
+    if (this.capCtx.state === "suspended") {
+      await this.capCtx.resume().catch(() => undefined);
+    }
     await this.capCtx.audioWorklet.addModule(CAPTURE_WORKLET_URL);
     this.capSource = this.capCtx.createMediaStreamSource(this.inputStream!);
     this.capNode = new AudioWorkletNode(this.capCtx, "pcm-capture");
@@ -214,7 +238,11 @@ export class BridgeRunnerClient {
   private onCaptureFrame(buffer: ArrayBuffer): void {
     const pcm = new Int16Array(buffer);
     const now = Date.now();
-    if (frameRms(pcm) >= this.config.voxThreshold) {
+    const rms = frameRms(pcm);
+    // Fast-attack, slow-decay smoothing keeps the input meter steady to read.
+    this.meterLevel = Math.max(rms, this.meterLevel * 0.8);
+    this.callbacks.onLevel?.(this.meterLevel);
+    if (rms >= this.config.voxThreshold) {
       this.lastVoxMs = now;
     }
     const open = this.lastVoxMs !== 0 && now - this.lastVoxMs < this.config.voxHangMs;
@@ -335,7 +363,10 @@ export class BridgeRunnerClient {
     }
     this.keyed = false;
     this.receiving = false;
-    if (this.state !== "error") {
+    // Don't re-announce a state we're already in: stop() can be called from inside the onState
+    // callback (the runner row releases the dying runner on "closed"), and re-emitting would
+    // re-enter that handler and reschedule the reconnect.
+    if (this.state !== "error" && this.state !== "closed") {
       this.setState("closed");
     }
   }

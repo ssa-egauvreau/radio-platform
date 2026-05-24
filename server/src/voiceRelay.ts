@@ -26,15 +26,34 @@ import { normalizedChannel } from "./presence.js";
 import { verifyToken, type AuthUser } from "./auth.js";
 import { getPool } from "./db.js";
 import {
+  setAiDispatchChannelCached,
+  isAiDispatchChannelCached,
+} from "./aiDispatch/channelCache.js";
+import {
   getAgencyById,
   getBridgeById,
   getChannelByName,
   getMembership,
   getSimulcastByName,
+  getUserById,
+  isChannelAiDispatchEnabled,
   resolveAgencyByKey,
   type Permission,
 } from "./store.js";
-import { recordFrame } from "./recorder.js";
+import { recordFrame, type FrameAttribution } from "./recorder.js";
+
+/** Sideband PCM for transmission log / AI — not broadcast (pairs with on-air IMBE). */
+const LISTEN_PCM_MAGIC_0 = 0xf6;
+const LISTEN_PCM_MAGIC_1 = 0xac;
+
+function isListenPcmFrame(payload: Buffer): boolean {
+  return payload.length >= 4 && payload[0] === LISTEN_PCM_MAGIC_0 && payload[1] === LISTEN_PCM_MAGIC_1;
+}
+
+function listenPcmBody(payload: Buffer): Buffer {
+  return payload.subarray(2);
+}
+import { getCachedAuth, setCachedAuth } from "./sessionCache.js";
 
 export const VOICE_WS_PATH = "/v1/voice/stream";
 
@@ -63,6 +82,8 @@ type Identity =
       bridgeName: string;
       /** When set, the bridge may only key this channel (a remote runner). */
       forcedChannel?: string;
+      /** Set for desktop `runBridge` sockets authenticated with a user token. */
+      ownerUserId?: number;
     };
 
 /** One member channel a simulcast transmission fans out to. */
@@ -91,14 +112,33 @@ interface ClientMeta {
   yields: boolean;
   /** Last time a "channel busy" notice was sent to this client (throttling). */
   lastBusyMs: number;
+  /**
+   * Until this timestamp, binary frames are 10-33 marker tones: relay to listeners
+   * but do not claim `/v1/air` (so handsets do not show "dispatcher transmitting").
+   */
+  markerToneUntilMs: number;
+  /** When true, uplink should be clear PCM so AI dispatch / Whisper can understand speech. */
+  aiDispatchListenPcm: boolean;
+  /** Always true after join — handsets/console uplink PCM for transmission log transcription. */
+  recordListenPcm: boolean;
+  /** Cached from the users table for console accounts (roster / live control). */
+  deviceType: string | null;
 }
 
 /** Throttle for the per-client "channel busy" notice. */
 const BUSY_NOTICE_MS = 750;
 
+/**
+ * Peer-buffer high-water mark before voice fan-out skips that peer. ~64 KB is well over a few
+ * seconds of voice frames (IMBE is ~13 B/20ms; PCM mono 16k is 640 B/20ms) so a healthy peer
+ * never trips it. A backed-up consumer gets dropped frames instead of holding back the channel.
+ */
+const VOICE_PEER_BUFFER_LIMIT_BYTES = 64 * 1024;
+
 type VoiceSlot = {
   ws: WebSocket;
   unitUpper: string;
+  displayName: string | null;
   lastPcmMs: number;
   priority: boolean;
   yields: boolean;
@@ -107,21 +147,36 @@ type VoiceSlot = {
 /** Who is currently keyed, keyed by `agency:channel` so tenants stay isolated. */
 const voiceAirByChannel = new Map<string, VoiceSlot>();
 
+/** Auto-derived activity status for a roster member. */
+export type PresenceStatus = "idle" | "transmitting" | "driving" | "emergency";
+
 export interface RosterMember {
   unit_id: string;
   display_name: string | null;
   kind: "account" | "legacy" | "bridge";
   /** Client platform reported on join: android, ios, web, desktop, bridge, or unknown. */
   client: string;
+  /** Account device category (unit_radio, phone, dispatch_console, …) when known. */
+  device_type?: string | null;
   connected_ms: number;
+  /** Derived from live signals (talker / GPS speed / active emergency); set by the roster route. */
+  status?: PresenceStatus;
+  /**
+   * True when Live Channel Control must not move this unit (dispatch console on
+   * multiple channels, or explicit dispatch_console device type).
+   */
+  move_locked?: boolean;
 }
 
 interface RosterRecord {
   channelKey: string;
+  /** Display name of the channel this socket joined (for the live-control admin tree). */
+  channelName: string;
   unitId: string;
   displayName: string | null;
   kind: "account" | "legacy" | "bridge";
   client: string;
+  deviceType: string | null;
   joinedAt: number;
 }
 
@@ -138,6 +193,42 @@ const voiceRoster = new Map<WebSocket, RosterRecord>();
 
 /** Every open voice socket and its connection metadata (the relay is a singleton). */
 const clientMeta = new Map<WebSocket, ClientMeta>();
+
+function frameAttribution(meta: ClientMeta): FrameAttribution {
+  return {
+    agencyId: meta.agencyId,
+    channelNorm: meta.channelNorm!,
+    channelName: meta.channelName,
+    channelId: meta.channelId,
+    userId: meta.userId,
+    unitId: meta.unitId,
+    displayName: meta.displayName,
+    aiDispatchListenPcm: meta.aiDispatchListenPcm,
+    recordListenPcm: meta.recordListenPcm,
+  };
+}
+
+/** Tell connected voice clients on a channel to uplink clear PCM (AI dispatch listening). */
+export function notifyChannelAiDispatchListenPcm(
+  agencyId: number,
+  channelName: string,
+  enabled: boolean,
+): void {
+  setAiDispatchChannelCached(agencyId, channelName, enabled);
+  const chNorm = normalizedChannel(channelName);
+  const key = channelKey(agencyId, chNorm);
+  for (const [ws, meta] of clientMeta) {
+    if (meta.channelKey !== key) {
+      continue;
+    }
+    meta.aiDispatchListenPcm = enabled;
+    try {
+      ws.send(JSON.stringify({ type: "ai_dispatch_pcm", enabled }));
+    } catch {
+      /* socket closing */
+    }
+  }
+}
 
 /** Composite channel key namespacing a normalized channel under its agency. */
 function channelKey(agencyId: number, channelNorm: string): string {
@@ -157,6 +248,49 @@ export function dropAgencyVoiceConnections(agencyId: number): number {
     }
     try {
       ws.close(1008, "agency access revoked");
+    } catch {
+      /* ignore a socket already gone */
+    }
+    closed++;
+  }
+  return closed;
+}
+
+/**
+ * Closes every open voice socket with a "going away" code (1001). Called from the SIGTERM
+ * handler so a Railway redeploy doesn't slam the underlying TCP — clients see a clean close and
+ * trigger their own reconnect logic instead of a mid-frame audio drop.
+ */
+export function closeAllVoiceConnections(): number {
+  let closed = 0;
+  for (const ws of clientMeta.keys()) {
+    try {
+      ws.close(1001, "server shutting down");
+    } catch {
+      /* already gone */
+    }
+    closed++;
+  }
+  return closed;
+}
+
+/**
+ * Closes every voice socket tied to one user account. Called from the login
+ * handler so a fresh sign-in immediately silences any prior browser session and
+ * any desktop `runBridge` runner for the same account. Key-authenticated
+ * handsets and the in-process loopback bridge worker are not user-bound.
+ */
+export function dropUserVoiceConnections(userId: number): number {
+  let closed = 0;
+  for (const [ws, meta] of clientMeta) {
+    const ownedByUser =
+      (meta.identity.kind === "account" && meta.identity.user.id === userId) ||
+      (meta.identity.kind === "bridge" &&
+        meta.identity.ownerUserId != null &&
+        meta.identity.ownerUserId === userId);
+    if (!ownedByUser) continue;
+    try {
+      ws.close(1008, "session superseded");
     } catch {
       /* ignore a socket already gone */
     }
@@ -198,6 +332,7 @@ export function listChannelRoster(agencyId: number, channelRaw: unknown): Roster
         display_name: record.displayName,
         kind: record.kind,
         client: record.client,
+        device_type: record.deviceType,
         connected_ms: now - record.joinedAt,
       });
     }
@@ -206,7 +341,152 @@ export function listChannelRoster(agencyId: number, channelRaw: unknown): Roster
   return members;
 }
 
+/** One channel and the members currently connected to it. */
+export interface AgencyChannelRoster {
+  channel: string;
+  members: RosterMember[];
+}
+
+/**
+ * Every channel in the agency that has at least one connected member, with that
+ * member list — drives the Live Channel Control admin tree.
+ */
+export function listAgencyRosters(agencyId: number): AgencyChannelRoster[] {
+  const prefix = `${agencyId} `;
+  const now = Date.now();
+  const byChannel = new Map<string, RosterMember[]>();
+  for (const record of voiceRoster.values()) {
+    if (!record.channelKey.startsWith(prefix)) {
+      continue;
+    }
+    const list = byChannel.get(record.channelName) ?? [];
+    list.push({
+      unit_id: record.unitId,
+      display_name: record.displayName,
+      kind: record.kind,
+      client: record.client,
+      device_type: record.deviceType,
+      connected_ms: now - record.joinedAt,
+    });
+    byChannel.set(record.channelName, list);
+  }
+  const counts = unitChannelCounts(agencyId);
+  return [...byChannel.entries()]
+    .map(([channel, members]) => ({
+      channel,
+      members: withRosterMoveLock(
+        members.sort((a, b) => b.connected_ms - a.connected_ms),
+        counts,
+      ),
+    }))
+    .sort((a, b) => a.channel.localeCompare(b.channel));
+}
+
+/** How many distinct voice channels each unit is connected to (live control). */
+export function unitChannelCounts(agencyId: number): Map<string, number> {
+  const prefix = `${agencyId} `;
+  const byUnit = new Map<string, Set<string>>();
+  for (const record of voiceRoster.values()) {
+    if (!record.channelKey.startsWith(prefix)) {
+      continue;
+    }
+    const unit = record.unitId.toUpperCase();
+    const set = byUnit.get(unit) ?? new Set<string>();
+    set.add(record.channelName);
+    byUnit.set(unit, set);
+  }
+  const counts = new Map<string, number>();
+  for (const [unit, channels] of byUnit) {
+    counts.set(unit, channels.size);
+  }
+  return counts;
+}
+
+/** Marks console operators who must not be live-moved (multi-channel dispatch). */
+export function withRosterMoveLock(
+  members: RosterMember[],
+  counts: Map<string, number>,
+): RosterMember[] {
+  return members.map((m) => {
+    const n = counts.get(m.unit_id.toUpperCase()) ?? 0;
+    const locked =
+      m.kind === "account" &&
+      (m.device_type === "dispatch_console" || n > 1);
+    return locked ? { ...m, move_locked: true } : m;
+  });
+}
+
+/** True when live channel control must not relocate this unit. */
+export function isUnitMoveLocked(agencyId: number, unitIdRaw: string): boolean {
+  const unit = unitIdRaw.trim().toUpperCase();
+  if (!unit) {
+    return false;
+  }
+  const counts = unitChannelCounts(agencyId);
+  if ((counts.get(unit) ?? 0) > 1) {
+    return true;
+  }
+  const prefix = `${agencyId} `;
+  for (const record of voiceRoster.values()) {
+    if (!record.channelKey.startsWith(prefix) || record.unitId.toUpperCase() !== unit) {
+      continue;
+    }
+    if (record.kind === "account" && record.deviceType === "dispatch_console") {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Live Channel Control: pushes a "move to channel" command to every open socket
+ * belonging to agency+unit. The client re-joins the target channel on receipt.
+ * Returns the number of sockets the command reached.
+ */
+export function sendMoveCommand(
+  agencyId: number,
+  unitIdRaw: string,
+  toChannel: string,
+  byName: string | null,
+  fromChannel: string | null,
+): number {
+  const unit = unitIdRaw.trim().toUpperCase();
+  if (!unit) {
+    return 0;
+  }
+  const payload = JSON.stringify({
+    type: "move",
+    channel: toChannel,
+    by: byName,
+    from: fromChannel,
+  });
+  let reached = 0;
+  for (const [ws, meta] of clientMeta) {
+    if (meta.agencyId !== agencyId || meta.unitId !== unit) {
+      continue;
+    }
+    if (ws.readyState !== WebSocket.OPEN) {
+      continue;
+    }
+    try {
+      ws.send(payload);
+      reached += 1;
+    } catch {
+      /* stale socket — ignore */
+    }
+  }
+  return reached;
+}
+
 export function peekVoiceTransmittingUnit(agencyId: number, channelRaw: unknown): string | null {
+  return peekVoiceTransmittingTalker(agencyId, channelRaw)?.unit_id ?? null;
+}
+
+/** Live transmitter on a channel (for handset HUD / air probe). */
+export function peekVoiceTransmittingTalker(
+  agencyId: number,
+  channelRaw: unknown,
+): { unit_id: string; display_name: string | null } | null {
   const chNorm = normalizedChannel(channelRaw);
   if (!chNorm || chNorm === "----") {
     return null;
@@ -220,7 +500,7 @@ export function peekVoiceTransmittingUnit(agencyId: number, channelRaw: unknown)
     voiceAirByChannel.delete(key);
     return null;
   }
-  return slot.unitUpper;
+  return { unit_id: slot.unitUpper, display_name: slot.displayName };
 }
 
 type AirClaim = { ok: true } | { ok: false; holder: string };
@@ -237,6 +517,7 @@ function claimAir(
   chanKey: string,
   ws: WebSocket,
   unitUpper: string,
+  displayName: string | null,
   priority: boolean,
   yields: boolean,
 ): AirClaim {
@@ -250,7 +531,14 @@ function claimAir(
     }
     // fall through and take over the channel.
   }
-  voiceAirByChannel.set(chanKey, { ws, unitUpper, lastPcmMs: now, priority, yields });
+  voiceAirByChannel.set(chanKey, {
+    ws,
+    unitUpper,
+    displayName: displayName?.trim() || null,
+    lastPcmMs: now,
+    priority,
+    yields,
+  });
   return { ok: true };
 }
 
@@ -263,13 +551,80 @@ function releaseAir(ws: WebSocket): void {
   }
 }
 
+/**
+ * True when a *different* live connection currently holds the channel's air. Gates the clear-PCM
+ * record sideband: only the connection that actually holds the air (or a free/expired channel) is
+ * recorded. A unit that loses the half-duplex race must not have its sideband recorded — otherwise
+ * its mic both creates a phantom transmission (transcribed + answered by AI for audio nobody heard)
+ * and, because recordings key on agency+channel and finalize whenever the unit changes, repeatedly
+ * finalizes and fragments the real talker's in-progress recording.
+ *
+ * This deliberately keys off the *current* holder, not who could preempt it. claimAir only runs on
+ * the IMBE/voice path, and clients send the clear-PCM sideband just before their first IMBE frame,
+ * so a would-be preemptor has not actually taken the channel yet at sideband time. Recording it
+ * speculatively would reintroduce the phantom/fragmentation behavior if that IMBE is delayed or
+ * never arrives. A real preemptor simply starts recording once its IMBE claims the air; the cost is
+ * at most one leading sideband frame (audio that was not yet on-air anyway).
+ */
+function channelAirBlocksRecord(chanKey: string, ws: WebSocket): boolean {
+  const slot = voiceAirByChannel.get(chanKey);
+  if (!slot) {
+    return false;
+  }
+  if (Date.now() - slot.lastPcmMs > VOICE_AIR_TTL_MS) {
+    return false;
+  }
+  return slot.ws !== ws;
+}
+
+/** A NAT or radio dropping a TCP connection without TCP RST/FIN leaves the WS "stuck" on our
+ *  side — heartbeat detects + drops these zombies fast. The interval matches typical NAT idle
+ *  timeouts (~60 s) without being chatty enough to drain handset battery noticeably. */
+const VOICE_WS_HEARTBEAT_MS = 30_000;
+
+interface HeartbeatWs extends WebSocket {
+  isAlive?: boolean;
+}
+
 export function attachVoiceRelay(
   server: HttpServer,
   options: { radioApiKey?: string },
 ): WebSocketServer {
   const requiredKey = options.radioApiKey?.trim();
 
-  const wss = new WebSocketServer({ noServer: true });
+  // Cap per-frame size to bound memory per connection. Voice frames are ~13 B IMBE or
+  // ~640 B/20ms PCM, but custom soundboard tone-outs (playCustomTone) send a whole decoded
+  // PCM clip as ONE frame: at 16 kHz mono int16, a 30-second clip is ~960 KB and a 4-minute
+  // clip from a 4 MB MP3 upload (TONE_OUT_AUDIO_MAX in apiRoutes.ts) can decode to ~8 MB.
+  // 8 MB covers every legitimate clip the agency-side TONE_OUT_AUDIO_MAX permits while still
+  // rejecting outright junk; the ws library's 100 MB default is too generous.
+  const wss = new WebSocketServer({ noServer: true, maxPayload: 8 * 1024 * 1024 });
+
+  /*
+   * Periodic ping; if a socket missed the previous round's pong, terminate it. The pong
+   * handler resets isAlive so any TCP that's still answering survives. wss.clients is the
+   * library-tracked set — using it directly avoids drift against our own clientMeta map.
+   */
+  const heartbeatInterval = setInterval(() => {
+    for (const raw of wss.clients) {
+      const ws = raw as HeartbeatWs;
+      if (ws.isAlive === false) {
+        try {
+          ws.terminate();
+        } catch {
+          /* already gone */
+        }
+        continue;
+      }
+      ws.isAlive = false;
+      try {
+        ws.ping();
+      } catch {
+        /* already closing */
+      }
+    }
+  }, VOICE_WS_HEARTBEAT_MS);
+  wss.on("close", () => clearInterval(heartbeatInterval));
 
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     void (async () => {
@@ -326,12 +681,75 @@ export function attachVoiceRelay(
             return;
           }
           // A token outlives its agency being disabled — reject the upgrade if so.
+          // Honor the 15 s sessionCache (same one the REST router uses) so a reconnect storm
+          // after a Railway redeploy doesn't fan dozens of pg lookups in parallel.
           if (getPool()) {
-            const agency = await getAgencyById(user.agencyId).catch(() => null);
-            if (!agency || agency.disabled) {
-              socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
-              socket.destroy();
-              return;
+            const cached = getCachedAuth(user.id);
+            if (cached) {
+              if (cached.userDisabled || cached.agencyDisabled) {
+                socket.write("HTTP/1.1 403 Forbidden\r\n\r\n");
+                socket.destroy();
+                return;
+              }
+              if (user.gen !== cached.tokenGeneration) {
+                socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+                socket.destroy();
+                return;
+              }
+            } else {
+              // Differentiate "the lookup returned null because the row is gone or disabled"
+              // (a definitive negative we want to cache so retries don't thrash pg) from
+              // "the lookup threw because pg is transiently unhappy" (must NOT be cached, or a
+              // single bad query would lock the user out for the next 15 s).
+              let lookupErrored = false;
+              const [agency, dbUser] = await Promise.all([
+                getAgencyById(user.agencyId).catch(() => {
+                  lookupErrored = true;
+                  return null;
+                }),
+                getUserById(user.id).catch(() => {
+                  lookupErrored = true;
+                  return null;
+                }),
+              ]);
+              const agencyDisabled = !agency || agency.disabled;
+              if (!dbUser || dbUser.disabled || agencyDisabled) {
+                if (!lookupErrored) {
+                  setCachedAuth(user.id, {
+                    tokenGeneration: dbUser?.token_generation ?? 0,
+                    userDisabled: !dbUser || !!dbUser.disabled,
+                    agencyDisabled,
+                  });
+                }
+                socket.write(
+                  agencyDisabled || (dbUser && dbUser.disabled)
+                    ? "HTTP/1.1 403 Forbidden\r\n\r\n"
+                    : "HTTP/1.1 401 Unauthorized\r\n\r\n",
+                );
+                socket.destroy();
+                return;
+              }
+              // Newest sign-in wins: reject a stale token here too so an auto-
+              // reconnecting browser cannot briefly resurrect its dropped socket.
+              if (user.gen !== dbUser.token_generation) {
+                if (!lookupErrored) {
+                  setCachedAuth(user.id, {
+                    tokenGeneration: dbUser.token_generation,
+                    userDisabled: false,
+                    agencyDisabled: false,
+                  });
+                }
+                socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
+                socket.destroy();
+                return;
+              }
+              if (!lookupErrored) {
+                setCachedAuth(user.id, {
+                  tokenGeneration: dbUser.token_generation,
+                  userDisabled: false,
+                  agencyDisabled: false,
+                });
+              }
             }
           }
           const runBridgeRaw = url.searchParams.get("runBridge");
@@ -356,6 +774,7 @@ export function attachVoiceRelay(
               yields: bridge.yield_to_units,
               bridgeName: bridge.name,
               forcedChannel: bridge.target_channel,
+              ownerUserId: user.id,
             };
           } else {
             identity = { kind: "account", user };
@@ -390,6 +809,10 @@ export function attachVoiceRelay(
             simulcastTargets: null,
             yields: identity.kind === "bridge" ? identity.yields : false,
             lastBusyMs: 0,
+            markerToneUntilMs: 0,
+            aiDispatchListenPcm: false,
+            recordListenPcm: true,
+            deviceType: null,
           });
           wss.emit("connection", ws, req);
         });
@@ -404,6 +827,12 @@ export function attachVoiceRelay(
       if (peer === from) continue;
       if (!meta.channelKey || meta.channelKey !== chanKey) continue;
       if (peer.readyState !== WebSocket.OPEN) continue;
+      // Drop frames for a peer whose send buffer has already piled up past the high-water mark.
+      // Without this, one slow consumer (saturated network, paused browser tab, etc.) would let
+      // ws queue frames unbounded, holding memory and adding latency for everyone else on the
+      // channel. Half-duplex voice tolerates drops fine — better a moment of silence on the slow
+      // peer than a backed-up relay on the channel.
+      if (peer.bufferedAmount > VOICE_PEER_BUFFER_LIMIT_BYTES) continue;
       try {
         peer.send(payload);
       } catch {
@@ -456,6 +885,14 @@ export function attachVoiceRelay(
       userId = user.id;
       displayName = user.displayName;
       unitId = (user.unitId ?? user.username).trim().toUpperCase() || "WEB";
+      if (meta.deviceType == null && getPool()) {
+        try {
+          const row = await getUserById(user.id, meta.agencyId);
+          meta.deviceType = row?.device_type ?? null;
+        } catch {
+          meta.deviceType = null;
+        }
+      }
       if (user.role === "admin" || user.role === "dispatcher") {
         permission = "talk_priority";
       } else {
@@ -464,17 +901,16 @@ export function attachVoiceRelay(
           return;
         }
         const membership = await getMembership(user.id, channelRow.id).catch(() => null);
-        if (!membership) {
-          ws.send(JSON.stringify({ type: "error", code: "not_a_member" }));
-          return;
-        }
-        permission = membership;
+        // Handsets list every agency channel; radios without an explicit assignment
+        // still need to join voice on their tuned channel (dispatchers use priority above).
+        permission = membership ?? "talk";
       }
     } else if (meta.identity.kind === "bridge") {
       // A radio bridge keys its admin-configured target like a unit. It may key
       // a simulcast channel too, so one ingest fans out to several channels.
       unitId = meta.identity.bridgeName.trim().toUpperCase() || "BRIDGE";
       displayName = meta.identity.bridgeName;
+      userId = meta.identity.ownerUserId ?? null;
       permission = "talk";
     } else {
       // A key-authenticated handset cannot key a simulcast channel.
@@ -511,21 +947,48 @@ export function attachVoiceRelay(
         })
       : null;
     meta.joined = true;
+    let aiListenPcm = isAiDispatchChannelCached(meta.agencyId, channelName);
+    if (!aiListenPcm && channelRow && !simulcast) {
+      try {
+        aiListenPcm = await isChannelAiDispatchEnabled(meta.agencyId, channelName);
+        setAiDispatchChannelCached(meta.agencyId, channelName, aiListenPcm);
+      } catch {
+        aiListenPcm = false;
+      }
+    }
+    meta.aiDispatchListenPcm = aiListenPcm;
+    meta.recordListenPcm = true;
     const prior = voiceRoster.get(ws);
     voiceRoster.set(ws, {
       channelKey: chanKey,
+      channelName,
       unitId,
       displayName,
       kind: meta.identity.kind,
       client: normalizeClient(json.client),
+      deviceType: meta.deviceType,
       // Keep the original join time across re-joins to the same channel
       // (Android re-sends `join` on the same socket periodically).
       joinedAt: prior && prior.channelKey === chanKey ? prior.joinedAt : Date.now(),
     });
-    ws.send(JSON.stringify({ type: "joined", channel: channelName, permission, unit_id: unitId }));
+    ws.send(
+      JSON.stringify({
+        type: "joined",
+        channel: channelName,
+        permission,
+        unit_id: unitId,
+        record_listen_pcm: true,
+        ...(aiListenPcm ? { ai_dispatch_listen_pcm: true } : {}),
+      }),
+    );
   }
 
   wss.on("connection", (ws: WebSocket) => {
+    // Mark alive at handshake so the next heartbeat tick doesn't immediately tear us down.
+    (ws as HeartbeatWs).isAlive = true;
+    ws.on("pong", () => {
+      (ws as HeartbeatWs).isAlive = true;
+    });
     ws.on("message", (raw: Buffer | ArrayBuffer | Buffer[], isBinary: boolean) => {
       const meta = clientMeta.get(ws);
       if (!meta) {
@@ -544,6 +1007,12 @@ export function attachVoiceRelay(
           };
           if (json.type === "join") {
             void handleJoin(ws, meta, json);
+            return;
+          }
+          // 10-33 marker: the next PCM frame(s) are alert audio only, not keyed voice.
+          if (json.type === "marker_tone") {
+            meta.markerToneUntilMs = Date.now() + 30_000;
+            return;
           }
           return;
         }
@@ -567,24 +1036,82 @@ export function attachVoiceRelay(
         if (payload.length === 0) {
           return;
         }
+
+        // Clear PCM sideband for recorder / AI — never broadcast or key the channel. Only record it
+        // for the connection that actually holds the air: a unit keying a busy channel loses the
+        // half-duplex race on-air, so recording its sideband would log a transmission nobody heard
+        // and fragment the real talker's recording (see channelAirBlocksRecord).
+        if (isListenPcmFrame(payload)) {
+          const pcm = listenPcmBody(payload);
+          if (pcm.length > 0) {
+            if (meta.simulcastTargets) {
+              for (const target of meta.simulcastTargets) {
+                if (channelAirBlocksRecord(target.channelKey, ws)) {
+                  continue;
+                }
+                recordFrame(
+                  {
+                    ...frameAttribution(meta),
+                    channelNorm: target.channelNorm,
+                    channelName: target.channelName,
+                    channelId: target.channelId,
+                    aiDispatchListenPcm: isAiDispatchChannelCached(meta.agencyId, target.channelName),
+                    recordListenPcm: true,
+                  },
+                  pcm,
+                );
+              }
+            } else if (meta.channelKey && !channelAirBlocksRecord(meta.channelKey, ws)) {
+              recordFrame(frameAttribution(meta), pcm);
+            }
+          }
+          return;
+        }
+
         const priority = meta.permission === "talk_priority";
+        const markerOnly = meta.markerToneUntilMs > Date.now();
+
+        // 10-33 marker tone — audibility without occupying the channel on /v1/air.
+        if (markerOnly) {
+          if (meta.simulcastTargets) {
+            for (const target of meta.simulcastTargets) {
+              broadcastExcept(ws, target.channelKey, payload);
+              recordFrame(
+                {
+                  ...frameAttribution(meta),
+                  channelNorm: target.channelNorm,
+                  channelName: target.channelName,
+                  channelId: target.channelId,
+                  aiDispatchListenPcm: isAiDispatchChannelCached(meta.agencyId, target.channelName),
+                  recordListenPcm: true,
+                },
+                payload,
+              );
+            }
+          } else if (meta.channelKey) {
+            broadcastExcept(ws, meta.channelKey, payload);
+            recordFrame(frameAttribution(meta), payload);
+          }
+          // One WebSocket binary message carries the whole marker clip.
+          meta.markerToneUntilMs = 0;
+          return;
+        }
 
         // Simulcast — fan the frame out to every member channel it can claim.
         if (meta.simulcastTargets) {
           for (const target of meta.simulcastTargets) {
-            if (!claimAir(target.channelKey, ws, meta.unitId, priority, meta.yields).ok) {
+            if (!claimAir(target.channelKey, ws, meta.unitId, meta.displayName, priority, meta.yields).ok) {
               continue; // a member channel held by someone else is simply skipped
             }
             broadcastExcept(ws, target.channelKey, payload);
             recordFrame(
               {
-                agencyId: meta.agencyId,
+                ...frameAttribution(meta),
                 channelNorm: target.channelNorm,
                 channelName: target.channelName,
                 channelId: target.channelId,
-                userId: meta.userId,
-                unitId: meta.unitId,
-                displayName: meta.displayName,
+                aiDispatchListenPcm: isAiDispatchChannelCached(meta.agencyId, target.channelName),
+                recordListenPcm: true,
               },
               payload,
             );
@@ -593,7 +1120,7 @@ export function attachVoiceRelay(
         }
 
         // Strict half-duplex — only the channel holder's audio goes through.
-        const claim = claimAir(meta.channelKey, ws, meta.unitId, priority, meta.yields);
+        const claim = claimAir(meta.channelKey, ws, meta.unitId, meta.displayName, priority, meta.yields);
         if (!claim.ok) {
           const now = Date.now();
           if (now - meta.lastBusyMs > BUSY_NOTICE_MS) {
@@ -607,18 +1134,7 @@ export function attachVoiceRelay(
           return;
         }
         broadcastExcept(ws, meta.channelKey, payload);
-        recordFrame(
-          {
-            agencyId: meta.agencyId,
-            channelNorm: meta.channelNorm,
-            channelName: meta.channelName,
-            channelId: meta.channelId,
-            userId: meta.userId,
-            unitId: meta.unitId,
-            displayName: meta.displayName,
-          },
-          payload,
-        );
+        recordFrame(frameAttribution(meta), payload);
       } catch (e) {
         console.warn("voiceRelay message handling error", e);
       }

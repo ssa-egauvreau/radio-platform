@@ -2,7 +2,9 @@
 // PCM, and (when permitted) captures the microphone and transmits.
 
 import { getToken, type Permission } from "../api";
+import { ImbeTxConditioner } from "./imbeTxConditioner";
 import { imbeDecode, imbeEncode, imbeReady, initImbe } from "./imbeVocoder";
+import { loadMarker1033Pcm } from "./marker1033";
 
 export type VoiceState = "idle" | "connecting" | "listening" | "transmitting" | "error" | "closed";
 
@@ -13,13 +15,29 @@ export interface VoiceCallbacks {
   onReceiving: (receiving: boolean) => void;
   /** Fired when the relay rejects our transmission because the channel is already held. */
   onBusy: (holderUnit: string | null) => void;
+  /** Fired when a dispatcher live-moves this unit to another channel (Live Channel Control). */
+  onMove?: (toChannel: string, by: string | null) => void;
 }
 
 const TARGET_RATE = 16000;
 const CAPTURE_WORKLET_URL = "/pcm-capture-worklet.js";
+/** Small FFT window — enough for a smooth RMS level, cheap to read every frame. */
+const WAVEFORM_FFT_SIZE = 256;
 // Two-byte marker prefixing P25 IMBE digital-voice frames the browser cannot decode.
 const IMBE_MAGIC_0 = 0xf5;
 const IMBE_MAGIC_1 = 0xab;
+/** Recording / AI sideband — relay stores PCM but does not broadcast it (pairs with IMBE on-air). */
+const LISTEN_PCM_MAGIC_0 = 0xf6;
+const LISTEN_PCM_MAGIC_1 = 0xac;
+
+function wrapListenPcm(pcm: ArrayBuffer): ArrayBuffer {
+  const out = new ArrayBuffer(2 + pcm.byteLength);
+  const view = new Uint8Array(out);
+  view[0] = LISTEN_PCM_MAGIC_0;
+  view[1] = LISTEN_PCM_MAGIC_1;
+  view.set(new Uint8Array(pcm), 2);
+  return out;
+}
 
 function voiceSocketUrl(): string {
   const token = getToken() ?? "";
@@ -41,6 +59,11 @@ const JOIN_ERRORS: Record<string, string> = {
 
 /** No inbound audio for this long means the channel is clear again. */
 const RX_GAP_MS = 500;
+
+/** Voice-fallback detector: at least this many raw PCM frames clustered within
+ *  CLEAR_RX_BURST_WINDOW_MS is treated as a sustained talk-spurt (not a marker/tone-out). */
+const CLEAR_RX_BURST_WINDOW_MS = 200;
+const CLEAR_RX_BURST_FRAMES = 4;
 
 const MARKER_INTERVAL_MS = 12000;
 const MARKER_BEEP_MS = 200;
@@ -164,9 +187,16 @@ export class VoiceChannelClient {
 
   private playCtx: AudioContext | null = null;
   private playGain: GainNode | null = null;
+  private audioOutputId = "";
   private playHead = 0;
   private volume = 1;
   private muted = false;
+
+  // Analyser taps for waveform visualisation: one on the inbound (RX) chain and
+  // one on the mic (TX) chain. Both are read on demand by getLevel().
+  private playAnalyser: AnalyserNode | null = null;
+  private capAnalyser: AnalyserNode | null = null;
+  private readonly levelBytes = new Uint8Array(WAVEFORM_FFT_SIZE);
 
   private micStream: MediaStream | null = null;
   private capCtx: AudioContext | null = null;
@@ -175,12 +205,27 @@ export class VoiceChannelClient {
   private transmitting = false;
   private markerTimer: number | null = null;
   private readonly localTones = new Set<AudioBufferSourceNode>();
+  /** Active looping soundboard tone-outs, keyed by tone-out id. */
+  private readonly customLoops = new Map<number, number>();
   private digitalTx = true;
+  /** Server asked for clear PCM uplink so AI dispatch can transcribe speech. */
+  private aiDispatchListenPcm = false;
+  /** Server wants clear PCM for the transmission log (all channels). */
+  private recordListenPcm = false;
+  private readonly txConditioner = new ImbeTxConditioner();
   private gestureUnbind: (() => void) | null = null;
 
   private lastInboundMs = 0;
   private receiving = false;
   private rxWatchdog: number | null = null;
+  /** One-shot warning when our own uplink falls back from IMBE to raw PCM. */
+  private warnedClearTx = false;
+  /** Already warned once that a peer is shipping continuous raw PCM (voice fallback). */
+  private warnedClearRx = false;
+  /** Timestamps of recent raw PCM frames received — used to distinguish a sustained
+   *  voice talk-spurt (many frames in quick succession) from a one-shot marker tone or
+   *  tone-out (a single big PCM message). Only the warn-burst window of samples is kept. */
+  private clearRxFrameTimes: number[] = [];
 
   constructor(channelName: string, callbacks: VoiceCallbacks) {
     this.channelName = channelName;
@@ -205,6 +250,20 @@ export class VoiceChannelClient {
     this.digitalTx = on;
   }
 
+  /** Also uplink clear PCM for AI dispatch (sideband; on-air may stay IMBE). */
+  setAiDispatchListenPcm(on: boolean): void {
+    this.aiDispatchListenPcm = on;
+  }
+
+  /** Also uplink clear PCM for transmission log / Whisper (sideband; on-air may stay IMBE). */
+  setRecordListenPcm(on: boolean): void {
+    this.recordListenPcm = on;
+  }
+
+  private listenPcmSidebandRequired(): boolean {
+    return this.aiDispatchListenPcm || this.recordListenPcm;
+  }
+
   /** Sets channel listen volume (0–1). Takes effect immediately and on next connect. */
   setVolume(volume: number): void {
     this.volume = Math.min(Math.max(volume, 0), 1);
@@ -221,6 +280,24 @@ export class VoiceChannelClient {
     }
   }
 
+  /** Route this channel's listen audio to a specific output device (headset, speakers, etc.). */
+  setAudioOutputId(deviceId: string): void {
+    this.audioOutputId = deviceId;
+    void this.applyAudioOutputId();
+  }
+
+  private async applyAudioOutputId(): Promise<void> {
+    const ctx = this.playCtx as (AudioContext & { setSinkId?: (id: string) => Promise<void> }) | null;
+    if (!ctx?.setSinkId) {
+      return;
+    }
+    try {
+      await ctx.setSinkId(this.audioOutputId);
+    } catch {
+      /* device unavailable or policy blocked */
+    }
+  }
+
   get isMuted(): boolean {
     return this.muted;
   }
@@ -229,8 +306,34 @@ export class VoiceChannelClient {
     return this.volume;
   }
 
+  /**
+   * Current audio amplitude (0–1 RMS) for waveform visualisation — the mic level
+   * while transmitting, otherwise the inbound channel level. Returns 0 when there
+   * is no active analyser (idle / disconnected).
+   */
+  getLevel(): number {
+    const analyser = this.transmitting ? this.capAnalyser : this.playAnalyser;
+    if (!analyser) {
+      return 0;
+    }
+    analyser.getByteTimeDomainData(this.levelBytes);
+    let sum = 0;
+    for (let i = 0; i < this.levelBytes.length; i++) {
+      const v = (this.levelBytes[i] - 128) / 128;
+      sum += v * v;
+    }
+    return Math.sqrt(sum / this.levelBytes.length);
+  }
+
   private setState(state: VoiceState, detail?: string): void {
     this.state = state;
+    // Belt-and-braces: any transition back to "listening" guarantees no in-flight TX state
+    // is left behind. A navigation race or a server-side close that arrives between a TX
+    // start and stop could otherwise leave `this.transmitting === true`, which would make
+    // the next startTransmit() silently early-return and look like a dead PTT button.
+    if (state === "listening" || state === "closed" || state === "error") {
+      this.transmitting = false;
+    }
     this.callbacks.onState(state, detail);
   }
 
@@ -273,6 +376,12 @@ export class VoiceChannelClient {
     this.playGain = this.playCtx.createGain();
     this.playGain.gain.value = this.muted ? 0 : this.volume;
     this.playGain.connect(this.playCtx.destination);
+    void this.applyAudioOutputId();
+    // Analyser tap for the RX waveform. Fed by the inbound sources (see schedulePcm)
+    // rather than the gain node, so the waveform reflects incoming speech even when
+    // the channel is muted or turned down.
+    this.playAnalyser = this.playCtx.createAnalyser();
+    this.playAnalyser.fftSize = WAVEFORM_FFT_SIZE;
     this.playHead = 0;
     void this.playCtx.resume();
     this.armAudioResume();
@@ -302,6 +411,7 @@ export class VoiceChannelClient {
       ws.send(
         JSON.stringify({ type: "join", unit_id: "WEB", channel: this.channelName, client: consolePlatform() }),
       );
+      void loadMarker1033Pcm().catch(() => undefined);
     };
     ws.onmessage = (event: MessageEvent) => {
       if (typeof event.data === "string") {
@@ -323,7 +433,17 @@ export class VoiceChannelClient {
   }
 
   private handleControl(text: string): void {
-    let msg: { type?: string; permission?: Permission; code?: string; unit_id?: string };
+    let msg: {
+      type?: string;
+      permission?: Permission;
+      code?: string;
+      unit_id?: string;
+      channel?: string;
+      by?: string;
+      ai_dispatch_listen_pcm?: boolean;
+      record_listen_pcm?: boolean;
+      enabled?: boolean;
+    };
     try {
       msg = JSON.parse(text);
     } catch {
@@ -332,13 +452,25 @@ export class VoiceChannelClient {
     if (msg.type === "joined") {
       this.permission = msg.permission ?? "listen_only";
       this.callbacks.onPermission(this.permission);
+      if (msg.record_listen_pcm === true) {
+        this.setRecordListenPcm(true);
+      }
+      if (msg.ai_dispatch_listen_pcm === true) {
+        this.setAiDispatchListenPcm(true);
+      }
       this.setState("listening");
+    } else if (msg.type === "ai_dispatch_pcm") {
+      this.setAiDispatchListenPcm(msg.enabled === true);
     } else if (msg.type === "busy") {
       // The relay rejected our audio — another unit holds the channel.
       if (this.transmitting) {
         this.stopTransmit();
       }
       this.callbacks.onBusy(msg.unit_id ?? null);
+    } else if (msg.type === "move" && typeof msg.channel === "string") {
+      // A dispatcher live-moved this unit (Live Channel Control). The client
+      // re-joins the new channel; the relay does not migrate the socket itself.
+      this.callbacks.onMove?.(msg.channel, msg.by ?? null);
     } else if (msg.type === "error") {
       this.setState("error", JOIN_ERRORS[msg.code ?? ""] ?? `Join rejected (${msg.code ?? "unknown"}).`);
       this.close();
@@ -368,6 +500,25 @@ export class VoiceChannelClient {
       }
       return;
     }
+    // A sustained burst of raw PCM (multiple frames within ~200 ms) means a peer's IMBE
+    // encoder did not engage and they are talking in clear PCM. Filter out one-shots —
+    // 10-33 marker tones and tone-outs are also broadcast as raw PCM but arrive as a
+    // single message — so we only warn after several frames cluster together.
+    if (!this.warnedClearRx) {
+      const now = Date.now();
+      const times = this.clearRxFrameTimes;
+      times.push(now);
+      while (times.length > 0 && now - times[0] > CLEAR_RX_BURST_WINDOW_MS) {
+        times.shift();
+      }
+      if (times.length >= CLEAR_RX_BURST_FRAMES) {
+        this.warnedClearRx = true;
+        this.clearRxFrameTimes = [];
+        console.warn(
+          `[voice] receiving raw PCM on "${this.channelName}" — peer's IMBE encoder is not active (handset native vocoder missing or web WASM failed to load on the sender).`,
+        );
+      }
+    }
     this.schedulePcm(new Int16Array(buffer, 0, Math.floor(buffer.byteLength / 2)));
   }
 
@@ -388,6 +539,10 @@ export class VoiceChannelClient {
     const source = ctx.createBufferSource();
     source.buffer = frame;
     source.connect(this.playGain ?? ctx.destination);
+    // Pre-gain tap so the RX waveform shows inbound audio regardless of volume/mute.
+    if (this.playAnalyser) {
+      source.connect(this.playAnalyser);
+    }
 
     const now = ctx.currentTime;
     if (this.playHead < now + 0.04) {
@@ -436,20 +591,38 @@ export class VoiceChannelClient {
       await this.capCtx.resume();
     }
 
+    this.txConditioner.reset();
     this.capSource = this.capCtx.createMediaStreamSource(this.micStream);
+    // Parallel analyser tap for the TX waveform (the worklet path is untouched).
+    this.capAnalyser = this.capCtx.createAnalyser();
+    this.capAnalyser.fftSize = WAVEFORM_FFT_SIZE;
+    this.capSource.connect(this.capAnalyser);
     this.capNode = new AudioWorkletNode(this.capCtx, "pcm-capture");
     this.capNode.port.onmessage = (event: MessageEvent) => {
       const ws = this.ws;
       if (!this.transmitting || !ws || ws.readyState !== WebSocket.OPEN || !(event.data instanceof ArrayBuffer)) {
         return;
       }
+      const pcmBuf = event.data;
       if (this.digitalTx && imbeReady()) {
-        // Encode to P25 IMBE so transmissions carry the digital-voice character.
-        for (const frame of encodeImbeFrames(new Int16Array(event.data))) {
+        // On-air: P25 IMBE. Recording / AI may still need clear PCM on a sideband.
+        const pcm = new Int16Array(pcmBuf);
+        this.txConditioner.process(pcm);
+        for (const frame of encodeImbeFrames(pcm)) {
           ws.send(frame);
         }
+        if (this.listenPcmSidebandRequired()) {
+          ws.send(wrapListenPcm(pcmBuf));
+        }
       } else {
-        ws.send(event.data);
+        if (!this.warnedClearTx) {
+          this.warnedClearTx = true;
+          const reason = !this.digitalTx ? "HQ/analog mode selected" : "IMBE WASM not ready";
+          console.warn(
+            `[voice] transmitting raw PCM on "${this.channelName}" (${reason}) — peers will hear clear audio, not vocoded.`,
+          );
+        }
+        ws.send(pcmBuf);
       }
     };
     this.capSource.connect(this.capNode);
@@ -477,6 +650,8 @@ export class VoiceChannelClient {
       this.capSource.disconnect();
       this.capSource = null;
     }
+    // capSource.disconnect() already detached the analyser; just drop the ref.
+    this.capAnalyser = null;
     if (this.state !== "closed" && this.state !== "error") {
       this.setState("listening");
     }
@@ -505,9 +680,16 @@ export class VoiceChannelClient {
     if (!ws || ws.readyState !== WebSocket.OPEN) {
       return;
     }
-    const beep = markerBeepPcm();
-    ws.send(beep.buffer); // keyed onto the channel for every listener
-    this.playLocalTone(beep); // and played locally so the dispatcher hears it
+    const sendPcm = (pcm: Int16Array): void => {
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      // Tell the relay this PCM is a 10-33 marker, not keyed voice (no /v1/air talker).
+      ws.send(JSON.stringify({ type: "marker_tone" }));
+      ws.send(pcm.buffer);
+      this.playLocalTone(pcm);
+    };
+    void loadMarker1033Pcm().then(sendPcm).catch(() => sendPcm(markerBeepPcm()));
   }
 
   /** Keys a police-style alert tone onto the channel and plays it locally. */
@@ -519,6 +701,43 @@ export class VoiceChannelClient {
     const tone = toneOutPcm(kind);
     ws.send(tone.buffer);
     this.playLocalTone(tone);
+  }
+
+  /**
+   * Fires a custom soundboard tone-out — keys the supplied PCM onto the channel
+   * and plays it locally. In loop mode it re-keys the clip until stopped.
+   */
+  playCustomTone(id: number, pcm: Int16Array, loop: boolean): void {
+    this.stopCustomTone(id);
+    const fire = (): void => {
+      const ws = this.ws;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      ws.send(pcm.buffer);
+      this.playLocalTone(pcm);
+    };
+    fire();
+    if (loop) {
+      const durationMs = Math.max(250, Math.round((pcm.length / TARGET_RATE) * 1000));
+      this.customLoops.set(id, window.setInterval(fire, durationMs));
+    }
+  }
+
+  /** Stops a looping tone-out (a one-shot tone-out simply plays out on its own). */
+  stopCustomTone(id: number): void {
+    const handle = this.customLoops.get(id);
+    if (handle !== undefined) {
+      window.clearInterval(handle);
+      this.customLoops.delete(id);
+    }
+  }
+
+  private stopCustomLoops(): void {
+    for (const handle of this.customLoops.values()) {
+      window.clearInterval(handle);
+    }
+    this.customLoops.clear();
   }
 
   private stopLocalTones(): void {
@@ -536,12 +755,14 @@ export class VoiceChannelClient {
   /** Stop All Sounds — silences the channel marker and any tone-out / page tones locally. */
   stopAllTones(): void {
     this.setChannelMarker(false);
+    this.stopCustomLoops();
     this.stopLocalTones();
   }
 
   /** Tears everything down; the client cannot be reused afterward. */
   close(): void {
     this.setChannelMarker(false);
+    this.stopCustomLoops();
     this.stopLocalTones();
     this.unbindAudioResume();
     if (this.rxWatchdog !== null) {
@@ -559,6 +780,7 @@ export class VoiceChannelClient {
       this.capSource.disconnect();
       this.capSource = null;
     }
+    this.capAnalyser = null;
     if (this.micStream) {
       this.micStream.getTracks().forEach((track) => track.stop());
       this.micStream = null;
@@ -572,6 +794,7 @@ export class VoiceChannelClient {
       this.playCtx = null;
     }
     this.playGain = null;
+    this.playAnalyser = null;
     const ws = this.ws;
     this.ws = null;
     if (ws) {

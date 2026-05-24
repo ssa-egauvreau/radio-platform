@@ -1,3 +1,4 @@
+import java.io.File
 import java.util.Properties
 
 plugins {
@@ -29,8 +30,20 @@ private val normalizedRadioApiBaseUrl: String = when {
  * Default backend when [radio.api.base.url] is not set in local.properties.
  * Override per machine with local.properties — never commit secrets there.
  */
-private val defaultRailwayApiBaseUrl = "https://radio-platform-production.up.railway.app/"
+private val defaultRailwayApiBaseUrl = "https://safet.up.railway.app/"
 private val radioApiKeyRaw = localProps.getProperty("radio.api.key")?.trim().orEmpty()
+
+// CI bumps these per build (env) so each OTA build advertises a higher code; local builds use the
+// committed defaults.
+private val buildVersionCode: Int = System.getenv("APP_VERSION_CODE")?.trim()?.toIntOrNull() ?: 1
+private val buildVersionName: String =
+    System.getenv("APP_VERSION_NAME")?.trim()?.ifEmpty { null } ?: "0.1.0"
+
+// Release signing comes from CI secrets (keystore decoded to a file, passwords in env). When absent
+// — e.g. a local `assembleRelease` — the release build falls back to the committed debug key.
+private val releaseKeystorePath: String = System.getenv("RELEASE_KEYSTORE_PATH")?.trim().orEmpty()
+private val hasReleaseKeystore: Boolean =
+    releaseKeystorePath.isNotEmpty() && File(releaseKeystorePath).isFile
 
 android {
     namespace = "com.securityradio.ptt"
@@ -41,8 +54,8 @@ android {
         /** Sonim XP6-class devices ship Android 7.x (API 24–25); keep min low enough to install there. */
         minSdk = 21
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = buildVersionCode
+        versionName = buildVersionName
 
         ndk {
             abiFilters += listOf("armeabi-v7a", "arm64-v8a", "x86", "x86_64")
@@ -57,6 +70,28 @@ android {
         }
     }
 
+    // A stable debug keystore is committed in app/debug.keystore so every build
+    // — local or CI — signs APKs with the same key. Sideloaded fleet APKs can
+    // then update over previous installs without an uninstall, the way a Play
+    // Store update would. For Play Store distribution use a separate, real
+    // release signing key.
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+        if (hasReleaseKeystore) {
+            create("release") {
+                storeFile = file(releaseKeystorePath)
+                storePassword = System.getenv("RELEASE_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("RELEASE_KEY_ALIAS")
+                keyPassword = System.getenv("RELEASE_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             // Optional shared secret (not from any third-party site): if RADIO_API_KEY is set on the
@@ -66,7 +101,14 @@ android {
             buildConfigField("String", "RADIO_API_KEY", "\"${radioApiKeyRaw.escapeForBuildConfig()}\"")
         }
         release {
-            isMinifyEnabled = false
+            signingConfig =
+                if (hasReleaseKeystore) signingConfigs.getByName("release")
+                else signingConfigs.getByName("debug")
+            // R8 + resource shrinking — see app/proguard-rules.pro for the keep rules covering
+            // Retrofit interfaces, Gson DTOs, the P25 JNI bridge, sealed event hierarchies, etc.
+            // Compose / OkHttp / kotlinx.coroutines ship their own consumer rules.
+            isMinifyEnabled = true
+            isShrinkResources = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
@@ -99,11 +141,8 @@ android {
 
     packaging {
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-        }
-        jniLibs {
-            // Helps install on strict 16KB-page emulators when zip/APK JNI alignment differs.
-            useLegacyPackaging = true
+            excludes.add("/META-INF/AL2.0")
+            excludes.add("/META-INF/LGPL2.1")
         }
     }
 }

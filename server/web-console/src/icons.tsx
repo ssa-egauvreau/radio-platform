@@ -100,7 +100,7 @@ export function IconLogOut(props: IconProps) {
   );
 }
 
-/** Shield — admin portal. */
+/** Shield — mission control. */
 export function IconShield(props: IconProps) {
   return (
     <StrokeIcon {...props}>
@@ -249,6 +249,93 @@ export function IconMapPin(props: IconProps) {
   );
 }
 
+/** Four-panel dashboard grid. */
+export function IconDashboard(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <rect x="3" y="3" width="8" height="8" rx="1.5" />
+      <rect x="13" y="3" width="8" height="8" rx="1.5" />
+      <rect x="3" y="13" width="8" height="8" rx="1.5" />
+      <rect x="13" y="13" width="8" height="8" rx="1.5" />
+    </StrokeIcon>
+  );
+}
+
+/** Gear — settings / admin. */
+export function IconSettings(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2.8v2.2M12 19v2.2M4.9 4.9l1.6 1.6M17.5 17.5l1.6 1.6M2.8 12h2.2M19 12h2.2M4.9 19.1l1.6-1.6M17.5 6.5l1.6-1.6" />
+    </StrokeIcon>
+  );
+}
+
+/** Sparkle — AI / assistant. */
+export function IconAi(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M12 3.5 13.8 8.2 18.5 10 13.8 11.8 12 16.5 10.2 11.8 5.5 10 10.2 8.2Z" />
+      <path d="M5 5.5l.9 2.1 2.1.9-2.1.9L5 11.5l-.9-2.1-2.1-.9 2.1-.9Z" />
+      <path d="M18.5 14.5l.7 1.6 1.6.7-1.6.7-.7 1.6-.7-1.6-1.6-.7 1.6-.7Z" />
+    </StrokeIcon>
+  );
+}
+
+/** In-car / cruiser radio unit. */
+export function IconCar(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M3 14.5v-2l2.5-2 3-4.5h7l2.5 4.5 2.5 2v2" />
+      <line x1="3" y1="12" x2="21" y2="12" />
+      <line x1="10" y1="6" x2="10" y2="12" />
+      <rect x="9" y="4.5" width="4" height="2" rx="0.5" />
+      <circle cx="7.5" cy="14.5" r="2" />
+      <circle cx="16.5" cy="14.5" r="2" />
+    </StrokeIcon>
+  );
+}
+
+/** Smartphone — mobile radio app. */
+export function IconMobile(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <rect x="7" y="3" width="10" height="18" rx="2" />
+      <line x1="10" y1="6" x2="14" y2="6" />
+      <circle cx="12" cy="17" r="0.8" fill="currentColor" stroke="none" />
+    </StrokeIcon>
+  );
+}
+
+/** Record dot — live control / recording. */
+export function IconRecord(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="3.2" fill="currentColor" stroke="none" />
+    </StrokeIcon>
+  );
+}
+
+/** Play triangle — replay transmission audio. */
+export function IconPlay(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <path d="M9 6.5v11l9-5.5-9-5.5Z" fill="currentColor" stroke="none" />
+    </StrokeIcon>
+  );
+}
+
+/** Pause bars — pause replay. */
+export function IconPause(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <line x1="9" y1="6" x2="9" y2="18" />
+      <line x1="15" y1="6" x2="15" y2="18" />
+    </StrokeIcon>
+  );
+}
+
 /** Waveform — recording & transcription. */
 export function IconWaveform(props: IconProps) {
   return (
@@ -271,4 +358,39 @@ export function IconLock(props: IconProps) {
       <circle cx="12" cy="15.2" r="0.7" fill="currentColor" stroke="none" />
     </StrokeIcon>
   );
+}
+
+/** Built-in glyphs an admin can assign to a custom soundboard tone-out. */
+export const TONE_OUT_ICON_KINDS = [
+  "waveform",
+  "bell",
+  "beacon",
+  "alert",
+  "bolt",
+  "routine",
+  "priority",
+  "status",
+  "radio",
+  "headphones",
+] as const;
+
+export type ToneOutIconKind = (typeof TONE_OUT_ICON_KINDS)[number];
+
+const TONE_OUT_ICON_MAP: Record<ToneOutIconKind, (props: IconProps) => ReactNode> = {
+  waveform: IconWaveform,
+  bell: IconBell,
+  beacon: IconBeacon,
+  alert: IconAlertTriangle,
+  bolt: IconBolt,
+  routine: IconToneRoutine,
+  priority: IconTonePriority,
+  status: IconToneStatus,
+  radio: IconRadio,
+  headphones: IconHeadphones,
+};
+
+/** Renders one built-in soundboard glyph by its kind, falling back to a waveform. */
+export function ToneOutIcon({ kind, ...props }: { kind: string } & IconProps) {
+  const Icon = TONE_OUT_ICON_MAP[kind as ToneOutIconKind] ?? IconWaveform;
+  return <Icon {...props} />;
 }

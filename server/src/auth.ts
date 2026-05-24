@@ -16,6 +16,13 @@ export interface AuthUser {
   /** Tenant the account belongs to; null for platform `owner` accounts. */
   agencyId: number | null;
   agencyName: string | null;
+  /**
+   * Session generation written on the originating login. Compared against the
+   * user row's current `token_generation` so a later login on another device
+   * invalidates this token (newest sign-in wins). Tokens issued before this
+   * field existed parse as 0 — they keep working until the user re-logs in.
+   */
+  gen: number;
 }
 
 /** Agency resolved for a request (from a JWT, or a handset's radio key). */
@@ -38,10 +45,16 @@ declare global {
 const envSecret = process.env.JWT_SECRET?.trim();
 const JWT_SECRET = envSecret && envSecret.length > 0 ? envSecret : crypto.randomBytes(48).toString("hex");
 if (!envSecret) {
+  if (process.env.NODE_ENV === "production") {
+    // A random per-process secret in production would silently sign every active session out on
+    // every redeploy / restart — exactly the failure mode this guard exists to prevent.
+    console.error("FATAL: JWT_SECRET env is not set in production. Refusing to start.");
+    process.exit(1);
+  }
   console.warn("JWT_SECRET not set — using a random secret; existing sessions break on every restart.");
 }
 
-/** Token lifetime in seconds (12h). */
+/** Console/admin/owner token lifetime in seconds (12h). Radio handsets never expire. */
 export const TOKEN_TTL_SECONDS = 12 * 60 * 60;
 
 export async function hashPassword(plain: string): Promise<string> {
@@ -57,19 +70,23 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
 }
 
 export function signToken(user: AuthUser): string {
-  return jwt.sign(
-    {
-      uid: user.id,
-      un: user.username,
-      dn: user.displayName,
-      role: user.role,
-      unit: user.unitId,
-      aid: user.agencyId,
-      an: user.agencyName,
-    },
-    JWT_SECRET,
-    { expiresIn: TOKEN_TTL_SECONDS },
-  );
+  const claims = {
+    uid: user.id,
+    un: user.username,
+    dn: user.displayName,
+    role: user.role,
+    unit: user.unitId,
+    aid: user.agencyId,
+    an: user.agencyName,
+    gen: user.gen,
+  };
+  // Radio handsets stay signed in until a manual sign-out, so their tokens
+  // carry no expiry. Console/admin/owner sessions still expire so a lost
+  // dispatch login cannot live forever.
+  if (user.role === "radio") {
+    return jwt.sign(claims, JWT_SECRET);
+  }
+  return jwt.sign(claims, JWT_SECRET, { expiresIn: TOKEN_TTL_SECONDS });
 }
 
 export function verifyToken(token: string): AuthUser | null {
@@ -84,6 +101,9 @@ export function verifyToken(token: string): AuthUser | null {
       unitId: p.unit == null ? null : String(p.unit),
       agencyId: p.aid == null ? null : Number(p.aid),
       agencyName: p.an == null ? null : String(p.an),
+      // Pre-existing tokens without the `gen` claim parse as 0, matching the
+      // default value on the `users.token_generation` column at deploy time.
+      gen: Number(p.gen ?? 0),
     };
   } catch {
     return null;

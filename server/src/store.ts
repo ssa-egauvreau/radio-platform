@@ -12,7 +12,14 @@ export const AGENCY_ROLES: Role[] = ["admin", "dispatcher", "radio"];
 export const PERMISSIONS: Permission[] = ["talk_priority", "talk", "listen_only"];
 
 /** Radio tones an agency may replace with its own uploaded audio. */
-export const SOUND_KINDS = ["permit", "channel_switch", "emergency", "busy"] as const;
+export const SOUND_KINDS = [
+  "permit",
+  "channel_switch",
+  "emergency",
+  "busy",
+  "volume_check",
+  "marker_1033",
+] as const;
 export type SoundKind = (typeof SOUND_KINDS)[number];
 
 export function isSoundKind(value: unknown): value is SoundKind {
@@ -246,6 +253,7 @@ export interface UserRow {
   disabled: boolean;
   agency_id: number | null;
   created_at: string;
+  token_generation: number;
 }
 
 export interface UserWithHash extends UserRow {
@@ -287,7 +295,7 @@ export interface AuditRow {
   ip: string | null;
 }
 
-const USER_COLS = "id, username, display_name, role, unit_id, device_type, disabled, agency_id, created_at";
+const USER_COLS = "id, username, display_name, role, unit_id, device_type, disabled, agency_id, created_at, token_generation";
 
 /** Accounts within one agency. */
 export async function listUsers(agencyId: number): Promise<UserRow[]> {
@@ -314,7 +322,7 @@ export async function getUserById(id: number, agencyId?: number): Promise<UserRo
 export async function getUserByUsername(username: string): Promise<UserWithHash | null> {
   const res = await requirePool().query<UserWithHash>(
     `SELECT u.id, u.username, u.display_name, u.role, u.unit_id, u.device_type, u.disabled, u.agency_id,
-            u.created_at, u.password_hash,
+            u.created_at, u.token_generation, u.password_hash,
             a.name AS agency_name, a.disabled AS agency_disabled
        FROM users u
        LEFT JOIN agencies a ON a.id = u.agency_id
@@ -322,6 +330,20 @@ export async function getUserByUsername(username: string): Promise<UserWithHash 
     [username],
   );
   return res.rows[0] ?? null;
+}
+
+/**
+ * Increments and returns the user's session generation. Each successful login
+ * calls this so prior tokens (carrying the old `gen` claim) fail the freshness
+ * check on their next authenticated request.
+ */
+export async function bumpTokenGeneration(userId: number): Promise<number> {
+  const res = await requirePool().query<{ token_generation: number }>(
+    `UPDATE users SET token_generation = token_generation + 1
+       WHERE id = $1 RETURNING token_generation;`,
+    [userId],
+  );
+  return res.rows[0]?.token_generation ?? 0;
 }
 
 export async function createUser(input: {
@@ -1013,6 +1035,35 @@ export async function listTransmissions(opts: {
 }
 
 /** Audio bytes for one transmission. When `agencyId` is given, the row must belong to it. */
+export interface TransmissionDispatchContext {
+  id: number;
+  agency_id: number;
+  channel_name: string;
+  unit_id: string | null;
+  display_name: string | null;
+  started_at: string;
+}
+
+export async function getTransmissionDispatchContext(id: number): Promise<TransmissionDispatchContext | null> {
+  const res = await requirePool().query<TransmissionDispatchContext>(
+    `SELECT id, agency_id, channel_name, unit_id, display_name, started_at
+       FROM transmissions WHERE id = $1;`,
+    [id],
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function getChannelAiDispatchRow(
+  agencyId: number,
+  channelName: string,
+): Promise<{ enabled: boolean; yields_to_units: boolean } | null> {
+  const res = await requirePool().query<{ enabled: boolean; yields_to_units: boolean }>(
+    `SELECT enabled, yields_to_units FROM channel_ai_dispatch WHERE agency_id = $1 AND channel_name = $2;`,
+    [agencyId, channelName],
+  );
+  return res.rows[0] ?? null;
+}
+
 export async function getTransmissionAudio(
   id: number,
   agencyId?: number,
@@ -1048,6 +1099,24 @@ export async function listPendingTranscriptionIds(): Promise<number[]> {
   return res.rows.map((r) => r.id);
 }
 
+/** Transmissions on AI-enabled channels that never got an ai_dispatch_log row (backfill). */
+export async function listTransmissionIdsMissingAiDispatchLog(limit = 100): Promise<number[]> {
+  const res = await requirePool().query<{ id: number }>(
+    `SELECT t.id
+       FROM transmissions t
+       INNER JOIN channel_ai_dispatch c
+         ON c.agency_id = t.agency_id AND c.channel_name = t.channel_name AND c.enabled = TRUE
+       LEFT JOIN ai_dispatch_log l ON l.transmission_id = t.id
+      WHERE l.id IS NULL
+        AND t.transcript_status IN ('done', 'pending', 'failed', 'disabled')
+        AND t.started_at > now() - interval '12 hours'
+      ORDER BY t.started_at ASC
+      LIMIT $1;`,
+    [Math.min(Math.max(limit, 1), 300)],
+  );
+  return res.rows.map((r) => r.id);
+}
+
 // --- radio positions (GPS) ----------------------------------------------
 
 export interface RadioPosition {
@@ -1060,6 +1129,8 @@ export interface RadioPosition {
   accuracy_m: number | null;
   heading: number | null;
   speed_mps: number | null;
+  /** Device category of the reporting account (handheld, unit_radio, …), or null. */
+  device_type: string | null;
   updated_at: string;
 }
 
@@ -1075,7 +1146,8 @@ export async function upsertPosition(input: {
   heading: number | null;
   speedMps: number | null;
 }): Promise<void> {
-  await requirePool().query(
+  const pool = requirePool();
+  await pool.query(
     `INSERT INTO radio_positions
        (agency_id, unit_id, user_id, display_name, channel_name, lat, lon, accuracy_m, heading, speed_mps, updated_at)
      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, now())
@@ -1102,15 +1174,152 @@ export async function upsertPosition(input: {
       input.speedMps,
     ],
   );
+  // Append to the GPS log so the console can replay a unit's track.
+  await pool.query(
+    `INSERT INTO radio_position_history
+       (agency_id, unit_id, lat, lon, accuracy_m, heading, speed_mps)
+     VALUES ($1, $2, $3, $4, $5, $6, $7);`,
+    [input.agencyId, input.unitId, input.lat, input.lon, input.accuracyM, input.heading, input.speedMps],
+  );
+  // Trim the log occasionally so history never grows without bound (~90-day window).
+  if (Math.random() < 0.01) {
+    await pool.query(
+      `DELETE FROM radio_position_history WHERE recorded_at < now() - interval '90 days';`,
+    );
+  }
 }
 
 export async function listPositions(agencyId: number): Promise<RadioPosition[]> {
   const res = await requirePool().query<RadioPosition>(
-    `SELECT unit_id, user_id, display_name, channel_name, lat, lon, accuracy_m, heading, speed_mps, updated_at
-     FROM radio_positions WHERE agency_id = $1 ORDER BY updated_at DESC;`,
+    `SELECT p.unit_id, p.user_id, p.display_name, p.channel_name, p.lat, p.lon,
+            p.accuracy_m, p.heading, p.speed_mps, p.updated_at, u.device_type
+     FROM radio_positions p
+     LEFT JOIN users u ON u.id = p.user_id
+     WHERE p.agency_id = $1 ORDER BY p.updated_at DESC;`,
     [agencyId],
   );
   return res.rows;
+}
+
+// --- GPS log (position history) -----------------------------------------
+
+export interface PositionSample {
+  lat: number;
+  lon: number;
+  accuracy_m: number | null;
+  heading: number | null;
+  speed_mps: number | null;
+  recorded_at: string;
+}
+
+/**
+ * A single radio's recorded GPS fixes, oldest first, optionally time-bounded.
+ * A dense range is evenly down-sampled to roughly `targetSamples` points
+ * (always keeping the first and last fix) so the track stays light to plot.
+ */
+export async function listPositionHistory(opts: {
+  agencyId: number;
+  unitId: string;
+  from?: string;
+  to?: string;
+  targetSamples?: number;
+}): Promise<PositionSample[]> {
+  const target = Math.min(Math.max(Math.trunc(opts.targetSamples ?? 1500) || 1500, 50), 5000);
+  const where: string[] = ["agency_id = $1", "unit_id = $2"];
+  const vals: unknown[] = [opts.agencyId, opts.unitId];
+  let i = 3;
+  const from = opts.from?.trim();
+  if (from) {
+    where.push(`recorded_at >= $${i++}::timestamptz`);
+    vals.push(from);
+  }
+  const to = opts.to?.trim();
+  if (to) {
+    where.push(`recorded_at <= $${i++}::timestamptz`);
+    vals.push(to);
+  }
+  vals.push(target);
+  const res = await requirePool().query<PositionSample>(
+    `WITH log AS (
+       SELECT lat, lon, accuracy_m, heading, speed_mps, recorded_at,
+              row_number() OVER (ORDER BY recorded_at ASC) AS rn,
+              count(*) OVER () AS total
+       FROM radio_position_history
+       WHERE ${where.join(" AND ")}
+     )
+     SELECT lat, lon, accuracy_m, heading, speed_mps, recorded_at
+     FROM log
+     WHERE rn = 1 OR rn = total OR (rn - 1) % GREATEST(1, (total / $${i})::int) = 0
+     ORDER BY recorded_at ASC;`,
+    vals,
+  );
+  return res.rows;
+}
+
+// --- geofences (map overlay zones) --------------------------------------
+
+export interface GeofenceRow {
+  id: number;
+  name: string;
+  shape: string;
+  color: string | null;
+  center_lat: number | null;
+  center_lon: number | null;
+  radius_m: number | null;
+  /** Polygon vertices as [lat, lon] pairs; null for a circle geofence. */
+  points: [number, number][] | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+const GEOFENCE_COLS =
+  "id, name, shape, color, center_lat, center_lon, radius_m, points, created_by, created_at";
+
+export async function listGeofences(agencyId: number): Promise<GeofenceRow[]> {
+  const res = await requirePool().query<GeofenceRow>(
+    `SELECT ${GEOFENCE_COLS} FROM geofences WHERE agency_id = $1 ORDER BY created_at DESC;`,
+    [agencyId],
+  );
+  return res.rows;
+}
+
+export async function createGeofence(input: {
+  agencyId: number;
+  name: string;
+  shape: string;
+  color: string | null;
+  centerLat: number | null;
+  centerLon: number | null;
+  radiusM: number | null;
+  points: [number, number][] | null;
+  createdBy: string | null;
+}): Promise<GeofenceRow> {
+  const res = await requirePool().query<GeofenceRow>(
+    `INSERT INTO geofences
+       (agency_id, name, shape, color, center_lat, center_lon, radius_m, points, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+     RETURNING ${GEOFENCE_COLS};`,
+    [
+      input.agencyId,
+      input.name,
+      input.shape,
+      input.color,
+      input.centerLat,
+      input.centerLon,
+      input.radiusM,
+      input.points ? JSON.stringify(input.points) : null,
+      input.createdBy,
+    ],
+  );
+  return res.rows[0]!;
+}
+
+export async function deleteGeofence(id: number, agencyId: number): Promise<boolean> {
+  const res = await requirePool().query(
+    `DELETE FROM geofences WHERE id = $1 AND agency_id = $2;`,
+    [id, agencyId],
+  );
+  return (res.rowCount ?? 0) > 0;
 }
 
 // --- alerts (emergencies + pages) ---------------------------------------
@@ -1176,13 +1385,35 @@ export async function listAlerts(agencyId: number, limit = 100): Promise<AlertRo
   return res.rows;
 }
 
+/**
+ * Appends an inactive emergency row so radios polling the inbox by an id
+ * cursor learn the emergency ended — an in-place UPDATE to the original row
+ * is invisible to that cursor. Broadcast (no channel/target) so every device
+ * that saw the activation clears regardless of its current channel.
+ */
+async function appendEmergencyClearedMarker(
+  agencyId: number,
+  unit: string,
+  clearedBy: string,
+): Promise<void> {
+  await requirePool().query(
+    `INSERT INTO alerts (agency_id, kind, channel_name, target_unit, from_unit, message, active, cleared_by, cleared_at)
+     VALUES ($1, 'emergency', NULL, NULL, $2, 'Emergency cleared', FALSE, $3, now());`,
+    [agencyId, unit, clearedBy],
+  );
+}
+
 export async function clearAlert(id: number, agencyId: number, clearedBy: string): Promise<AlertRow | null> {
   const res = await requirePool().query<AlertRow>(
     `UPDATE alerts SET active = FALSE, cleared_by = $3, cleared_at = now()
      WHERE id = $1 AND agency_id = $2 RETURNING ${ALERT_COLS};`,
     [id, agencyId, clearedBy],
   );
-  return res.rows[0] ?? null;
+  const row = res.rows[0] ?? null;
+  if (row && row.kind === "emergency" && row.from_unit) {
+    await appendEmergencyClearedMarker(agencyId, row.from_unit, clearedBy);
+  }
+  return row;
 }
 
 export async function clearEmergenciesFromUnit(agencyId: number, unit: string, clearedBy: string): Promise<number> {
@@ -1191,7 +1422,11 @@ export async function clearEmergenciesFromUnit(agencyId: number, unit: string, c
      WHERE agency_id = $1 AND kind = 'emergency' AND active = TRUE AND from_unit = $2;`,
     [agencyId, unit, clearedBy],
   );
-  return res.rowCount ?? 0;
+  const cleared = res.rowCount ?? 0;
+  if (cleared > 0) {
+    await appendEmergencyClearedMarker(agencyId, unit, clearedBy);
+  }
+  return cleared;
 }
 
 /** Alerts addressed to a radio (direct, its channel, or broadcast) newer than `sinceId`. */
@@ -1212,6 +1447,39 @@ export async function listInboxAlerts(
     [agencyId, sinceId, unit, channel ?? ""],
   );
   return res.rows;
+}
+
+/** Sets or clears the 10-33 marker for one channel of an agency. */
+export async function setChannelTen33(
+  agencyId: number,
+  channelName: string,
+  active: boolean,
+): Promise<void> {
+  await requirePool().query(
+    `INSERT INTO channel_markers (agency_id, channel_name, active)
+       VALUES ($1, $2, $3)
+     ON CONFLICT (agency_id, channel_name)
+       DO UPDATE SET active = EXCLUDED.active, updated_at = now();`,
+    [agencyId, channelName, active],
+  );
+}
+
+/** Whether a channel is currently flagged 10-33. */
+export async function getChannelTen33Active(agencyId: number, channelName: string): Promise<boolean> {
+  const res = await requirePool().query<{ active: boolean }>(
+    `SELECT active FROM channel_markers WHERE agency_id = $1 AND channel_name = $2;`,
+    [agencyId, channelName],
+  );
+  return res.rows[0]?.active === true;
+}
+
+/** Channel names currently flagged 10-33 for an agency. */
+export async function listTen33Channels(agencyId: number): Promise<string[]> {
+  const res = await requirePool().query<{ channel_name: string }>(
+    `SELECT channel_name FROM channel_markers WHERE agency_id = $1 AND active = TRUE;`,
+    [agencyId],
+  );
+  return res.rows.map((r) => r.channel_name);
 }
 
 // --- agency sounds (custom radio tones) ----------------------------------
@@ -1262,6 +1530,174 @@ export async function deleteAgencySound(agencyId: number, kind: string): Promise
   const res = await requirePool().query(
     `DELETE FROM agency_sounds WHERE agency_id = $1 AND kind = $2;`,
     [agencyId, kind],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+/**
+ * A token that changes whenever any of an agency's custom tones is added,
+ * replaced or removed. Clients poll it to know when to re-pull their tones —
+ * the row count covers removals, the latest timestamp covers adds/replacements.
+ */
+export async function getAgencySoundsVersion(agencyId: number): Promise<string> {
+  const res = await requirePool().query<{ n: string; ts: string | null }>(
+    `SELECT COUNT(*)::text AS n, MAX(updated_at)::text AS ts
+       FROM agency_sounds WHERE agency_id = $1;`,
+    [agencyId],
+  );
+  const row = res.rows[0];
+  return `${row?.n ?? "0"}:${row?.ts ?? "-"}`;
+}
+
+// --- custom soundboard tone-outs ----------------------------------------
+
+export const TONE_OUT_PLAY_MODES = ["once", "loop"] as const;
+export type ToneOutPlayMode = (typeof TONE_OUT_PLAY_MODES)[number];
+
+/** Metadata for one soundboard tone-out (never selects the audio/icon bytes). */
+export interface ToneOutMeta {
+  id: number;
+  name: string;
+  play_mode: string;
+  icon_kind: string;
+  icon_color: string;
+  has_image: boolean;
+  has_audio: boolean;
+  sort_order: number;
+}
+
+const TONE_OUT_META_COLS =
+  "id, name, play_mode, icon_kind, icon_color, " +
+  "(icon_image IS NOT NULL) AS has_image, (audio IS NOT NULL) AS has_audio, sort_order";
+
+export async function listToneOuts(agencyId: number): Promise<ToneOutMeta[]> {
+  const res = await requirePool().query<ToneOutMeta>(
+    `SELECT ${TONE_OUT_META_COLS} FROM agency_tone_outs
+     WHERE agency_id = $1 ORDER BY sort_order ASC, id ASC;`,
+    [agencyId],
+  );
+  return res.rows;
+}
+
+export async function createToneOut(
+  agencyId: number,
+  input: { name: string; playMode: string; iconKind: string; iconColor: string },
+): Promise<ToneOutMeta> {
+  const res = await requirePool().query<ToneOutMeta>(
+    `INSERT INTO agency_tone_outs (agency_id, name, play_mode, icon_kind, icon_color, sort_order)
+     VALUES ($1, $2, $3, $4, $5,
+             COALESCE((SELECT MAX(sort_order) + 1 FROM agency_tone_outs WHERE agency_id = $1), 0))
+     RETURNING ${TONE_OUT_META_COLS};`,
+    [agencyId, input.name, input.playMode, input.iconKind, input.iconColor],
+  );
+  return res.rows[0]!;
+}
+
+export async function updateToneOut(
+  id: number,
+  agencyId: number,
+  patch: { name?: string; playMode?: string; iconKind?: string; iconColor?: string },
+): Promise<ToneOutMeta | null> {
+  const sets: string[] = [];
+  const vals: unknown[] = [];
+  let i = 1;
+  if (patch.name !== undefined) {
+    sets.push(`name = $${i++}`);
+    vals.push(patch.name);
+  }
+  if (patch.playMode !== undefined) {
+    sets.push(`play_mode = $${i++}`);
+    vals.push(patch.playMode);
+  }
+  if (patch.iconKind !== undefined) {
+    sets.push(`icon_kind = $${i++}`);
+    vals.push(patch.iconKind);
+  }
+  if (patch.iconColor !== undefined) {
+    sets.push(`icon_color = $${i++}`);
+    vals.push(patch.iconColor);
+  }
+  if (sets.length === 0) {
+    const res = await requirePool().query<ToneOutMeta>(
+      `SELECT ${TONE_OUT_META_COLS} FROM agency_tone_outs WHERE id = $1 AND agency_id = $2;`,
+      [id, agencyId],
+    );
+    return res.rows[0] ?? null;
+  }
+  vals.push(id, agencyId);
+  const res = await requirePool().query<ToneOutMeta>(
+    `UPDATE agency_tone_outs SET ${sets.join(", ")}
+     WHERE id = $${i++} AND agency_id = $${i}
+     RETURNING ${TONE_OUT_META_COLS};`,
+    vals,
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function setToneOutAudio(
+  id: number,
+  agencyId: number,
+  audio: Buffer,
+  mime: string,
+): Promise<boolean> {
+  const res = await requirePool().query(
+    `UPDATE agency_tone_outs SET audio = $1, audio_mime = $2, audio_bytes = $3
+     WHERE id = $4 AND agency_id = $5;`,
+    [audio, mime, audio.length, id, agencyId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+export async function setToneOutIcon(
+  id: number,
+  agencyId: number,
+  image: Buffer,
+  mime: string,
+): Promise<boolean> {
+  const res = await requirePool().query(
+    `UPDATE agency_tone_outs SET icon_image = $1, icon_mime = $2 WHERE id = $3 AND agency_id = $4;`,
+    [image, mime, id, agencyId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+export async function clearToneOutIcon(id: number, agencyId: number): Promise<boolean> {
+  const res = await requirePool().query(
+    `UPDATE agency_tone_outs SET icon_image = NULL, icon_mime = NULL
+     WHERE id = $1 AND agency_id = $2;`,
+    [id, agencyId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+export async function getToneOutAudio(
+  id: number,
+  agencyId: number,
+): Promise<{ audio: Buffer; mime: string } | null> {
+  const res = await requirePool().query<{ audio: Buffer; mime: string }>(
+    `SELECT audio, COALESCE(audio_mime, 'audio/wav') AS mime
+     FROM agency_tone_outs WHERE id = $1 AND agency_id = $2 AND audio IS NOT NULL;`,
+    [id, agencyId],
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function getToneOutIcon(
+  id: number,
+  agencyId: number,
+): Promise<{ image: Buffer; mime: string } | null> {
+  const res = await requirePool().query<{ image: Buffer; mime: string }>(
+    `SELECT icon_image AS image, COALESCE(icon_mime, 'image/png') AS mime
+     FROM agency_tone_outs WHERE id = $1 AND agency_id = $2 AND icon_image IS NOT NULL;`,
+    [id, agencyId],
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function deleteToneOut(id: number, agencyId: number): Promise<boolean> {
+  const res = await requirePool().query(
+    `DELETE FROM agency_tone_outs WHERE id = $1 AND agency_id = $2;`,
+    [id, agencyId],
   );
   return (res.rowCount ?? 0) > 0;
 }
@@ -1327,4 +1763,443 @@ export async function seedInitialAccounts(): Promise<void> {
     });
     console.log(`Seeded initial admin — username "admin", password "${adminPassword}". Change it after first login.`);
   }
+}
+
+// --- agency integrations (per-tenant API keys, webhooks) -----------------
+
+export interface AgencyIntegrationRow {
+  integration_key: string;
+  value: string;
+  updated_at: string;
+}
+
+export async function listAgencyIntegrationRows(agencyId: number): Promise<AgencyIntegrationRow[]> {
+  const res = await requirePool().query<AgencyIntegrationRow>(
+    `SELECT integration_key, value, updated_at
+       FROM agency_integrations
+      WHERE agency_id = $1;`,
+    [agencyId],
+  );
+  return res.rows;
+}
+
+export async function getAgencyIntegrationValue(
+  agencyId: number,
+  integrationKey: string,
+): Promise<string | null> {
+  const res = await requirePool().query<{ value: string }>(
+    `SELECT value FROM agency_integrations WHERE agency_id = $1 AND integration_key = $2;`,
+    [agencyId, integrationKey],
+  );
+  const row = res.rows[0];
+  if (!row) {
+    return null;
+  }
+  const v = row.value?.trim() ?? "";
+  return v.length > 0 ? v : null;
+}
+
+export async function setAgencyIntegrationValue(
+  agencyId: number,
+  integrationKey: string,
+  value: string,
+  updatedByUserId: number | null,
+): Promise<void> {
+  await requirePool().query(
+    `INSERT INTO agency_integrations (agency_id, integration_key, value, updated_by_user_id)
+       VALUES ($1, $2, $3, $4)
+     ON CONFLICT (agency_id, integration_key)
+       DO UPDATE SET value = EXCLUDED.value,
+                     updated_at = now(),
+                     updated_by_user_id = EXCLUDED.updated_by_user_id;`,
+    [agencyId, integrationKey, value, updatedByUserId],
+  );
+}
+
+export async function deleteAgencyIntegration(agencyId: number, integrationKey: string): Promise<void> {
+  await requirePool().query(`DELETE FROM agency_integrations WHERE agency_id = $1 AND integration_key = $2;`, [
+    agencyId,
+    integrationKey,
+  ]);
+}
+
+// --- per-channel AI dispatch toggle --------------------------------------
+
+export async function isChannelAiDispatchEnabled(agencyId: number, channelName: string): Promise<boolean> {
+  const res = await requirePool().query<{ enabled: boolean }>(
+    `SELECT enabled FROM channel_ai_dispatch WHERE agency_id = $1 AND channel_name = $2;`,
+    [agencyId, channelName],
+  );
+  return res.rows[0]?.enabled === true;
+}
+
+export async function setChannelAiDispatch(
+  agencyId: number,
+  channelName: string,
+  enabled: boolean,
+  yieldsToUnits?: boolean,
+): Promise<void> {
+  const yields = yieldsToUnits ?? true;
+  await requirePool().query(
+    `INSERT INTO channel_ai_dispatch (agency_id, channel_name, enabled, yields_to_units)
+       VALUES ($1, $2, $3, $4)
+     ON CONFLICT (agency_id, channel_name)
+       DO UPDATE SET enabled = EXCLUDED.enabled,
+                     yields_to_units = EXCLUDED.yields_to_units,
+                     updated_at = now();`,
+    [agencyId, channelName, enabled, yields],
+  );
+}
+
+export async function listAllChannelAiDispatchEnabledRows(): Promise<
+  Array<{ agency_id: number; channel_name: string }>
+> {
+  const res = await requirePool().query<{ agency_id: number; channel_name: string }>(
+    `SELECT agency_id, channel_name FROM channel_ai_dispatch WHERE enabled = TRUE;`,
+  );
+  return res.rows;
+}
+
+export async function listChannelAiDispatchEnabled(agencyId: number): Promise<string[]> {
+  const res = await requirePool().query<{ channel_name: string }>(
+    `SELECT channel_name FROM channel_ai_dispatch WHERE agency_id = $1 AND enabled = TRUE;`,
+    [agencyId],
+  );
+  return res.rows.map((r) => r.channel_name);
+}
+
+// --- AI dispatcher knowledge base (RAG) ----------------------------------
+
+export const KB_CATEGORY_SECTIONS = [
+  {
+    id: "radio_operations",
+    label: "Radio operations",
+    description: "Radio procedures, channel plans, route information, codes, and call classifications.",
+    categories: [
+      {
+        id: "post_order",
+        label: "Post orders",
+        description: "Site-specific guard instructions and standing orders.",
+      },
+      {
+        id: "route_sheet",
+        label: "Route sheets",
+        description: "Patrol routes, checkpoint sequences, and tour instructions.",
+      },
+      {
+        id: "radio_procedure",
+        label: "Radio procedures",
+        description: "How units should call in, acknowledge, escalate, and use channels.",
+      },
+      {
+        id: "radio_codes",
+        label: "Radio codes",
+        description: "10-codes, signal codes, disposition codes, and local radio shorthand.",
+      },
+      {
+        id: "call_types",
+        label: "Call types",
+        description: "CAD/event types and how dispatch should classify incoming traffic.",
+      },
+    ],
+  },
+  {
+    id: "safety_response",
+    label: "Safety and response",
+    description: "Safety rules, emergency actions, and incident response references.",
+    categories: [
+      {
+        id: "safety_procedure",
+        label: "Safety procedures",
+        description: "Officer safety, site hazards, PPE, and safe-work instructions.",
+      },
+      {
+        id: "emergency_procedure",
+        label: "Emergency procedures",
+        description: "Fire, medical, evacuation, lockdown, and critical incident steps.",
+      },
+      {
+        id: "incident_response",
+        label: "Incident response plans",
+        description: "Response playbooks for alarms, trespassers, disturbances, and other events.",
+      },
+    ],
+  },
+  {
+    id: "policy_law",
+    label: "Policy and legal",
+    description: "Agency policy, SOPs, legal references, and compliance material.",
+    categories: [
+      {
+        id: "policy",
+        label: "Policies and SOPs",
+        description: "Agency rules, standard operating procedures, and internal policy.",
+      },
+      {
+        id: "law_reference",
+        label: "Laws and legal references",
+        description: "Statutes, ordinances, enforcement limits, and legal guidance.",
+      },
+    ],
+  },
+  {
+    id: "client_site",
+    label: "Client and site information",
+    description: "Client preferences, property details, contacts, and escalation information.",
+    categories: [
+      {
+        id: "client_info",
+        label: "Client information",
+        description: "Client expectations, preferences, reporting rules, and special instructions.",
+      },
+      {
+        id: "property_info",
+        label: "Property information",
+        description: "Access points, landmarks, maps, tenants, suites, and local site details.",
+      },
+      {
+        id: "contact_directory",
+        label: "Contacts and escalation",
+        description: "Who to call, after-hours contacts, supervisors, vendors, and escalation paths.",
+      },
+    ],
+  },
+  {
+    id: "general_reference",
+    label: "General reference",
+    description: "Training material and documents that do not fit another category.",
+    categories: [
+      {
+        id: "training",
+        label: "Training material",
+        description: "Training guides, onboarding material, and dispatcher reference examples.",
+      },
+      {
+        id: "other",
+        label: "Other reference",
+        description: "General material that does not fit a more specific category.",
+      },
+    ],
+  },
+] as const;
+
+export type KbCategory = (typeof KB_CATEGORY_SECTIONS)[number]["categories"][number]["id"];
+
+export const KB_CATEGORIES: KbCategory[] = KB_CATEGORY_SECTIONS.flatMap((section) =>
+  section.categories.map((category) => category.id),
+);
+
+export function isKbCategory(value: unknown): value is KbCategory {
+  return typeof value === "string" && (KB_CATEGORIES as readonly string[]).includes(value);
+}
+
+export function getKbCategoryLabel(value: string): string {
+  for (const section of KB_CATEGORY_SECTIONS) {
+    const category = section.categories.find((item) => item.id === value);
+    if (category) {
+      return category.label;
+    }
+  }
+  return "Reference";
+}
+
+/** Document metadata for the admin list (never selects the PDF bytes or extracted text). */
+export interface KbDocumentMeta {
+  id: number;
+  title: string;
+  category: string;
+  property_code: string | null;
+  filename: string | null;
+  mime: string;
+  byte_size: number;
+  status: string;
+  error: string | null;
+  chunk_count: number;
+  embed_model: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+const KB_DOC_META_COLS =
+  "id, title, category, property_code, filename, mime, byte_size, status, error, chunk_count, embed_model, created_at, updated_at";
+
+export async function listKbDocuments(agencyId: number): Promise<KbDocumentMeta[]> {
+  const res = await requirePool().query<KbDocumentMeta>(
+    `SELECT ${KB_DOC_META_COLS} FROM agency_kb_documents
+      WHERE agency_id = $1 ORDER BY created_at DESC, id DESC;`,
+    [agencyId],
+  );
+  return res.rows;
+}
+
+export async function createKbDocument(
+  agencyId: number,
+  input: {
+    title: string;
+    category: string;
+    propertyCode: string | null;
+    filename: string | null;
+    mime: string;
+    content: Buffer;
+    uploadedByUserId: number | null;
+  },
+): Promise<KbDocumentMeta> {
+  const res = await requirePool().query<KbDocumentMeta>(
+    `INSERT INTO agency_kb_documents
+       (agency_id, title, category, property_code, filename, mime, byte_size, content, status, uploaded_by_user_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'processing', $9)
+     RETURNING ${KB_DOC_META_COLS};`,
+    [
+      agencyId,
+      input.title,
+      input.category,
+      input.propertyCode,
+      input.filename,
+      input.mime,
+      input.content.length,
+      input.content,
+      input.uploadedByUserId,
+    ],
+  );
+  return res.rows[0]!;
+}
+
+/** Loads a document's original bytes for download or re-indexing (agency-scoped). */
+export async function getKbDocumentContent(
+  agencyId: number,
+  id: number,
+): Promise<{ content: Buffer; mime: string; filename: string | null } | null> {
+  const res = await requirePool().query<{ content: Buffer; mime: string; filename: string | null }>(
+    `SELECT content, mime, filename FROM agency_kb_documents WHERE id = $1 AND agency_id = $2;`,
+    [id, agencyId],
+  );
+  return res.rows[0] ?? null;
+}
+
+/** Document row used by the ingest worker — includes the bytes, not agency-scoped. */
+export async function getKbDocumentForIngest(
+  id: number,
+): Promise<{ id: number; agency_id: number; content: Buffer } | null> {
+  const res = await requirePool().query<{ id: number; agency_id: number; content: Buffer }>(
+    `SELECT id, agency_id, content FROM agency_kb_documents WHERE id = $1;`,
+    [id],
+  );
+  return res.rows[0] ?? null;
+}
+
+export async function setKbDocumentStatus(
+  id: number,
+  status: string,
+  patch: {
+    error?: string | null;
+    chunkCount?: number;
+    extractedText?: string | null;
+    embedModel?: string | null;
+  } = {},
+): Promise<void> {
+  await requirePool().query(
+    `UPDATE agency_kb_documents
+        SET status = $2,
+            error = $3,
+            chunk_count = COALESCE($4, chunk_count),
+            extracted_text = COALESCE($5, extracted_text),
+            embed_model = COALESCE($6, embed_model),
+            updated_at = now()
+      WHERE id = $1;`,
+    [
+      id,
+      status,
+      patch.error ?? null,
+      patch.chunkCount ?? null,
+      patch.extractedText ?? null,
+      patch.embedModel ?? null,
+    ],
+  );
+}
+
+/** Documents left mid-ingest by a crash/restart — re-queued on boot. */
+export async function listProcessingKbDocumentIds(): Promise<number[]> {
+  const res = await requirePool().query<{ id: number }>(
+    `SELECT id FROM agency_kb_documents WHERE status = 'processing' ORDER BY id ASC LIMIT 200;`,
+  );
+  return res.rows.map((r) => r.id);
+}
+
+/** Lightweight agency-scoped existence check (avoids fetching the PDF bytes). */
+export async function kbDocumentExists(agencyId: number, id: number): Promise<boolean> {
+  const res = await requirePool().query(
+    `SELECT 1 FROM agency_kb_documents WHERE id = $1 AND agency_id = $2;`,
+    [id, agencyId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+export async function deleteKbDocument(agencyId: number, id: number): Promise<boolean> {
+  const res = await requirePool().query(
+    `DELETE FROM agency_kb_documents WHERE id = $1 AND agency_id = $2;`,
+    [id, agencyId],
+  );
+  return (res.rowCount ?? 0) > 0;
+}
+
+/** Replaces all chunks for a document in one transaction (used by ingest / reindex). */
+export async function replaceKbChunks(
+  documentId: number,
+  agencyId: number,
+  chunks: Array<{ content: string; embedding: number[] }>,
+): Promise<void> {
+  const pool = requirePool();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(`DELETE FROM agency_kb_chunks WHERE document_id = $1;`, [documentId]);
+    for (let i = 0; i < chunks.length; i++) {
+      const chunk = chunks[i]!;
+      await client.query(
+        `INSERT INTO agency_kb_chunks (document_id, agency_id, chunk_index, content, embedding)
+         VALUES ($1, $2, $3, $4, $5);`,
+        [documentId, agencyId, i, chunk.content, chunk.embedding],
+      );
+    }
+    await client.query("COMMIT");
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => undefined);
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export interface KbChunkRow {
+  id: string;
+  document_id: number;
+  title: string;
+  category: string;
+  property_code: string | null;
+  content: string;
+  embedding: number[];
+}
+
+/**
+ * Ready chunks for an agency, joined to their document for source labelling.
+ * Only chunks embedded with the current model are returned: a model swap leaves
+ * old vectors in a different space/dimension, so they must not be ranked against
+ * a query embedded with the new model (the document is flagged for re-index in
+ * the admin UI instead). Legacy rows with a NULL stamp are assumed current.
+ */
+export async function listKbChunksForAgency(
+  agencyId: number,
+  embedModel: string,
+): Promise<KbChunkRow[]> {
+  const res = await requirePool().query<KbChunkRow>(
+    `SELECT c.id::text AS id, c.document_id, d.title, d.category, d.property_code,
+            c.content, c.embedding
+       FROM agency_kb_chunks c
+       JOIN agency_kb_documents d ON d.id = c.document_id
+      WHERE c.agency_id = $1
+        AND d.status = 'ready'
+        AND (d.embed_model = $2 OR d.embed_model IS NULL);`,
+    [agencyId, embedModel],
+  );
+  return res.rows;
 }

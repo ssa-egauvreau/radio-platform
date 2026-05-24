@@ -25,10 +25,12 @@ boot. Handsets bind to an agency with a per-agency radio key (the legacy global
 - State: ViewModel + StateFlow
 - Backend: Node.js or TypeScript
 - Database: PostgreSQL on Railway
-- Repo: GitHub monorepo
+- Repo: GitHub monorepo [`safeT-PTT`](https://github.com/ssa-egauvreau/safeT-PTT)
 - Distribution: private APKs
 
 Step-by-step Railway + Android configuration: `docs/railway-android-setup.md`.
+
+**Production API / web console:** `https://safet.up.railway.app/`
 
 ## Architecture rules
 - Keep UI, ViewModel, domain logic, data access, and device integration separate.

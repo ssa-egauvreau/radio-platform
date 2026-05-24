@@ -1,37 +1,49 @@
 import { useState } from "react";
 import { Topbar } from "../../Topbar";
-import { AccountsPanel } from "./AccountsPanel";
 import { ChannelsPanel } from "./ChannelsPanel";
-import { AssignmentsPanel } from "./AssignmentsPanel";
+import { UsersAndAssignmentsPanel } from "./UsersAndAssignmentsPanel";
 import { UnitAliasesPanel } from "./UnitAliasesPanel";
 import { SoundsPanel } from "./SoundsPanel";
+import { ToneOutsPanel } from "./ToneOutsPanel";
 import { BrandingPanel } from "./BrandingPanel";
-import { BridgesPanel } from "./BridgesPanel";
 import { AuditPanel } from "./AuditPanel";
+import { IntegrationsPanel } from "./IntegrationsPanel";
+import { KnowledgeBasePanel } from "./KnowledgeBasePanel";
+import { AndroidAppPanel } from "./AndroidAppPanel";
+import { AiTestPanel } from "./AiTestPanel";
+import { AudioLabPanel } from "./AudioLabPanel";
 
 type TabId =
-  | "accounts"
+  | "users"
   | "channels"
-  | "assignments"
   | "aliases"
+  | "integrations"
+  | "knowledge"
+  | "ai-test"
+  | "audio-lab"
+  | "android"
   | "sounds"
+  | "soundboard"
   | "branding"
-  | "bridges"
   | "audit";
 
 const TABS: { id: TabId; label: string }[] = [
-  { id: "accounts", label: "Accounts" },
+  { id: "users", label: "Users" },
   { id: "channels", label: "Channels" },
-  { id: "assignments", label: "Assignments" },
   { id: "aliases", label: "Unit Aliases" },
+  { id: "integrations", label: "Integrations" },
+  { id: "knowledge", label: "Knowledge Base" },
+  { id: "ai-test", label: "AI Test" },
+  { id: "audio-lab", label: "Audio Lab" },
+  { id: "android", label: "Android App" },
   { id: "sounds", label: "Sounds" },
+  { id: "soundboard", label: "Soundboard" },
   { id: "branding", label: "Branding" },
-  { id: "bridges", label: "Radio Bridges" },
   { id: "audit", label: "Audit Log" },
 ];
 
 export function AdminPage() {
-  const [tab, setTab] = useState<TabId>("accounts");
+  const [tab, setTab] = useState<TabId>("users");
 
   return (
     <div className="app-shell">
@@ -50,13 +62,17 @@ export function AdminPage() {
           ))}
         </aside>
         <main className="panel">
-          {tab === "accounts" && <AccountsPanel />}
+          {tab === "users" && <UsersAndAssignmentsPanel />}
           {tab === "channels" && <ChannelsPanel />}
-          {tab === "assignments" && <AssignmentsPanel />}
           {tab === "aliases" && <UnitAliasesPanel />}
+          {tab === "integrations" && <IntegrationsPanel />}
+          {tab === "knowledge" && <KnowledgeBasePanel />}
+          {tab === "ai-test" && <AiTestPanel />}
+          {tab === "audio-lab" && <AudioLabPanel />}
+          {tab === "android" && <AndroidAppPanel />}
           {tab === "sounds" && <SoundsPanel />}
+          {tab === "soundboard" && <ToneOutsPanel />}
           {tab === "branding" && <BrandingPanel />}
-          {tab === "bridges" && <BridgesPanel />}
           {tab === "audit" && <AuditPanel />}
         </main>
       </div>

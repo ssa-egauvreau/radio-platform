@@ -76,6 +76,8 @@ export interface UserChannel {
   zone: string | null;
   /** True for a simulcast channel — keying it transmits on several real channels. */
   simulcast?: boolean;
+  /** Per-channel AI dispatcher (dispatch console only). */
+  ai_dispatch_enabled?: boolean;
 }
 
 export interface Simulcast {
@@ -95,6 +97,107 @@ export interface AuditEntry {
   ip: string | null;
 }
 
+export interface AiDispatchActivityEntry {
+  id: number;
+  transmission_id: number | null;
+  channel_name: string | null;
+  unit_id: string | null;
+  transcript: string;
+  intent: string | null;
+  summary: string | null;
+  dispatcher_response: string | null;
+  trigger_emergency_tone: boolean;
+  plate_lookup: {
+    ok: boolean;
+    plate?: string | null;
+    year?: string | null;
+    make?: string | null;
+    model?: string | null;
+    reason?: string;
+  } | null;
+  error: string | null;
+  outcome: string | null;
+  duration_ms: number | null;
+  created_at: string;
+}
+
+export interface AiDispatchTestResult {
+  request: {
+    transcript: string;
+    channelName: string;
+    unitId: string;
+    sendForReal: boolean;
+    synthesizeTts: boolean;
+  };
+  durationMs: number;
+  trace: { phase: string; ms: number; detail?: string }[];
+  channelAiDispatchEnabled: boolean;
+  ten8Configured: boolean;
+  parsed: {
+    actionable: boolean;
+    intent: string;
+    unit: string | null;
+    summary: string;
+    confidence: number;
+    dispatcher_response: string | null;
+    trigger_emergency_tone: boolean;
+    recommended_action: string | null;
+    code: string | null;
+    location_code: string | null;
+    location_name: string | null;
+    plate_request: {
+      plate: string | null;
+      state: string | null;
+      vin: string | null;
+    } | null;
+    info_request: {
+      type: string;
+      account_code: string | null;
+      subject: string | null;
+    } | null;
+    comment_text: string | null;
+  } | null;
+  knowledgeContextChars: number;
+  knowledgeContextPreview: string;
+  plateLookup: {
+    ok: boolean;
+    plate?: string | null;
+    state?: string | null;
+    year?: string | null;
+    make?: string | null;
+    model?: string | null;
+    color?: string | null;
+    vin?: string | null;
+    provider?: string;
+    reason?: string;
+    message?: string;
+    ms?: number;
+  } | null;
+  ten8Actions: Record<string, unknown>;
+  dispatcherReply: string;
+  ttsKind: string;
+  ttsMp3Base64: string | null;
+  errors: string[];
+}
+
+export interface Ten8ActiveIncident {
+  call_id: string;
+  incident_type: string | null;
+  priority: string | null;
+  status: string | null;
+  location: string | null;
+  updated_at: string;
+}
+
+export interface Ten8MapIncident {
+  call_id: string;
+  label: string;
+  incident_type: string | null;
+  location: string | null;
+  lat: number;
+  lon: number;
+}
+
 export interface Transmission {
   id: number;
   channel_id: number | null;
@@ -111,6 +214,29 @@ export interface Transmission {
   transcript_status: string;
 }
 
+/** Live voice relay: who is keyed on a channel (same source as Android `/v1/air`). */
+export interface AirState {
+  occupied: boolean;
+  transmitting_unit_id: string | null;
+  transmitting_display_name: string | null;
+}
+
+/** Home + scan talker hints (Android `/v1/talk-activity`). */
+export interface TalkActivity {
+  main: {
+    channel: string;
+    active: boolean;
+    unit_id: string | null;
+    username: string | null;
+  };
+  scan: {
+    channel: string;
+    active: boolean;
+    unit_id: string | null;
+    username: string | null;
+  };
+}
+
 export interface RadioPosition {
   unit_id: string;
   user_id: number | null;
@@ -121,8 +247,39 @@ export interface RadioPosition {
   accuracy_m: number | null;
   heading: number | null;
   speed_mps: number | null;
+  /** Device category of the reporting account (handheld, unit_radio, …), or null. */
+  device_type: string | null;
   updated_at: string;
 }
+
+/** One recorded GPS fix from a radio's position history. */
+export interface PositionSample {
+  lat: number;
+  lon: number;
+  accuracy_m: number | null;
+  heading: number | null;
+  speed_mps: number | null;
+  recorded_at: string;
+}
+
+/** A map overlay zone drawn by an operator — a circle or a custom polygon. */
+export interface Geofence {
+  id: number;
+  name: string;
+  shape: string;
+  color: string | null;
+  center_lat: number | null;
+  center_lon: number | null;
+  radius_m: number | null;
+  /** Polygon vertices as [lat, lon] pairs; null for a circle geofence. */
+  points: [number, number][] | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export type GeofenceInput =
+  | { shape: "circle"; name: string; centerLat: number; centerLon: number; radiusM: number; color?: string | null }
+  | { shape: "polygon"; name: string; points: [number, number][]; color?: string | null };
 
 export interface Alert {
   id: number;
@@ -139,13 +296,22 @@ export interface Alert {
   cleared_at: string | null;
 }
 
+/** Auto-derived activity status for a roster member. */
+export type PresenceStatus = "idle" | "transmitting" | "driving" | "emergency";
+
 export interface ChannelMember {
   unit_id: string;
   display_name: string | null;
   kind: string;
   /** Client platform: android, ios, web, desktop, bridge, or unknown. */
   client: string;
+  /** Account device category when known (unit_radio, phone, dispatch_console, …). */
+  device_type?: string | null;
   connected_ms: number;
+  /** Derived from live signals (talker / GPS speed / active emergency). */
+  status?: PresenceStatus;
+  /** Dispatch console on multiple channels — do not live-move. */
+  move_locked?: boolean;
 }
 
 export interface UnitAlias {
@@ -159,6 +325,84 @@ export interface AgencySound {
   mime: string;
   byte_size: number;
   updated_at: string;
+}
+
+export interface KbDocument {
+  id: number;
+  title: string;
+  category: string;
+  property_code: string | null;
+  filename: string | null;
+  mime: string;
+  byte_size: number;
+  status: string;
+  error: string | null;
+  chunk_count: number;
+  embed_model: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface KbCategory {
+  id: string;
+  label: string;
+  description: string;
+}
+
+export interface KbCategorySection {
+  id: string;
+  label: string;
+  description: string;
+  categories: KbCategory[];
+}
+
+export interface IntegrationItem {
+  key: string;
+  label: string;
+  description: string;
+  kind: "secret" | "text" | "url" | "multiline";
+  availability: "active" | "coming_soon";
+  placeholder?: string;
+  configured: boolean;
+  display_value: string | null;
+  updated_at: string | null;
+}
+
+export interface IntegrationsPayload {
+  platform: {
+    enabled: boolean;
+    llmConfigured: boolean;
+    model: string;
+    dispatchUnitId: string;
+  };
+  platform_note: string;
+  prompt_source?: "custom" | "sunset_bundled" | "railway_default";
+  groups: { id: string; label: string; items: IntegrationItem[] }[];
+}
+
+export interface ProviderHealth {
+  provider: string;
+  label: string;
+  status: "ok" | "low" | "out" | "error" | "unknown";
+  detail: string;
+  remaining?: number | null;
+  limit?: number | null;
+}
+
+export interface IntegrationHealthPayload {
+  providers: ProviderHealth[];
+  checkedAt: string;
+}
+
+/** Published fleet Android build (public /v1/app/android/version). */
+export interface AndroidAppRelease {
+  versionCode: number;
+  versionName: string;
+  /** Path on this server, e.g. /v1/app/android/apk */
+  url: string;
+  sha256: string;
+  mandatory: boolean;
+  notes: string;
 }
 
 export interface Bridge {
@@ -191,6 +435,33 @@ export interface BridgeInput {
   enabled: boolean;
 }
 
+/** Live ingest status for a stream bridge — its input level and VOX gate state. */
+export interface BridgeStatus {
+  id: number;
+  /** Normalized input level, 0–1. */
+  level: number;
+  /** Whether the VOX gate is currently keying the channel. */
+  keyed: boolean;
+  /** Whether the server is actively ingesting this bridge. */
+  running: boolean;
+}
+
+/** A custom soundboard tone-out — an operator-fired audio clip. */
+export interface ToneOut {
+  id: number;
+  name: string;
+  /** "once" plays through; "loop" repeats until stopped. */
+  play_mode: string;
+  /** Built-in glyph kind, used when no custom image is set. */
+  icon_kind: string;
+  icon_color: string;
+  /** True when a custom icon image is set (overrides the built-in glyph). */
+  has_image: boolean;
+  /** True once an audio clip has been uploaded — a tone-out is firable only then. */
+  has_audio: boolean;
+  sort_order: number;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(code: string, status: number) {
@@ -209,6 +480,27 @@ export function setToken(token: string | null): void {
 /** Current bearer token, for transports that cannot send headers (the voice WebSocket). */
 export function getToken(): string | null {
   return authToken;
+}
+
+/** Dispatched whenever the server tells us our token is no longer accepted. */
+export const SESSION_EXPIRED_EVENT = "safet:session-expired";
+
+/**
+ * Called by every API path that can come back 401, so an evicted session
+ * (account disabled, signed in elsewhere, etc.) drops out of the console
+ * within the same tick instead of waiting for the next user click.
+ */
+function handle401IfNeeded(status: number): void {
+  if (status !== 401) return;
+  authToken = null;
+  try {
+    localStorage.removeItem("securityradio.token");
+  } catch {
+    /* ignore storage quota / private mode */
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(SESSION_EXPIRED_EVENT));
+  }
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -234,6 +526,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
     }
   }
   if (!res.ok) {
+    handle401IfNeeded(res.status);
     const code = (data as { error?: string })?.error ?? `http_${res.status}`;
     throw new ApiError(code, res.status);
   }
@@ -241,8 +534,12 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 }
 
 export const api = {
-  login: (username: string, password: string) =>
-    request<{ token: string; user: SessionUser }>("POST", "/v1/auth/login", { username, password }),
+  login: (username: string, password: string, agencySlug?: string) =>
+    request<{ token: string; user: SessionUser }>("POST", "/v1/auth/login", {
+      username,
+      password,
+      ...(agencySlug?.trim() ? { agency_slug: agencySlug.trim().toLowerCase() } : {}),
+    }),
   me: () => request<{ user: SessionUser }>("GET", "/v1/auth/me"),
   myChannels: () => request<{ channels: UserChannel[] }>("GET", "/v1/me/channels"),
 
@@ -303,14 +600,146 @@ export const api = {
     return request<{ transmissions: Transmission[] }>("GET", `/v1/transmissions?${params}`);
   },
 
+  air: (channel: string) => {
+    const params = new URLSearchParams({ channel: channel.trim() });
+    return request<AirState>("GET", `/v1/air?${params}`);
+  },
+
+  talkActivity: (opts: { home?: string; scan?: string }) => {
+    const params = new URLSearchParams();
+    const home = opts.home?.trim();
+    const scan = opts.scan?.trim();
+    if (home) params.set("home", home);
+    if (scan) params.set("scan", scan);
+    return request<TalkActivity>("GET", `/v1/talk-activity?${params}`);
+  },
+
   locations: () => request<{ positions: RadioPosition[] }>("GET", "/v1/locations"),
+  ten8MapIncidents: () =>
+    request<{ incidents: Ten8MapIncident[] }>("GET", "/v1/ten8/map-incidents"),
+  agencyUnits: () =>
+    request<{ units: { unit_id: string; display_name: string | null }[] }>(
+      "GET",
+      "/v1/agency/units",
+    ),
+  locationHistory: (unit: string, from?: string, to?: string) => {
+    const params = new URLSearchParams({ unit });
+    if (from) {
+      params.set("from", from);
+    }
+    if (to) {
+      params.set("to", to);
+    }
+    return request<{ unit: string; samples: PositionSample[] }>(
+      "GET",
+      `/v1/locations/history?${params}`,
+    );
+  },
+
+  geofences: () => request<{ geofences: Geofence[] }>("GET", "/v1/geofences"),
+  createGeofence: (input: GeofenceInput) =>
+    request<{ geofence: Geofence }>("POST", "/v1/geofences", input),
+  deleteGeofence: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/geofences/${id}`),
+
   alerts: () => request<{ alerts: Alert[] }>("GET", "/v1/alerts"),
   sendAlert: (input: { kind: string; channelName: string | null; targetUnit?: string | null; message: string | null }) =>
     request<{ alert: Alert }>("POST", "/v1/alerts", input),
   clearAlert: (id: number) => request<{ alert: Alert }>("POST", `/v1/alerts/${id}/clear`),
 
+  /** Toggles the 10-33 channel marker so radios on that channel show a warning icon. */
+  setChannelTen33: (channelName: string, active: boolean) =>
+    request<{ ok: boolean; active: boolean }>("POST", "/v1/channels/ten33", { channel: channelName, active }),
+
+  getChannelTen33: (channelName: string) =>
+    request<{ active: boolean }>(
+      "GET",
+      `/v1/channels/ten33?channel=${encodeURIComponent(channelName)}`,
+    ),
+
+  getAiDispatchStatus: () =>
+    request<{
+      platform_enabled: boolean;
+      platform_llm_configured: boolean;
+      agency_tts_configured: boolean;
+      agency_prompt_configured: boolean;
+      agency_prompt_source?: "custom" | "sunset_bundled" | "railway_default";
+      model: string;
+      dispatch_unit_id: string;
+    }>("GET", "/v1/ai-dispatch/status"),
+
+  setChannelAiDispatch: (channelName: string, enabled: boolean) =>
+    request<{ ok: boolean; enabled: boolean }>("POST", "/v1/channels/ai-dispatch", {
+      channel: channelName,
+      enabled,
+    }),
+
+  getChannelAiDispatch: (channelName: string) =>
+    request<{ enabled: boolean }>(
+      "GET",
+      `/v1/channels/ai-dispatch?channel=${encodeURIComponent(channelName)}`,
+    ),
+
+  getAiDispatchActivity: (limit = 50) =>
+    request<{
+      count: number;
+      entries: AiDispatchActivityEntry[];
+      ten8_active_incidents: Ten8ActiveIncident[];
+      ten8_recent_webhooks: { id: number; action: string; call_id: string | null; received_at: string }[];
+    }>("GET", `/v1/ai-dispatch/activity?limit=${limit}`),
+
+  testAiDispatch: (input: {
+    transcript: string;
+    channelName: string;
+    unitId: string;
+    sendForReal?: boolean;
+    synthesizeTts?: boolean;
+  }) => request<AiDispatchTestResult>("POST", "/v1/ai-dispatch/test", input),
+
   channelRoster: (channel: string) =>
     request<{ members: ChannelMember[] }>("GET", `/v1/channels/roster?channel=${encodeURIComponent(channel)}`),
+
+  /** Live Channel Control: every channel with its currently-connected members. */
+  channelRosters: () =>
+    request<{ channels: { channel: string; members: ChannelMember[] }[] }>(
+      "GET",
+      "/v1/channels/rosters",
+    ),
+
+  /** Live Channel Control: push a live move command to a unit. */
+  moveUnit: (input: { unitId: string; toChannel: string; fromChannel?: string | null; reason?: string | null }) =>
+    request<{ ok: boolean; reached: number }>("POST", "/v1/channels/move", {
+      unit_id: input.unitId,
+      toChannel: input.toChannel,
+      fromChannel: input.fromChannel ?? null,
+      reason: input.reason ?? null,
+    }),
+
+  /** Live Channel Control: create (or reuse) an emergency channel and pull units in. */
+  createEmergencyChannel: (input: { name?: string; unitIds: string[] }) =>
+    request<{ ok: boolean; channel: string; reached: number }>("POST", "/v1/channels/emergency", {
+      name: input.name ?? null,
+      unit_ids: input.unitIds,
+    }),
+
+  /** Fires the same /radio/emergency endpoint the Android handsets use; surfaces as an alert. */
+  radioEmergency: (input: {
+    unitId: string;
+    channel: string | null;
+    active: boolean;
+    displayName?: string | null;
+    message?: string | null;
+  }) =>
+    request<{ ok?: boolean; alert?: unknown; cleared?: number }>(
+      "POST",
+      "/v1/radio/emergency",
+      {
+        unit_id: input.unitId,
+        channel: input.channel,
+        active: input.active,
+        display_name: input.displayName ?? null,
+        message: input.message ?? null,
+      },
+    ),
 
   unitAliases: () => request<{ aliases: UnitAlias[] }>("GET", "/v1/unit-aliases"),
   setUnitAlias: (unitId: string, label: string) =>
@@ -357,22 +786,65 @@ export const api = {
   deleteAgencyUser: (id: number, uid: number) =>
     request<{ ok: boolean }>("DELETE", `/v1/owner/agencies/${id}/users/${uid}`),
 
+  // --- agency integrations (API keys, webhooks) ----------------------------
+  getIntegrations: () => request<IntegrationsPayload>("GET", "/v1/admin/integrations"),
+  getIntegrationHealth: () =>
+    request<IntegrationHealthPayload>("GET", "/v1/admin/integrations/health"),
+  setIntegration: (key: string, value: string) =>
+    request<IntegrationsPayload>("PATCH", `/v1/admin/integrations/${encodeURIComponent(key)}`, {
+      value,
+    }),
+
+  /** Latest OTA APK published for handsets (same feed the radio app polls). */
+  getAndroidAppRelease: () => request<AndroidAppRelease>("GET", "/v1/app/android/version"),
+
   // --- custom radio tones ------------------------------------------------
   listSounds: () => request<{ sounds: AgencySound[] }>("GET", "/v1/admin/sounds"),
   deleteSound: (kind: string) =>
     request<{ ok: boolean }>("DELETE", `/v1/admin/sounds/${encodeURIComponent(kind)}`),
+
+  // --- AI dispatcher knowledge base --------------------------------------
+  listKbDocuments: () =>
+    request<{
+      documents: KbDocument[];
+      categories: string[];
+      category_sections: KbCategorySection[];
+      embed_model: string;
+    }>("GET", "/v1/admin/kb/documents"),
+  deleteKbDocument: (id: number) =>
+    request<{ ok: boolean }>("DELETE", `/v1/admin/kb/documents/${id}`),
+  reindexKbDocument: (id: number) =>
+    request<{ ok: boolean }>("POST", `/v1/admin/kb/documents/${id}/reindex`),
 
   // --- agency branding ---------------------------------------------------
   deleteAgencyLogo: () => request<{ ok: boolean }>("DELETE", "/v1/admin/agency/logo"),
 
   // --- radio bridges -----------------------------------------------------
   listBridges: () => request<{ bridges: Bridge[] }>("GET", "/v1/admin/bridges"),
+  bridgeStatuses: () =>
+    request<{ statuses: BridgeStatus[] }>("GET", "/v1/admin/bridges/status"),
   createBridge: (input: BridgeInput) => request<{ bridge: Bridge }>("POST", "/v1/admin/bridges", input),
   updateBridge: (id: number, patch: Partial<BridgeInput>) =>
     request<{ bridge: Bridge }>("PATCH", `/v1/admin/bridges/${id}`, patch),
   deleteBridge: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/admin/bridges/${id}`),
   /** Enabled audio-device bridges this agency can run from the desktop console. */
   listRunnableBridges: () => request<{ bridges: Bridge[] }>("GET", "/v1/bridges/runnable"),
+
+  // --- custom soundboard tone-outs ---------------------------------------
+  toneOuts: () => request<{ toneOuts: ToneOut[] }>("GET", "/v1/tone-outs"),
+  createToneOut: (input: {
+    name: string;
+    playMode: string;
+    iconKind: string;
+    iconColor: string;
+  }) => request<{ toneOut: ToneOut }>("POST", "/v1/admin/tone-outs", input),
+  updateToneOut: (
+    id: number,
+    patch: Partial<{ name: string; playMode: string; iconKind: string; iconColor: string }>,
+  ) => request<{ toneOut: ToneOut }>("PATCH", `/v1/admin/tone-outs/${id}`, patch),
+  deleteToneOut: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/admin/tone-outs/${id}`),
+  deleteToneOutIcon: (id: number) =>
+    request<{ ok: boolean }>("DELETE", `/v1/admin/tone-outs/${id}/icon`),
 
   // --- simulcast channels ------------------------------------------------
   listSimulcasts: () => request<{ simulcasts: Simulcast[] }>("GET", "/v1/simulcast"),
@@ -391,6 +863,7 @@ export async function uploadAgencyLogo(file: File): Promise<void> {
   }
   const res = await fetch("/v1/admin/agency/logo", { method: "PUT", headers, body: file });
   if (!res.ok) {
+    handle401IfNeeded(res.status);
     let code = `http_${res.status}`;
     try {
       code = (JSON.parse(await res.text()) as { error?: string }).error ?? code;
@@ -413,6 +886,7 @@ export async function uploadSound(kind: string, file: File): Promise<void> {
     body: file,
   });
   if (!res.ok) {
+    handle401IfNeeded(res.status);
     let code = `http_${res.status}`;
     try {
       code = (JSON.parse(await res.text()) as { error?: string }).error ?? code;
@@ -423,6 +897,48 @@ export async function uploadSound(kind: string, file: File): Promise<void> {
   }
 }
 
+/** Uploads a knowledge-base PDF (raw body — metadata rides on the query string). */
+export async function uploadKbDocument(
+  file: File,
+  meta: { title: string; category: string; propertyCode?: string },
+): Promise<KbDocument> {
+  const headers: Record<string, string> = { "Content-Type": "application/pdf" };
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  const params = new URLSearchParams({
+    title: meta.title,
+    category: meta.category,
+    filename: file.name,
+  });
+  if (meta.propertyCode?.trim()) {
+    params.set("property_code", meta.propertyCode.trim());
+  }
+  const res = await fetch(`/v1/admin/kb/documents?${params.toString()}`, {
+    method: "POST",
+    headers,
+    body: file,
+  });
+  if (!res.ok) {
+    handle401IfNeeded(res.status);
+    let code = `http_${res.status}`;
+    // Express's `raw()` middleware answers 413 with an HTML body, not JSON, so the
+    // generic try/parse below would leave a useless "http_413". Map it explicitly
+    // here so the UI can show "PDF too large — limit is N MB."
+    if (res.status === 413) {
+      code = "pdf_too_large";
+    } else {
+      try {
+        code = (JSON.parse(await res.text()) as { error?: string }).error ?? code;
+      } catch {
+        /* keep the generic code */
+      }
+    }
+    throw new ApiError(code, res.status);
+  }
+  return (JSON.parse(await res.text()) as { document: KbDocument }).document;
+}
+
 /** Fetches a transmission's WAV audio as a Blob (a bearer header cannot ride on <audio src>). */
 export async function fetchTransmissionAudio(id: number): Promise<Blob> {
   const headers: Record<string, string> = {};
@@ -431,6 +947,64 @@ export async function fetchTransmissionAudio(id: number): Promise<Blob> {
   }
   const res = await fetch(`/v1/transmissions/${id}/audio`, { headers });
   if (!res.ok) {
+    handle401IfNeeded(res.status);
+    throw new ApiError(`http_${res.status}`, res.status);
+  }
+  return res.blob();
+}
+
+/** Uploads a raw file body to one of the bearer-protected API endpoints. */
+async function uploadRaw(path: string, file: File, fallbackType: string): Promise<void> {
+  const headers: Record<string, string> = { "Content-Type": file.type || fallbackType };
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  const res = await fetch(path, { method: "PUT", headers, body: file });
+  if (!res.ok) {
+    handle401IfNeeded(res.status);
+    let code = `http_${res.status}`;
+    try {
+      code = (JSON.parse(await res.text()) as { error?: string }).error ?? code;
+    } catch {
+      /* keep the generic code */
+    }
+    throw new ApiError(code, res.status);
+  }
+}
+
+/** Uploads a soundboard tone-out's audio clip (raw body — not JSON). */
+export function uploadToneOutAudio(id: number, file: File): Promise<void> {
+  return uploadRaw(`/v1/admin/tone-outs/${id}/audio`, file, "audio/wav");
+}
+
+/** Uploads a soundboard tone-out's custom icon image (raw body — not JSON). */
+export function uploadToneOutIcon(id: number, file: File): Promise<void> {
+  return uploadRaw(`/v1/admin/tone-outs/${id}/icon`, file, "image/png");
+}
+
+/** Fetches a tone-out's audio clip as a Blob (a bearer header cannot ride on a URL). */
+export async function fetchToneOutAudio(id: number): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  const res = await fetch(`/v1/tone-outs/${id}/audio`, { headers });
+  if (!res.ok) {
+    handle401IfNeeded(res.status);
+    throw new ApiError(`http_${res.status}`, res.status);
+  }
+  return res.blob();
+}
+
+/** Fetches a tone-out's custom icon image as a Blob. */
+export async function fetchToneOutIcon(id: number): Promise<Blob> {
+  const headers: Record<string, string> = {};
+  if (authToken) {
+    headers["Authorization"] = `Bearer ${authToken}`;
+  }
+  const res = await fetch(`/v1/tone-outs/${id}/icon`, { headers });
+  if (!res.ok) {
+    handle401IfNeeded(res.status);
     throw new ApiError(`http_${res.status}`, res.status);
   }
   return res.blob();
@@ -441,6 +1015,7 @@ export function describeError(error: unknown): string {
   if (error instanceof ApiError) {
     const map: Record<string, string> = {
       invalid_login: "Incorrect username or password.",
+      owner_use_platform_portal: "Platform owner accounts sign in without an agency code, from the Platform portal.",
       missing_credentials: "Enter a username and password.",
       missing_fields: "Fill in every required field.",
       missing_name: "Enter a name.",
@@ -454,6 +1029,11 @@ export function describeError(error: unknown): string {
       database_unavailable: "The database is not configured on the server.",
       bad_role: "Unknown role.",
       agency_disabled: "Your agency has been disabled. Contact your platform owner.",
+      session_superseded: "Signed in on another device — sign in again here if you want to continue.",
+      unit_move_locked:
+        "That operator has the dispatch console open on multiple channels and cannot be moved.",
+      pdf_too_large:
+        "PDF is too large to upload (default limit 50 MB). Compress the file or split it before retrying.",
     };
     return map[error.message] ?? `Request failed (${error.message}).`;
   }

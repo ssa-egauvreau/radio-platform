@@ -1,7 +1,15 @@
-import { useEffect, useState } from "react";
-import { api, type ChannelMember } from "../api";
+import type { ChannelMember, PresenceStatus } from "../api";
+import { useChannelRoster } from "../hooks/useChannelRoster";
 import { useUnitAliasResolver } from "../unitAliases";
 import { IconUser } from "../icons";
+
+/** Label + colour class for each derived presence status. */
+const STATUS_META: Record<PresenceStatus, { label: string; cls: string }> = {
+  emergency: { label: "Emergency", cls: "emergency" },
+  transmitting: { label: "On air", cls: "transmitting" },
+  driving: { label: "Driving", cls: "driving" },
+  idle: { label: "Idle", cls: "idle" },
+};
 
 function formatConnected(ms: number): string {
   const minutes = Math.floor(ms / 60000);
@@ -37,51 +45,48 @@ function tier(ms: number): string {
 }
 
 /** Live list of radios/operators connected to a channel's voice stream. */
-export function ChannelRoster({ channelName }: { channelName: string }) {
-  const [members, setMembers] = useState<ChannelMember[]>([]);
+export function ChannelRoster({
+  channelName,
+  compact = false,
+  members: membersProp,
+}: {
+  channelName: string;
+  /** Tighter rows for Mission Control M/L widgets. */
+  compact?: boolean;
+  /** When provided, skips internal roster polling (parent shares one poll). */
+  members?: ChannelMember[];
+}) {
+  const polled = useChannelRoster(channelName, membersProp === undefined);
+  const members = membersProp ?? polled.members;
   const aliasFor = useUnitAliasResolver();
 
-  useEffect(() => {
-    let cancelled = false;
-    async function poll() {
-      try {
-        const res = await api.channelRoster(channelName);
-        if (!cancelled) {
-          setMembers(res.members);
-        }
-      } catch {
-        /* keep last snapshot */
-      }
-    }
-    void poll();
-    const timer = window.setInterval(poll, 5000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(timer);
-    };
-  }, [channelName]);
-
   return (
-    <div className="roster">
+    <div className={`roster${compact ? " roster--compact" : ""}`}>
       <div className="roster-head">
-        <IconUser size={13} />
+        <IconUser size={compact ? 12 : 13} />
         <span>On this channel</span>
         <span className="count">{members.length}</span>
       </div>
       {members.length === 0 ? (
         <div className="roster-empty">No radios connected.</div>
       ) : (
-        members.map((member, index) => (
-          <div className="roster-row" key={`${member.unit_id}-${index}`}>
-            <span className={`roster-dot ${tier(member.connected_ms)}`} title="Connected" />
-            <span className="roster-name">{member.display_name || aliasFor(member.unit_id)}</span>
-            {member.kind === "legacy" && <span className="roster-tag">radio</span>}
-            {CLIENT_LABEL[member.client] && (
-              <span className="roster-tag">{CLIENT_LABEL[member.client]}</span>
-            )}
-            <span className="roster-time">{formatConnected(member.connected_ms)}</span>
-          </div>
-        ))
+        <ul className="roster-list">
+          {members.map((member, index) => {
+            const status = STATUS_META[member.status ?? "idle"];
+            return (
+              <li className="roster-row" key={`${member.unit_id}-${index}`}>
+                <span className={`roster-dot ${tier(member.connected_ms)}`} title="Connected" />
+                <span className="roster-name">{member.display_name || aliasFor(member.unit_id)}</span>
+                <span className={`roster-status ${status.cls}`}>{status.label}</span>
+                {member.kind === "legacy" && <span className="roster-tag">radio</span>}
+                {CLIENT_LABEL[member.client] && (
+                  <span className="roster-tag">{CLIENT_LABEL[member.client]}</span>
+                )}
+                <span className="roster-time">{formatConnected(member.connected_ms)}</span>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );

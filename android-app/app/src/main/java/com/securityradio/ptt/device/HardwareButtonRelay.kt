@@ -41,4 +41,11 @@ sealed interface HardwareButtonEvent {
     data object ChannelDownPressed : HardwareButtonEvent
     data object ScanTogglePressed : HardwareButtonEvent
     data object PlayLastTransmissionPressed : HardwareButtonEvent
+    data object PlayLastTransmissionReleased : HardwareButtonEvent
+    data object VolumeCheckPressed : HardwareButtonEvent
+    data object VolumeCheckReleased : HardwareButtonEvent
+    /** Single volume-check tone for the volume knob (one beep per turn, no loop). */
+    data object VolumeCheckTapped : HardwareButtonEvent
+    data object ToggleDayNightPressed : HardwareButtonEvent
+    data object ToggleDayNightReleased : HardwareButtonEvent
 }

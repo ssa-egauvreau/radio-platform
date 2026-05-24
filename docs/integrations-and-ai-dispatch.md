@@ -1,0 +1,210 @@
+# Integrations and AI dispatcher
+
+safeT separates **who configures what**:
+
+| Layer | Where | Examples |
+|-------|--------|----------|
+| **Platform (Railway env)** | Server operator | AI dispatcher on/off, LLM API key, model, **default** system prompt |
+| **Per agency (Admin → Integrations)** | Each tenant’s admin | ElevenLabs API key & voice, **agency system prompt** (10-codes, call signs), outbound webhook |
+| **Per channel (dispatch console)** | Channel panel | Turn AI dispatcher on/off per channel (like 10-33 marker) |
+
+**10-8 Systems (CAD + webhook)** and **plate/VIN lookup** are configured per agency under **Admin → Integrations**, not Railway Variables. Railway is only for platform-wide AI (Anthropic/OpenAI) and optional global fallbacks (see below).
+
+---
+
+## Railway environment variables (AI dispatcher)
+
+Set these on the **safeT PTT** service in Railway (not in the Integrations page).
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `AI_DISPATCH_ENABLED` | No | `1` / `true` to allow AI dispatch when agency + channel are configured. Default off. |
+| `AI_DISPATCH_LLM_API_KEY` | For AI | **Anthropic:** paste your old `ANTHROPIC_API_KEY` here. **OpenAI:** use an OpenAI `sk-…` key instead. |
+| `AI_DISPATCH_LLM_PROVIDER` | No | `anthropic` (default) or `openai` |
+| `AI_DISPATCH_PROMPT_CACHE_TTL` | No | `1h` for Anthropic prompt caching (same as old 10-8 server). Use `5m` for shorter cache. |
+| `AI_DISPATCH_LLM_BASE_URL` | OpenAI only | Default `https://api.openai.com/v1` — **leave unset for Anthropic** |
+| `AI_DISPATCH_LLM_MODEL` | No | Anthropic default `claude-sonnet-4-6`; OpenAI default `gpt-4o-mini` |
+| `AI_DISPATCH_SYSTEM_PROMPT` | No | **Fallback** dispatcher prompt if the agency leaves Integrations prompt empty |
+| `AI_DISPATCH_UNIT_ID` | No | Unit id on the radio when AI keys up (default `AI-DISPATCH`) |
+| `AI_DISPATCH_YIELDS_DEFAULT` | No | Default `1` — AI yields to live units on a channel |
+| `KB_ENABLED` | No | Knowledge-base retrieval on/off. Default **on**; set `off` to disable RAG. |
+| `KB_EMBED_MODEL` | No | transformers.js embedding model (default `Xenova/all-MiniLM-L6-v2`, 384-dim). |
+| `KB_EMBED_DTYPE` | No | Embedding quantization (default `q8`; same memory trade-off as `WHISPER_DTYPE`). |
+| `KB_RETRIEVE_TOP_K` | No | Max passages injected per transmission (default `5`). |
+| `KB_MAX_DOC_BYTES` | No | Upload size cap (default `10mb`). |
+
+Example:
+
+```env
+AI_DISPATCH_ENABLED=1
+AI_DISPATCH_LLM_API_KEY=sk-...
+AI_DISPATCH_LLM_MODEL=gpt-4o-mini
+```
+
+Restart the service after changing env vars.
+
+---
+
+## Agency Integrations page
+
+**Path:** Sign in as **admin** → **Admin** → **Integrations**.
+
+- **ElevenLabs API key** — TTS for that agency’s AI replies.
+- **ElevenLabs voice ID** — Voice from your ElevenLabs library.
+- **TTS model** — Default **`eleven_v3`** for dispatcher speech (short Copy/913 acks and long plate/callout lines). If v3 returns 4xx on the sync API, the server automatically retries **`eleven_turbo_v2_5`** so the channel is not silent. Optional Railway overrides:
+  - `ELEVENLABS_LONG_MODEL_ID` or `ELEVENLABS_MODEL_ID` — default `eleven_v3`
+  - `ELEVENLABS_FAST_MODEL_ID` — only used when you explicitly set a Flash model id containing `flash` (legacy low-latency path)
+  - `ELEVENLABS_FAST_MAX_CHARS` — default `140` (longer text auto-switches to expressive)
+  - `ELEVENLABS_STABILITY` — expressive Creative default `0.0`; `ELEVENLABS_FAST_STABILITY` — Flash default `0.55`
+- **TTS pronunciation** — Same pipeline as the old 10-8 dispatcher: radio codes (`913` → “nine thirteen”), 10-codes (`10-97` → “ten” + pause + “ninety seven”, not “ten to ninety seven”), SSA account codes (`32-08` → “thirty-two oh-eight”), command staff (`27-000` → “twenty seven thousand”), other dashes → short SSML pauses, call types, phone digit groups, NATO plate phonetics, and SSML pacing breaks.
+- **TTS precache** — On startup, common ack phrases from the old server (Copy, `{unit}, 913`, status acks, standby lines) are pre-generated per agency that has ElevenLabs configured, so short replies play instantly.
+- **Web search (phone book)** — Phone numbers, contacts, external addresses (e.g. Garden Grove PD), legal codes, and general questions use the same Anthropic `web_search` tool as the old dispatcher. Requires Railway `AI_DISPATCH_LLM_API_KEY` (Anthropic) and `AI_DISPATCH_ENABLED=1`. The AI says “standby” first, then speaks the answer a few seconds later.
+- **AI dispatcher system prompt** — **Your agency’s** instructions: local 10-codes, unit/call sign format, tone, and radio policy. If this field is empty, **Sunset Safety** agencies use the built-in prompt exported from the 10-8 AI dashboard; other agencies use `AI_DISPATCH_SYSTEM_PROMPT` from Railway.
+- **Outbound webhook URL** — Optional HTTPS URL; safeT POSTs JSON when the AI dispatcher sends a reply.
+- **Lookups** — PlateToVIN key, optional VIN (Auto.dev) key, default plate state.
+- **Webhooks** — **10-8 webhook bearer token** (what 10-8 sends as `Authorization: Bearer …`).
+- **10-8 CAD** — API key + secret, optional base URL, **live CAD writes** (`1` = post comments, `0` = shadow/log only).
+
+Secrets are stored per `agency_id` in Postgres (`agency_integrations`). The API never returns full secret values—only masked hints (e.g. `••••abcd` for keys, or character count for the multiline prompt).
+
+---
+
+## Per-channel AI dispatch
+
+**Path:** Dispatch console → open a channel panel → **AI DISPATCH OFF / ON**.
+
+- Stored in `channel_ai_dispatch` per `(agency_id, channel_name)`.
+- Requires platform AI on (Railway), agency ElevenLabs configured, and a completed transcript after a unit transmission.
+- AI traffic uses the platform `AI_DISPATCH_UNIT_ID` so the engine does not reply to its own transmissions.
+
+---
+
+## Flow (built-in dispatcher)
+
+1. Unit transmits on a channel with **AI DISPATCH ON**.
+2. Recording is transcribed (Whisper).
+3. Server loads the **agency system prompt** (Integrations) or Railway default.
+4. LLM returns structured JSON (same shape as 10-8): `dispatcher_response`, `trigger_emergency_tone`, intents, etc.
+5. **10-33 / 10-34** — regex + AI turn the safeT **10-33 channel marker** on or off (DB flag + marker tone on the channel every 12s), not a browser-only sound.
+6. ElevenLabs speaks `dispatcher_response` → voice loopback on the channel.
+7. Optional outbound webhook with transcript and reply text.
+
+Server logs are tagged `[ai-dispatch]`.
+
+---
+
+## Knowledge base (RAG) — Admin → Knowledge Base
+
+Give the AI dispatcher agency reference material without stuffing it all into the cached system prompt. The admin page is organized into sections for **radio operations**, **safety and response**, **policy and legal**, **client and site information**, and **general reference**.
+
+**Why not just put it in the prompt?** Prompt caching only makes *re-sending* the same prompt cheaper; it does not raise the context ceiling or help the model find the one relevant paragraph. A handful of documents already overflows it. Instead, the knowledge base uses **retrieval-augmented generation (RAG)**:
+
+1. **Upload (Admin → Knowledge Base):** an admin uploads a PDF into one of the sectioned categories and may add an optional **property code**.
+2. **Index (once, in the background):** the server extracts the PDF text (`pdfjs-dist`), splits it into ~800-character passages, and embeds each one into a 384-dim vector using a local transformers.js model (no per-token API cost). Vectors are stored in Postgres. The document shows **Processing → Ready** (with a chunk count) in the admin table.
+3. **Retrieve (at dispatch time):** the transmission transcript is embedded and compared (cosine similarity, in Node) against that agency's passages. Only the top few matches are injected — into the **user turn, not the cached system prompt**, so the prompt cache hit rate is unaffected. A passage tagged to a property mentioned on the air is boosted.
+
+The current category catalog is:
+
+- **Radio operations:** post orders, route sheets, radio procedures, radio codes, call types.
+- **Safety and response:** safety procedures, emergency procedures, incident response plans.
+- **Policy and legal:** policies/SOPs, laws/legal references.
+- **Client and site information:** client information, property information, contacts/escalation.
+- **General reference:** training material, other reference.
+
+Categories organize the admin page and label retrieved passages for the AI (for example, `[Radio codes: Signal list]`). Property codes are the retrieval signal that changes ranking today; category-specific retrieval boosts can be added later if needed.
+
+This is the practical meaning of the AI "learning" the agency's material: the corpus can grow to hundreds of documents while each LLM call stays small. **Fine-tuning is not used** (the hosted Claude/OpenAI models are not fine-tunable this way, and it would go stale on every document edit).
+
+**Graceful degradation:** if `KB_ENABLED=off`, the embedding model can't load (Railway OOM — same risk as Whisper), or no passage is relevant, retrieval returns nothing and the dispatcher behaves exactly as before. Scanned-image PDFs with no extractable text are marked **Failed** (OCR is out of scope); re-upload a text PDF.
+
+**Changing the embedding model:** each document records the `KB_EMBED_MODEL` it was indexed with. If you change that env var, existing documents are flagged **Re-index needed** in the admin table and are skipped at dispatch time (their old vectors live in a different space) until you re-index them.
+
+> Scope today: **PDF only**, in-Node cosine search (no `pgvector`), per-agency isolation. The retrieval interface is narrow so `pgvector` or a hosted embedder can replace the in-Node path later without touching callers.
+
+---
+
+## Database tables
+
+- `agency_integrations` — `(agency_id, integration_key)` → value
+- `channel_ai_dispatch` — `(agency_id, channel_name)` → `enabled`, `yields_to_units`
+- `agency_kb_documents` — uploaded knowledge-base PDFs (metadata, original bytes, status)
+- `agency_kb_chunks` — embedded passages (`embedding REAL[]`) retrieved at dispatch time
+
+---
+
+## 10-8 Systems (three credentials from the old dispatcher)
+
+Migrate from the **10-8 alert dashboard** Railway project into **Admin → Integrations** (not Railway):
+
+| Old Railway variable | Integrations field | Purpose |
+|---------------------|-------------------|---------|
+| `WEBHOOK_SECRET` | **Webhooks** → 10-8 incident export bearer token | 10-8 **pushes** incidents to safeT |
+| `TEN8_API_KEY` + `TEN8_API_SECRET` | **10-8 CAD API** → key + secret (v1.0.8) | **Reads** (pending calls, lookups) + **comments** on existing calls |
+| `TEN8_NEW_INCIDENT_API_KEY` + `TEN8_NEW_INCIDENT_API_SECRET` | **10-8 New Incident API** → key + secret | **Creates** new CAD calls (Basic auth on `interface.10-8systems.com`) |
+| `TEN8_API_BASE_URL` | 10-8 CAD API base URL (optional) | Override v1.0.8 gateway |
+| `TEN8_NEW_INCIDENT_API_BASE_URL` | New Incident API base URL (optional) | Override create-call host |
+| `live_execution_enabled` (UI toggle) | **10-8 live CAD writes** = `1` or `0` | `0` = shadow/log only; `1` = real writes |
+
+### Incident export webhook
+
+Point **10-8 Systems** incident export at:
+
+`https://YOUR_SAFET_HOST/v1/webhooks/10-8?agency=YOUR_AGENCY_SLUG&token=YOUR_WEBHOOK_SECRET`
+
+- **Auth:** the shared secret (`TEN8_WEBHOOK_SECRET` env, or `ten8_webhook_secret` in Integrations) may be sent **either** as `Authorization: Bearer …` **or**, when 10-8 can't set headers, as the `token=` (also accepts `secret=`/`key=`) query param shown above. In production a secret is required; unauthenticated posts get **401**.
+- **Agency:** `agency` query must match your agency slug.
+
+Active incidents appear on **Command → AI dispatch activity log**.
+
+## Plate / VIN lookup
+
+**Admin → Integrations → Lookups:**
+
+- **License plate lookup API key** — PlateToVIN.com key (912 plate readbacks).
+- **VIN lookup API key** — Auto.dev (optional; uses plate key if empty).
+- **Default plate state** — e.g. `CA`.
+
+Do **not** put plate keys in Railway for normal agency setup. Optional env fallbacks (`PLATE_LOOKUP_DEFAULT_STATE`, `PLATE_LOOKUP_PROVIDER`) exist for operators only; per-agency keys in Integrations take precedence.
+
+## Transmission log and AI dispatch audio (clear PCM, not IMBE)
+
+The **transmission log** always records and transcribes **clear PCM** from the radio uplink — not P25 IMBE vocoder audio (Whisper cannot understand vocoded speech).
+
+- Every voice join includes `record_listen_pcm: true`. With **TX mode Fast** (vocoder), clients send **IMBE on the channel** plus a **clear PCM sideband** (magic `0xF6 0xAC`) that the relay records but does not broadcast — so the transmission log and Whisper stay on clear speech.
+- When **AI dispatch is ON** for a channel, clients also receive `ai_dispatch_listen_pcm` (same sideband when using vocoder).
+- Other units still hear normal channel audio (IMBE when peers use Fast mode).
+- Toggling AI dispatch in the console notifies connected voice clients immediately.
+
+## Unit 10-20 (radio map location)
+
+When command staff or a unit asks **where someone is** (10-20, location on unit X), the AI dispatcher uses **GPS from the dispatch radio map** (`GET /v1/locations` data). It answers on the air in **plain language** first:
+
+- Cross streets (e.g. “near Main Street and 1st Street”)
+- Landmark / business (e.g. “in the McDonalds parking lot in Irvine by Jamboree”)
+
+**Reverse geocoding:** OpenStreetMap Nominatim by default. Optional **Google Maps Geocoding API key** in **Admin → Integrations → Lookups** (or env `GOOGLE_MAPS_GEOCODING_API_KEY`) for richer POI names.
+
+If they ask for the **full street address**, the dispatcher reads the complete address instead of the short landmark version.
+
+Units must have a **recent GPS fix** on the map (within about 10 minutes) or the dispatcher will say they are not showing on the map.
+
+## 10-8 CAD API and New Incident API
+
+**10-8 CAD API (v1.0.8)** — `TEN8_API_KEY` / `TEN8_API_SECRET` from the old dispatcher:
+
+- List/read incidents, post AI summary **comments** on the active webhook incident.
+- **10-8 live CAD writes** — `1` to post for real; `0` for shadow mode (log only).
+
+**10-8 New Incident API** — `TEN8_NEW_INCIDENT_API_KEY` / `TEN8_NEW_INCIDENT_API_SECRET`:
+
+- Second key pair from 10-8 support; used only to **create** new calls (not reads/comments).
+- **Self-dispatch (AI `intent=dispatch`)** sends addresses in **Google Maps / 10-8 format**: `street, city, ST ZIP` on the `location` field, plus `streetAddress`, `city`, `state`, `zip`, and `county` when known. **SSA properties** (`1806`, `3208`, etc.) use the property database for the street address; **`locnotes` is the property number then the exact name, digits only, no dashes and no word “property”** (e.g. `3208 Harbor Chapman Restaurant Center`). **Plate/VIN lookups** on an open (or just-created) call are sent to 10-8 via the **vehicles API** (`license`, `state`, `vin`, `year`, `make`, `model`, `color`) and duplicated as a **CAD comment** on the same call if the vehicle fields are not applied. **Non-database places** (e.g. “McDonalds on Main St” on a Citizen Assist) are resolved with **Google Maps web search** before create.
+- **Priority** is always **1–4** (1 = highest). The server never sends priority **0**; routine officer-initiated calls default to **3**, in-progress / alarm types to **2**, emergencies to **1**.
+- **`type` (call type)** must match your 10-8 CAD table **exactly** (spacing and dashes), e.g. `961 - Car Stop`, `415-E - Disturbing the Peace; Music or Party`, `930- See the Man`, `Code 7- Lunch`. The AI returns a **shortcut** (`961`, `ped`); the server maps it via `server/src/ten8/data/cadCallTypes.json` before POST.
+- **`priority`** comes from the same table (1–4 per call type, never 0).
+- **CAD comments** on existing open calls: `CALLSIGN` + what they said on the radio (STT transcript). Comments are only posted when the call id is in the **open incident list** from the 10-8 webhook — never on a guessed or non-existent call (prevents 10-8 crashes). New self-dispatch calls get a comment only after create succeeds and the API returns a real call id.
+- If empty, safeT can fall back to the v1.0.8 key pair when creating calls (same as the old server).
+
+## AI activity log
+
+**Command → AI dispatch activity log** (or top nav **AI Log**): live feed of transcripts, intents, on-air replies, plate lookups, and 10-8 webhook state. Refreshes every 5 seconds.

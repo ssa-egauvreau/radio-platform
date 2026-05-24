@@ -24,15 +24,27 @@ const TONES: ToneDef[] = [
   },
   {
     kind: "emergency",
-    label: "Emergency / 10-33",
-    desc: "Emergency activation and alert tone.",
+    label: "Emergency alert",
+    desc: "Emergency button activation on handsets and alerts.",
     bundled: "/sounds/emergency.wav",
+  },
+  {
+    kind: "marker_1033",
+    label: "10-33 channel marker",
+    desc: "Looped on the dispatch console while 10-33 marker is active (~12 s).",
+    bundled: "/sounds/marker_1033.wav",
   },
   {
     kind: "busy",
     label: "Channel busy",
     desc: "Plays when the channel is already held by another unit.",
     bundled: "/sounds/busy.wav",
+  },
+  {
+    kind: "volume_check",
+    label: "Volume check (handset)",
+    desc: "IRC590 key 232 — short clip so users can check speaker level.",
+    bundled: "/sounds/volume.wav",
   },
 ];
 
@@ -45,6 +57,7 @@ export function SoundsPanel() {
   const [sounds, setSounds] = useState<AgencySound[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [busyKind, setBusyKind] = useState<string | null>(null);
 
   async function reload() {
@@ -100,20 +113,53 @@ export function SoundsPanel() {
   }
 
   async function preview(tone: ToneDef) {
-    if (!customByKind.has(tone.kind)) {
-      void new Audio(tone.bundled).play().catch(() => undefined);
-      return;
-    }
-    const token = getToken();
-    try {
-      const res = await fetch(`/v1/sounds/${tone.kind}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-      });
-      if (res.ok) {
-        void new Audio(URL.createObjectURL(await res.blob())).play().catch(() => undefined);
+    setPreviewError(null);
+    let objectUrl: string | null = null;
+    let src = tone.bundled;
+    if (customByKind.has(tone.kind)) {
+      const token = getToken();
+      try {
+        const res = await fetch(`/v1/sounds/${tone.kind}`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (res.ok) {
+          objectUrl = URL.createObjectURL(await res.blob());
+          src = objectUrl;
+        }
+      } catch {
+        /* fall back to bundled default */
       }
+    }
+    if (!objectUrl) {
+      try {
+        const head = await fetch(src, { method: "HEAD" });
+        if (!head.ok) {
+          setPreviewError(
+            `Cannot play “${tone.label}”: missing bundled file ${tone.bundled}. Add it under server/web-console/public/sounds/ or upload a custom tone.`,
+          );
+          return;
+        }
+      } catch {
+        setPreviewError(`Cannot play “${tone.label}”: could not reach ${tone.bundled}.`);
+        return;
+      }
+    }
+    const clip = new Audio(src);
+    clip.volume = 1;
+    const revoke = () => {
+      if (objectUrl) {
+        URL.revokeObjectURL(objectUrl);
+      }
+    };
+    clip.addEventListener("ended", revoke, { once: true });
+    clip.addEventListener("error", revoke, { once: true });
+    try {
+      await clip.play();
     } catch {
-      /* preview is best-effort */
+      revoke();
+      setPreviewError(
+        `Cannot play “${tone.label}”. Your browser may block sound until you click elsewhere on the page, or the file may be missing (${tone.bundled}).`,
+      );
     }
   }
 
@@ -130,6 +176,7 @@ export function SoundsPanel() {
       </p>
 
       {error && <div className="banner error">{error}</div>}
+      {previewError && <div className="banner error">{previewError}</div>}
 
       {loading ? (
         <div className="empty">Loading…</div>

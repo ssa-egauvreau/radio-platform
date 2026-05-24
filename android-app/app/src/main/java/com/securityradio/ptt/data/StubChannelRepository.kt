@@ -11,6 +11,7 @@ class StubChannelRepository : ChannelRepository {
 
     override suspend fun loadCatalog(): RadioChannelCatalog = RadioChannelCatalog(
         channels = DEFAULT_CHANNELS,
+        permissions = emptyMap(),
         origin = ChannelCatalogOrigin.LOCAL_FALLBACK,
         errorMessage = null,
     )

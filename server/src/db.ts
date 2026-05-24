@@ -15,11 +15,37 @@ export function getPool(): pg.Pool | null {
     return null;
   }
   if (!pool) {
+    // Cap on concurrent Postgres connections per node. Default 20 is comfortable for the typical
+    // polling load (Android handsets at ~5 req/s/user + the dispatch console); the prior cap of
+    // 5 throttled requests under any moderate concurrency. Override via DB_POOL_MAX env when
+    // running multiple Node instances behind a load balancer to keep total pool size sane.
+    // Parse explicitly so DB_POOL_MAX=0 is clamped to 1 (the documented floor) rather than
+    // silently falling through `|| 20` and quietly opening 20 connections.
+    const parsed = Number.parseInt(process.env.DB_POOL_MAX ?? "", 10);
+    const max = Number.isFinite(parsed)
+      ? Math.max(1, Math.min(200, parsed))
+      : 20;
+    // Parse the connection string so the SSL toggle keys off the hostname only — substring
+    // matching on "localhost" would also skip TLS for prod URLs that happen to contain that
+    // word anywhere (host segment, query param, password).
+    let isLocal = false;
+    try {
+      const host = new URL(url).hostname;
+      isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
+    } catch {
+      // Malformed URL → leave TLS on; pg will fail to connect and surface the real error.
+    }
     pool = new Pool({
       connectionString: url,
-      ssl: url.includes("localhost") ? false : { rejectUnauthorized: false },
-      max: 5,
+      ssl: isLocal ? false : { rejectUnauthorized: false },
+      max,
     });
+    // Statement-level timeout would be nice to bound a runaway query against the shared pool,
+    // but setting it on the Pool would also apply to ensureSchema()'s bootstrap migrations
+    // (full-table backfills, CREATE INDEX) that can legitimately exceed any short ceiling on
+    // a populated database. Re-introducing this safely needs either a separate migration pool
+    // or per-request scoping (`SET LOCAL statement_timeout`); skip for now rather than risk a
+    // half-applied schema on boot.
   }
   return pool;
 }
@@ -116,6 +142,9 @@ export async function ensureSchema(): Promise<void> {
   await p.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS agency_id INT REFERENCES agencies(id) ON DELETE CASCADE;`);
   // Device category the admin assigns to an account (unit_radio, handheld, …).
   await p.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS device_type TEXT;`);
+  // Newest sign-in wins: incremented on each login; tokens carry the value as
+  // their `gen` claim and are rejected once the user's row moves past it.
+  await p.query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS token_generation INT NOT NULL DEFAULT 0;`);
 
   await p.query(`
     CREATE TABLE IF NOT EXISTS channel_members (
@@ -233,6 +262,26 @@ export async function ensureSchema(): Promise<void> {
     );
   `);
 
+  // Custom soundboard tone-outs — operator-fired audio clips that supplement
+  // the built-in Routine / Priority / Status tones in the console.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS agency_tone_outs (
+      id SERIAL PRIMARY KEY,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      play_mode TEXT NOT NULL DEFAULT 'once',
+      icon_kind TEXT NOT NULL DEFAULT 'waveform',
+      icon_color TEXT NOT NULL DEFAULT '#22c5e5',
+      icon_image BYTEA,
+      icon_mime TEXT,
+      audio BYTEA,
+      audio_mime TEXT,
+      audio_bytes INT NOT NULL DEFAULT 0,
+      sort_order INT NOT NULL DEFAULT 0,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
   // Simulcast channels — one transmission fanned out to several real channels.
   await p.query(`
     CREATE TABLE IF NOT EXISTS simulcast_channels (
@@ -274,6 +323,177 @@ export async function ensureSchema(): Promise<void> {
     );
   `);
 
+  // Map geofences — circle or custom-polygon overlay zones an operator draws.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS geofences (
+      id SERIAL PRIMARY KEY,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      shape TEXT NOT NULL DEFAULT 'circle',
+      color TEXT,
+      center_lat DOUBLE PRECISION NOT NULL,
+      center_lon DOUBLE PRECISION NOT NULL,
+      radius_m DOUBLE PRECISION NOT NULL,
+      created_by TEXT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+  // Polygon geofences carry a vertex list instead of a centre/radius.
+  await p.query(`ALTER TABLE geofences ADD COLUMN IF NOT EXISTS points JSONB;`);
+  await p.query(`ALTER TABLE geofences ALTER COLUMN center_lat DROP NOT NULL;`);
+  await p.query(`ALTER TABLE geofences ALTER COLUMN center_lon DROP NOT NULL;`);
+  await p.query(`ALTER TABLE geofences ALTER COLUMN radius_m DROP NOT NULL;`);
+
+  // GPS log — every position report appended, so the console can replay a
+  // radio's track. radio_positions keeps only the latest fix per unit.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS radio_position_history (
+      id BIGSERIAL PRIMARY KEY,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      unit_id TEXT NOT NULL,
+      lat DOUBLE PRECISION NOT NULL,
+      lon DOUBLE PRECISION NOT NULL,
+      accuracy_m DOUBLE PRECISION,
+      heading DOUBLE PRECISION,
+      speed_mps DOUBLE PRECISION,
+      recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+  `);
+
+  // 10-33 channel markers — a dispatcher flags a channel for emergency traffic.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS channel_markers (
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      channel_name TEXT NOT NULL,
+      active BOOLEAN NOT NULL DEFAULT FALSE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (agency_id, channel_name)
+    );
+  `);
+
+  // Per-agency integration secrets (API keys, webhooks) — tenant-isolated.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS agency_integrations (
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      integration_key TEXT NOT NULL,
+      value TEXT NOT NULL DEFAULT '',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_by_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+      PRIMARY KEY (agency_id, integration_key)
+    );
+  `);
+
+  // Per-channel AI dispatcher toggle (voice loop uses platform env + agency integrations).
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS channel_ai_dispatch (
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      channel_name TEXT NOT NULL,
+      enabled BOOLEAN NOT NULL DEFAULT FALSE,
+      yields_to_units BOOLEAN NOT NULL DEFAULT TRUE,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (agency_id, channel_name)
+    );
+  `);
+
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS ai_dispatch_log (
+      id BIGSERIAL PRIMARY KEY,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      transmission_id INT REFERENCES transmissions(id) ON DELETE SET NULL,
+      channel_name TEXT,
+      unit_id TEXT,
+      transcript TEXT NOT NULL,
+      intent TEXT,
+      summary TEXT,
+      dispatcher_response TEXT,
+      trigger_emergency_tone BOOLEAN NOT NULL DEFAULT FALSE,
+      plate_lookup JSONB,
+      ten8_actions JSONB,
+      error TEXT,
+      duration_ms INT,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_dispatch_log_agency_ts
+      ON ai_dispatch_log (agency_id, created_at DESC);
+  `);
+  await p.query(`ALTER TABLE ai_dispatch_log ADD COLUMN IF NOT EXISTS outcome TEXT;`);
+
+  // AI dispatcher knowledge base — admin-uploaded reference documents (post
+  // orders, route sheets, policies). Original PDF kept in `content`; the
+  // extracted text is split into embedded chunks (agency_kb_chunks) that the
+  // dispatcher retrieves from at call time (RAG) instead of stuffing every
+  // document into the cached system prompt.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS agency_kb_documents (
+      id SERIAL PRIMARY KEY,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      title TEXT NOT NULL,
+      category TEXT NOT NULL DEFAULT 'other',
+      property_code TEXT,
+      filename TEXT,
+      mime TEXT NOT NULL DEFAULT 'application/pdf',
+      byte_size INT NOT NULL DEFAULT 0,
+      content BYTEA NOT NULL,
+      extracted_text TEXT,
+      status TEXT NOT NULL DEFAULT 'processing',
+      error TEXT,
+      chunk_count INT NOT NULL DEFAULT 0,
+      uploaded_by_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_kb_docs_agency ON agency_kb_documents (agency_id, created_at DESC);
+  `);
+  // The embedding model used to index this document's chunks. A model swap
+  // leaves old vectors at a different dimension/space, so retrieval ignores
+  // mismatched chunks and the admin UI flags the document for re-indexing.
+  await p.query(`ALTER TABLE agency_kb_documents ADD COLUMN IF NOT EXISTS embed_model TEXT;`);
+
+  // One embedded passage of a knowledge-base document. Similarity search runs in
+  // Node (cosine over the REAL[] vector) — no pgvector extension required at this
+  // scale. Chunks cascade-delete with their document.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS agency_kb_chunks (
+      id BIGSERIAL PRIMARY KEY,
+      document_id INT NOT NULL REFERENCES agency_kb_documents(id) ON DELETE CASCADE,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      chunk_index INT NOT NULL,
+      content TEXT NOT NULL,
+      embedding REAL[] NOT NULL,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_kb_chunks_agency ON agency_kb_chunks (agency_id);
+  `);
+
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS ten8_incidents (
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      call_id TEXT NOT NULL,
+      action TEXT,
+      is_closed BOOLEAN NOT NULL DEFAULT FALSE,
+      incident_type TEXT,
+      priority TEXT,
+      status TEXT,
+      location TEXT,
+      payload JSONB NOT NULL DEFAULT '{}',
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      PRIMARY KEY (agency_id, call_id)
+    );
+  `);
+
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS ten8_webhook_log (
+      id BIGSERIAL PRIMARY KEY,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      action TEXT,
+      call_id TEXT,
+      payload JSONB NOT NULL DEFAULT '{}',
+      received_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_ten8_webhook_log_agency_ts
+      ON ten8_webhook_log (agency_id, received_at DESC);
+  `);
+
   // --- migrate any pre-existing single-tenant data into the default agency ---
   const def = await p.query<{ id: number }>(
     `INSERT INTO agencies (name, slug)
@@ -313,6 +533,10 @@ export async function ensureSchema(): Promise<void> {
   await p.query(`CREATE INDEX IF NOT EXISTS idx_tx_agency ON transmissions (agency_id, started_at DESC);`);
   await p.query(`CREATE INDEX IF NOT EXISTS idx_alerts_created ON alerts (created_at DESC);`);
   await p.query(`CREATE INDEX IF NOT EXISTS idx_alerts_agency ON alerts (agency_id, created_at DESC);`);
+  await p.query(`CREATE INDEX IF NOT EXISTS idx_geofences_agency ON geofences (agency_id, created_at DESC);`);
+  await p.query(
+    `CREATE INDEX IF NOT EXISTS idx_pos_history_unit ON radio_position_history (agency_id, unit_id, recorded_at DESC);`,
+  );
 
   const countRes = await p.query<{ count: string }>(
     `SELECT COUNT(*)::text AS count FROM radio_channels WHERE agency_id = $1;`,

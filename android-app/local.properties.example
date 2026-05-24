@@ -1,0 +1,10 @@
+# Copy this file to local.properties in the same folder (android-app/).
+# local.properties is not committed to git — you must create/edit it on each PC.
+
+sdk.dir=C\:\\Users\\YOUR_NAME\\AppData\\Local\\Android\\Sdk
+
+# Production API (required for real devices)
+radio.api.base.url=https://safet.up.railway.app/
+
+# Optional — only if RADIO_API_KEY is set on Railway:
+# radio.api.key=YOUR_RAILWAY_RADIO_API_KEY

@@ -1,8 +1,10 @@
 package com.securityradio.ptt.device
 
 import android.util.Log
+import com.securityradio.ptt.data.remote.normalizeApiBaseUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONObject
 import java.util.concurrent.TimeUnit
 
 /**
@@ -14,11 +16,12 @@ import java.util.concurrent.TimeUnit
  */
 class CustomSoundDownloader(
     httpApiBaseUrl: String,
+    private val authTokenProvider: () -> String,
     private val apiKeyProvider: () -> String,
     private val store: CustomSoundStore,
 ) {
 
-    private val baseUrl = httpApiBaseUrl.trim().trimEnd('/')
+    private val baseUrl = normalizeApiBaseUrl(httpApiBaseUrl).trimEnd('/')
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -31,16 +34,19 @@ class CustomSoundDownloader(
         "channel_switch" to "channel_switch.wav",
         "emergency" to "emergency.wav",
         "busy" to "busy.wav",
+        "volume_check" to "volume.wav",
     )
 
     /** Blocking refresh of every custom tone — call off the main thread. */
     fun refresh() {
+        val token = authTokenProvider().trim()
         val key = apiKeyProvider().trim()
         for ((kind, fileName) in kinds) {
             try {
                 val builder = Request.Builder().url("$baseUrl/v1/sounds/$kind")
-                if (key.isNotEmpty()) {
-                    builder.header("X-Radio-Key", key)
+                when {
+                    token.isNotEmpty() -> builder.header("Authorization", "Bearer $token")
+                    key.isNotEmpty() -> builder.header("X-Radio-Key", key)
                 }
                 client.newCall(builder.build()).execute().use { response ->
                     when {
@@ -60,6 +66,32 @@ class CustomSoundDownloader(
     /** Refreshes the custom tones on a background thread. */
     fun refreshAsync() {
         Thread({ refresh() }, "custom-sound-refresh").start()
+    }
+
+    /**
+     * Reads the agency's current tone-set version, or null when it can't be
+     * determined (offline, server error, no agency). A change in this value
+     * between calls means [refresh] should run to pull the updated tones.
+     * Blocking — call off the main thread.
+     */
+    fun fetchVersion(): String? {
+        val token = authTokenProvider().trim()
+        val key = apiKeyProvider().trim()
+        return try {
+            val builder = Request.Builder().url("$baseUrl/v1/sounds")
+            when {
+                token.isNotEmpty() -> builder.header("Authorization", "Bearer $token")
+                key.isNotEmpty() -> builder.header("X-Radio-Key", key)
+            }
+            client.newCall(builder.build()).execute().use { response ->
+                if (!response.isSuccessful) return null
+                val body = response.body?.string() ?: return null
+                JSONObject(body).optString("version").takeIf { it.isNotEmpty() }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "custom tone version check failed", e)
+            null
+        }
     }
 
     private companion object {

@@ -9,9 +9,23 @@ import {
   type AuthUser,
   type Role,
 } from "./auth.js";
-import { dropAgencyVoiceConnections, listChannelRoster } from "./voiceRelay.js";
+import {
+  dropAgencyVoiceConnections,
+  dropUserVoiceConnections,
+  isUnitMoveLocked,
+  listAgencyRosters,
+  listChannelRoster,
+  unitChannelCounts,
+  withRosterMoveLock,
+  peekVoiceTransmittingUnit,
+  sendMoveCommand,
+  type PresenceStatus,
+  type RosterMember,
+} from "./voiceRelay.js";
+import { getBridgeStatus } from "./bridgeWorker.js";
 import {
   AGENCY_ROLES,
+  bumpTokenGeneration,
   countActiveAdmins,
   clearAlert,
   clearEmergenciesFromUnit,
@@ -25,6 +39,7 @@ import {
   deleteUser,
   generateRadioKey,
   getAgencyById,
+  getAgencyBySlug,
   getChannelById,
   getChannelByName,
   getSimulcastByName,
@@ -50,8 +65,18 @@ import {
   listChannels,
   listChannelsForUser,
   listInboxAlerts,
+  listTen33Channels,
+  getChannelTen33Active,
+  setChannelAiDispatch,
+  listChannelAiDispatchEnabled,
+  getChannelAiDispatchRow,
+  getAgencyIntegrationValue,
   listMemberships,
   listPositions,
+  listPositionHistory,
+  listGeofences,
+  createGeofence,
+  deleteGeofence,
   listTransmissions,
   listUnitAliases,
   listUsers,
@@ -60,9 +85,28 @@ import {
   deleteAgencySound,
   getAgencyLogo,
   getAgencySound,
+  getAgencySoundsVersion,
   isDeviceType,
   isSoundKind,
   listAgencySounds,
+  TONE_OUT_PLAY_MODES,
+  listToneOuts,
+  createToneOut,
+  updateToneOut,
+  setToneOutAudio,
+  setToneOutIcon,
+  clearToneOutIcon,
+  getToneOutAudio,
+  getToneOutIcon,
+  deleteToneOut,
+  isKbCategory,
+  KB_CATEGORIES,
+  KB_CATEGORY_SECTIONS,
+  listKbDocuments,
+  createKbDocument,
+  getKbDocumentContent,
+  kbDocumentExists,
+  deleteKbDocument,
   resolveAgencyByKey,
   setAgencyLogo,
   setAgencySound,
@@ -78,6 +122,32 @@ import {
   type Permission,
   type TransmissionSort,
 } from "./store.js";
+import { getPool } from "./db.js";
+import { getCachedAuth, invalidateCachedAuth, setCachedAuth } from "./sessionCache.js";
+import {
+  handleIntegrationHealth,
+  handleListIntegrations,
+  handleSetIntegration,
+} from "./integrations/adminApi.js";
+import { getAiDispatchLoopbackPort } from "./aiDispatch/engine.js";
+import { runAiDispatchDryRun } from "./aiDispatch/dryRun.js";
+import {
+  agencyPromptSource,
+  getAiDispatchPlatformConfig,
+  getAiDispatchPlatformStatus,
+} from "./aiDispatch/platformConfig.js";
+import { applyChannelTen33Marker } from "./aiDispatch/ten33Marker.js";
+import { listAiDispatchLog } from "./aiDispatch/activityLog.js";
+import { enqueueKbIngest } from "./aiDispatch/knowledgeBase/ingest.js";
+import { getEmbeddingModelName } from "./aiDispatch/knowledgeBase/embeddings.js";
+import { handleTen8Webhook, handleTen8WebhookGet } from "./ten8/webhook.js";
+import {
+  handleAndroidUpdateApk,
+  handleAndroidUpdateManifest,
+  handleAndroidUpdatePublish,
+} from "./appUpdate.js";
+import { listTen8MapIncidents } from "./ten8/mapIncidents.js";
+import { listTen8ActiveIncidents, listTen8WebhookLog } from "./ten8/store.js";
 
 /** Legacy global radio key — lets a handset fetch its agency's custom tones. */
 const radioApiKey = process.env.RADIO_API_KEY?.trim();
@@ -88,9 +158,30 @@ const SOUND_MAX_BYTES = "1mb";
 /** Upper bound for an uploaded agency logo. */
 const LOGO_MAX_BYTES = "512kb";
 
+/** Upper bound for an uploaded soundboard tone-out clip. */
+const TONE_OUT_AUDIO_MAX = "4mb";
+
+/** Upper bound for an uploaded knowledge-base document (PDF). */
+const KB_MAX_DOC_BYTES = process.env.KB_MAX_DOC_BYTES?.trim() || "50mb";
+
 /** Reads a device-category value from request input, or null when absent/invalid. */
 function asDeviceType(value: unknown): string | null {
   return isDeviceType(value) ? value : null;
+}
+
+/**
+ * Agency id for a sound request — from a console JWT, else the handset radio
+ * key (header or `?key=`). Returns null when neither resolves an agency.
+ */
+async function resolveSoundAgencyId(req: Request): Promise<number | null> {
+  if (req.authUser?.agencyId != null) {
+    return req.authUser.agencyId;
+  }
+  const headerRaw = req.headers["x-radio-key"];
+  const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
+  const key = headerVal ?? (typeof req.query.key === "string" ? req.query.key : null);
+  const agency = await resolveAgencyByKey(key ?? null, radioApiKey).catch(() => null);
+  return agency?.id ?? null;
 }
 
 /** Picks `value` when it is one of `allowed`, else `fallback`. */
@@ -151,6 +242,17 @@ function radioAgencyId(req: Request): number {
   return req.agency?.id ?? 0;
 }
 
+/** ISO-8601 UTC for handset clients (pg may return Date or string). */
+function formatTransmissionStartedAt(value: unknown): string {
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+  if (typeof value === "string" && value.trim() !== "") {
+    return value.trim();
+  }
+  return new Date().toISOString();
+}
+
 /** Requires a signed-in admin or dispatcher within an agency (command-level operators). */
 function requireAgencyOperator(req: Request, res: Response, next: NextFunction): void {
   if (!req.authUser) {
@@ -167,25 +269,140 @@ function requireAgencyOperator(req: Request, res: Response, next: NextFunction):
   next();
 }
 
+/** GPS speed (m/s) above which a moving unit is treated as "driving" (~11 km/h). */
+const DRIVING_SPEED_MPS = 3;
+/** Ignore GPS fixes older than this when deriving "driving" — stale speed lies. */
+const POSITION_FRESH_MS = 3 * 60_000;
+
+/**
+ * Attaches an auto-derived activity status to each roster member from live
+ * signals only: an active emergency from the unit, the current channel talker,
+ * or recent GPS speed. Everything else is "idle" (connected but quiet). No
+ * manual input and no extra device telemetry is involved.
+ */
+async function annotateRosterStatus(
+  agencyId: number,
+  channel: string,
+  members: RosterMember[],
+): Promise<RosterMember[]> {
+  if (members.length === 0) {
+    return members;
+  }
+  const talker = peekVoiceTransmittingUnit(agencyId, channel);
+  const [positions, alerts] = await Promise.all([
+    listPositions(agencyId),
+    listAlerts(agencyId, 200),
+  ]);
+  const now = Date.now();
+  // listPositions is ordered newest-first, so the first row per unit is its latest fix.
+  const latestSpeed = new Map<string, { speed: number; ageMs: number }>();
+  for (const p of positions) {
+    const unit = p.unit_id.toUpperCase();
+    if (!latestSpeed.has(unit)) {
+      latestSpeed.set(unit, { speed: p.speed_mps ?? 0, ageMs: now - Date.parse(p.updated_at) });
+    }
+  }
+  const emergencyUnits = new Set<string>();
+  for (const a of alerts) {
+    if (a.kind === "emergency" && a.active && a.from_unit) {
+      emergencyUnits.add(a.from_unit.toUpperCase());
+    }
+  }
+  const talkerUnit = talker ? talker.toUpperCase() : null;
+  return members.map((m) => {
+    const unit = m.unit_id.toUpperCase();
+    const fix = latestSpeed.get(unit);
+    let status: PresenceStatus = "idle";
+    if (emergencyUnits.has(unit)) {
+      status = "emergency";
+    } else if (talkerUnit && unit === talkerUnit) {
+      status = "transmitting";
+    } else if (fix && fix.ageMs <= POSITION_FRESH_MS && fix.speed >= DRIVING_SPEED_MPS) {
+      status = "driving";
+    }
+    return { ...m, status };
+  });
+}
+
 /** Router for account/auth, admin, owner, and radio endpoints, mounted at `/v1`. */
 export function createApiRouter(): Router {
   const router = Router();
 
+  router.get("/webhooks/10-8", handleTen8WebhookGet);
+  router.post("/webhooks/10-8", handleTen8Webhook);
+
+  // Public, unauthenticated: the sideloaded Android fleet polls these to self-update.
+  router.get("/app/android/version", handleAndroidUpdateManifest);
+  router.get("/app/android/apk", handleAndroidUpdateApk);
+  // CI publishes new builds here (bearer-token auth inside the handler); raw APK body.
+  router.post(
+    "/app/android/publish",
+    raw({ type: () => true, limit: "200mb" }),
+    handleAndroidUpdatePublish,
+  );
+
   // Reject API calls from an account whose agency was disabled (or deleted)
-  // after its token was issued. Login and the radio middleware already block
-  // this, but an issued JWT stays valid until it expires.
+  // after its token was issued, or whose own account row has been disabled or
+  // removed on the portal. The JWT stays cryptographically valid until it
+  // expires, so this DB check is what actually locks a disabled radio out.
   router.use(async (req, res, next) => {
     try {
-      const agencyId = req.authUser?.agencyId;
-      if (agencyId == null) {
+      const auth = req.authUser;
+      if (auth == null) {
         next();
         return;
       }
-      const agency = await getAgencyById(agencyId);
-      if (!agency || agency.disabled) {
-        res.status(403).json({ error: "agency_disabled" });
+      // Fast path: a 15 s in-process cache (sessionCache.ts) lets us skip the user/agency
+      // lookups on the hot Android polling path. Login invalidates the cache explicitly so
+      // "newest sign-in wins" still takes effect on the next request from the old device;
+      // admin-driven disables propagate within TTL.
+      const cached = getCachedAuth(auth.id);
+      if (cached) {
+        if (cached.userDisabled) {
+          res.status(401).json({ error: "account_disabled" });
+          return;
+        }
+        if (auth.gen !== cached.tokenGeneration) {
+          res.status(401).json({ error: "session_superseded" });
+          return;
+        }
+        if (cached.agencyDisabled) {
+          res.status(403).json({ error: "agency_disabled" });
+          return;
+        }
+        next();
         return;
       }
+      const user = await getUserById(auth.id);
+      if (!user || user.disabled) {
+        res.status(401).json({ error: "account_disabled" });
+        return;
+      }
+      // Newest sign-in wins. A token whose `gen` lags the user row was issued
+      // for an earlier session that a later login has since superseded.
+      if (auth.gen !== user.token_generation) {
+        res.status(401).json({ error: "session_superseded" });
+        return;
+      }
+      let agencyDisabled = false;
+      if (auth.agencyId != null) {
+        const agency = await getAgencyById(auth.agencyId);
+        if (!agency || agency.disabled) {
+          agencyDisabled = true;
+          setCachedAuth(auth.id, {
+            tokenGeneration: user.token_generation,
+            userDisabled: false,
+            agencyDisabled: true,
+          });
+          res.status(403).json({ error: "agency_disabled" });
+          return;
+        }
+      }
+      setCachedAuth(auth.id, {
+        tokenGeneration: user.token_generation,
+        userDisabled: false,
+        agencyDisabled,
+      });
       next();
     } catch (error) {
       fail(res, error);
@@ -198,6 +415,7 @@ export function createApiRouter(): Router {
     try {
       const username = String(req.body?.username ?? "").trim();
       const password = String(req.body?.password ?? "");
+      const agencySlugRaw = String(req.body?.agency_slug ?? "").trim().toLowerCase();
       if (!username || !password) {
         res.status(400).json({ error: "missing_credentials" });
         return;
@@ -215,6 +433,32 @@ export function createApiRouter(): Router {
         res.status(401).json({ error: "invalid_login" });
         return;
       }
+      if (agencySlugRaw && user!.role !== "owner") {
+        const agency = await getAgencyBySlug(agencySlugRaw);
+        if (!agency || agency.disabled) {
+          res.status(401).json({ error: "unknown_agency" });
+          return;
+        }
+        if (user!.agency_id !== agency.id) {
+          await writeAudit({
+            agencyId: user?.agency_id ?? null,
+            actorUserId: user?.id ?? null,
+            actorName: username,
+            action: "login_failed",
+            ip: clientIp(req),
+          });
+          res.status(401).json({ error: "agency_mismatch" });
+          return;
+        }
+      }
+      // Mint a fresh session generation so any token still floating around for
+      // this account immediately fails the freshness check on its next call.
+      const newGen = getPool() ? await bumpTokenGeneration(user!.id) : 0;
+      // Drop the cached "auth is fine" entry for this user so the next request from any prior
+      // device sees the new token_generation and gets a 401 immediately, instead of waiting
+      // up to TTL for the cache to expire.
+      invalidateCachedAuth(user!.id);
+      const evictedSockets = dropUserVoiceConnections(user!.id);
       const authUser: AuthUser = {
         id: user!.id,
         username: user!.username,
@@ -223,6 +467,7 @@ export function createApiRouter(): Router {
         unitId: user!.unit_id,
         agencyId: user!.agency_id,
         agencyName: user!.agency_name,
+        gen: newGen,
       };
       await writeAudit({
         agencyId: user!.agency_id,
@@ -231,14 +476,47 @@ export function createApiRouter(): Router {
         action: "login",
         ip: clientIp(req),
       });
+      if (evictedSockets > 0) {
+        await writeAudit({
+          agencyId: user!.agency_id,
+          actorUserId: user!.id,
+          actorName: user!.username,
+          action: "session_evicted",
+          detail: { dropped_voice_sockets: evictedSockets, new_ip: clientIp(req) },
+          ip: clientIp(req),
+        });
+      }
       res.json({ token: signToken(authUser), user: authUser });
     } catch (error) {
       fail(res, error);
     }
   });
 
-  router.get("/auth/me", requireAuth, (req, res) => {
-    res.json({ user: req.authUser });
+  // Live profile read for handsets — they poll this so display-name / unit-id
+  // edits made on the portal land on the radios without waiting for a restart.
+  // The auth middleware above already rejects disabled accounts.
+  router.get("/auth/me", requireAuth, async (req, res) => {
+    try {
+      const me = req.authUser!;
+      const row = await getUserById(me.id);
+      if (!row) {
+        res.status(401).json({ error: "account_disabled" });
+        return;
+      }
+      res.json({
+        user: {
+          id: row.id,
+          username: row.username,
+          displayName: row.display_name,
+          role: row.role,
+          unitId: row.unit_id,
+          agencyId: row.agency_id,
+          agencyName: me.agencyName,
+        },
+      });
+    } catch (error) {
+      fail(res, error);
+    }
   });
 
   // --- channels the caller may use (console + radios) --------------------
@@ -249,6 +527,7 @@ export function createApiRouter(): Router {
       if (me.role === "admin" || me.role === "dispatcher") {
         const all = await listChannels(me.agencyId!);
         const sims = await listSimulcasts(me.agencyId!);
+        const aiEnabled = new Set(await listChannelAiDispatchEnabled(me.agencyId!));
         res.json({
           channels: [
             ...all.map((c) => ({
@@ -258,6 +537,7 @@ export function createApiRouter(): Router {
               zone: c.zone,
               permission: "talk_priority",
               simulcast: false,
+              ai_dispatch_enabled: aiEnabled.has(c.name),
             })),
             // Simulcast channels carry a negative id so they never collide with
             // a real channel id in the console's open-channel set.
@@ -889,6 +1169,18 @@ export function createApiRouter(): Router {
     }
   });
 
+  // Live ingest level + gate state per stream bridge — drives the audio meter.
+  router.get("/admin/bridges/status", requireAdmin, async (req, res) => {
+    try {
+      const bridges = await listBridges(req.authUser!.agencyId!);
+      res.json({
+        statuses: bridges.map((bridge) => ({ id: bridge.id, ...getBridgeStatus(bridge.id) })),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
   router.post("/admin/bridges", requireAdmin, async (req, res) => {
     try {
       const agencyId = req.authUser!.agencyId!;
@@ -1102,6 +1394,32 @@ export function createApiRouter(): Router {
     }
   });
 
+  // --- agency integrations (API keys, webhooks — per tenant) ---------------
+
+  router.get("/admin/integrations", requireAdmin, async (req, res) => {
+    try {
+      await handleListIntegrations(req, res);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get("/admin/integrations/health", requireAdmin, async (req, res) => {
+    try {
+      await handleIntegrationHealth(req, res);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.patch("/admin/integrations/:key", requireAdmin, async (req, res) => {
+    try {
+      await handleSetIntegration(req, res);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
   // --- agency sounds (custom radio tones) --------------------------------
 
   router.get("/admin/sounds", requireAdmin, async (req, res) => {
@@ -1174,6 +1492,162 @@ export function createApiRouter(): Router {
     }
   });
 
+  // --- AI dispatcher knowledge base (admin-uploaded reference docs) ------
+
+  router.get("/admin/kb/documents", requireAdmin, async (req, res) => {
+    try {
+      res.json({
+        documents: await listKbDocuments(req.authUser!.agencyId!),
+        categories: KB_CATEGORIES,
+        category_sections: KB_CATEGORY_SECTIONS,
+        embed_model: getEmbeddingModelName(),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post(
+    "/admin/kb/documents",
+    requireAdmin,
+    raw({ type: () => true, limit: KB_MAX_DOC_BYTES }),
+    async (req, res) => {
+      try {
+        const mime = (req.header("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+        if (mime !== "application/pdf") {
+          res.status(415).json({ error: "pdf_only" });
+          return;
+        }
+        const body: unknown = req.body;
+        if (!Buffer.isBuffer(body) || body.length === 0) {
+          res.status(400).json({ error: "missing_file" });
+          return;
+        }
+        const filename =
+          typeof req.query.filename === "string" ? req.query.filename.trim().slice(0, 255) : null;
+        const title =
+          (typeof req.query.title === "string" ? req.query.title.trim() : "").slice(0, 255) ||
+          filename ||
+          "Untitled document";
+        const categoryRaw = typeof req.query.category === "string" ? req.query.category.trim() : "";
+        const category = isKbCategory(categoryRaw) ? categoryRaw : "other";
+        const propertyCode =
+          typeof req.query.property_code === "string" && req.query.property_code.trim()
+            ? req.query.property_code.trim().slice(0, 32)
+            : null;
+
+        const agencyId = req.authUser!.agencyId!;
+        const doc = await createKbDocument(agencyId, {
+          title,
+          category,
+          propertyCode,
+          filename,
+          mime,
+          content: body,
+          uploadedByUserId: req.authUser!.id,
+        });
+        enqueueKbIngest(doc.id);
+        await writeAudit({
+          agencyId,
+          actorUserId: req.authUser!.id,
+          actorName: req.authUser!.username,
+          action: "kb_document_upload",
+          target: String(doc.id),
+          detail: { title, category, property_code: propertyCode, bytes: body.length },
+          ip: clientIp(req),
+        });
+        res.status(201).json({ document: doc });
+      } catch (error) {
+        fail(res, error);
+      }
+    },
+  );
+
+  router.get("/admin/kb/documents/:id/file", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      if (!Number.isInteger(id)) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      const doc = await getKbDocumentContent(req.authUser!.agencyId!, id);
+      if (!doc) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.setHeader("Content-Type", doc.mime);
+      res.setHeader(
+        "Content-Disposition",
+        `inline; filename="${(doc.filename ?? `document-${id}.pdf`).replace(/"/g, "")}"`,
+      );
+      res.send(doc.content);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post("/admin/kb/documents/:id/reindex", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const agencyId = req.authUser!.agencyId!;
+      if (!Number.isInteger(id) || !(await kbDocumentExists(agencyId, id))) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      enqueueKbIngest(id);
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "kb_document_reindex",
+        target: String(id),
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.delete("/admin/kb/documents/:id", requireAdmin, async (req, res) => {
+    try {
+      const id = Number(req.params.id);
+      const agencyId = req.authUser!.agencyId!;
+      const ok = await deleteKbDocument(agencyId, id);
+      if (!ok) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "kb_document_delete",
+        target: String(id),
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // Tone-set version probe. Consoles and handsets poll this and re-pull their
+  // custom tones whenever the returned version changes.
+  router.get("/sounds", async (req, res) => {
+    try {
+      const agencyId = await resolveSoundAgencyId(req);
+      if (agencyId == null) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.setHeader("Cache-Control", "no-cache");
+      res.json({ version: await getAgencySoundsVersion(agencyId) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
   // Serves an agency's custom tone to consoles (JWT) and handsets (radio key).
   // A 404 simply means "no custom tone" — the client falls back to its bundled one.
   router.get("/sounds/:kind", async (req, res) => {
@@ -1183,14 +1657,7 @@ export function createApiRouter(): Router {
         res.status(404).json({ error: "unknown_sound" });
         return;
       }
-      let agencyId = req.authUser?.agencyId ?? null;
-      if (agencyId == null) {
-        const headerRaw = req.headers["x-radio-key"];
-        const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
-        const key = headerVal ?? (typeof req.query.key === "string" ? req.query.key : null);
-        const agency = await resolveAgencyByKey(key ?? null, radioApiKey).catch(() => null);
-        agencyId = agency?.id ?? null;
-      }
+      const agencyId = await resolveSoundAgencyId(req);
       if (agencyId == null) {
         res.status(404).json({ error: "not_found" });
         return;
@@ -1284,6 +1751,204 @@ export function createApiRouter(): Router {
       res.setHeader("Content-Type", logo.mime);
       res.setHeader("Cache-Control", "no-cache");
       res.send(logo.logo);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- custom soundboard tone-outs ---------------------------------------
+
+  router.get("/tone-outs", requireAgencyMember, async (req, res) => {
+    try {
+      res.json({ toneOuts: await listToneOuts(req.authUser!.agencyId!) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get("/tone-outs/:id/audio", requireAgencyMember, async (req, res) => {
+    try {
+      const record = await getToneOutAudio(Number(req.params.id), req.authUser!.agencyId!);
+      if (!record) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.setHeader("Content-Type", record.mime);
+      res.send(record.audio);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get("/tone-outs/:id/icon", requireAgencyMember, async (req, res) => {
+    try {
+      const record = await getToneOutIcon(Number(req.params.id), req.authUser!.agencyId!);
+      if (!record) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.setHeader("Content-Type", record.mime);
+      res.setHeader("Cache-Control", "no-cache");
+      res.send(record.image);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post("/admin/tone-outs", requireAdmin, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const name = String(body.name ?? "").trim();
+      if (!name) {
+        res.status(400).json({ error: "missing_name" });
+        return;
+      }
+      const colorRaw = String(body.iconColor ?? "").trim();
+      const toneOut = await createToneOut(agencyId, {
+        name: name.slice(0, 60),
+        playMode: oneOf(body.playMode, TONE_OUT_PLAY_MODES, "once"),
+        iconKind: String(body.iconKind ?? "waveform").trim().slice(0, 32) || "waveform",
+        iconColor: /^#[0-9a-fA-F]{6}$/.test(colorRaw) ? colorRaw : "#22c5e5",
+      });
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "tone_out_create",
+        target: name,
+        ip: clientIp(req),
+      });
+      res.status(201).json({ toneOut });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.patch("/admin/tone-outs/:id", requireAdmin, async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const patch: { name?: string; playMode?: string; iconKind?: string; iconColor?: string } = {};
+      if (body.name !== undefined) {
+        const name = String(body.name).trim();
+        if (!name) {
+          res.status(400).json({ error: "missing_name" });
+          return;
+        }
+        patch.name = name.slice(0, 60);
+      }
+      if (body.playMode !== undefined) {
+        patch.playMode = oneOf(body.playMode, TONE_OUT_PLAY_MODES, "once");
+      }
+      if (body.iconKind !== undefined) {
+        patch.iconKind = String(body.iconKind).trim().slice(0, 32) || "waveform";
+      }
+      if (body.iconColor !== undefined) {
+        const color = String(body.iconColor).trim();
+        patch.iconColor = /^#[0-9a-fA-F]{6}$/.test(color) ? color : "#22c5e5";
+      }
+      const toneOut = await updateToneOut(Number(req.params.id), req.authUser!.agencyId!, patch);
+      if (!toneOut) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.json({ toneOut });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.put(
+    "/admin/tone-outs/:id/audio",
+    requireAdmin,
+    raw({ type: () => true, limit: TONE_OUT_AUDIO_MAX }),
+    async (req, res) => {
+      try {
+        const mime = (req.header("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+        if (!mime.startsWith("audio/") && mime !== "application/octet-stream") {
+          res.status(415).json({ error: "bad_audio_type" });
+          return;
+        }
+        const body: unknown = req.body;
+        if (!Buffer.isBuffer(body) || body.length === 0) {
+          res.status(400).json({ error: "missing_audio" });
+          return;
+        }
+        const ok = await setToneOutAudio(
+          Number(req.params.id),
+          req.authUser!.agencyId!,
+          body,
+          mime,
+        );
+        if (!ok) {
+          res.status(404).json({ error: "not_found" });
+          return;
+        }
+        res.json({ ok: true, byte_size: body.length });
+      } catch (error) {
+        fail(res, error);
+      }
+    },
+  );
+
+  router.put(
+    "/admin/tone-outs/:id/icon",
+    requireAdmin,
+    raw({ type: () => true, limit: LOGO_MAX_BYTES }),
+    async (req, res) => {
+      try {
+        const mime = (req.header("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
+        if (!mime.startsWith("image/")) {
+          res.status(415).json({ error: "bad_image_type" });
+          return;
+        }
+        const body: unknown = req.body;
+        if (!Buffer.isBuffer(body) || body.length === 0) {
+          res.status(400).json({ error: "missing_image" });
+          return;
+        }
+        const ok = await setToneOutIcon(Number(req.params.id), req.authUser!.agencyId!, body, mime);
+        if (!ok) {
+          res.status(404).json({ error: "not_found" });
+          return;
+        }
+        res.json({ ok: true });
+      } catch (error) {
+        fail(res, error);
+      }
+    },
+  );
+
+  router.delete("/admin/tone-outs/:id/icon", requireAdmin, async (req, res) => {
+    try {
+      const ok = await clearToneOutIcon(Number(req.params.id), req.authUser!.agencyId!);
+      if (!ok) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.delete("/admin/tone-outs/:id", requireAdmin, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const ok = await deleteToneOut(Number(req.params.id), agencyId);
+      if (!ok) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "tone_out_delete",
+        target: String(req.params.id),
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
     } catch (error) {
       fail(res, error);
     }
@@ -1455,6 +2120,31 @@ export function createApiRouter(): Router {
     }
   });
 
+  router.get("/radio/transmissions", async (req, res) => {
+    try {
+      const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 80);
+      const transmissions = await listTransmissions({
+        agencyId: radioAgencyId(req),
+        sort: "newest",
+        limit,
+      });
+      res.json({
+        transmissions: transmissions.map((t) => ({
+          id: t.id,
+          channel_name: t.channel_name,
+          started_at: formatTransmissionStartedAt(t.started_at),
+          duration_ms: t.duration_ms,
+          transcript: t.transcript,
+          transcript_status: t.transcript_status,
+          unit_id: t.unit_id,
+          display_name: t.display_name,
+        })),
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
   router.get("/radio/inbox", async (req, res) => {
     try {
       const unit = String(req.query.unit ?? "").trim().toUpperCase();
@@ -1466,7 +2156,8 @@ export function createApiRouter(): Router {
       const since = Number(req.query.since ?? 0);
       const alerts = await listInboxAlerts(radioAgencyId(req), unit, channel, Number.isFinite(since) ? since : 0);
       const lastId = alerts.length > 0 ? alerts[alerts.length - 1]!.id : Number.isFinite(since) ? since : 0;
-      res.json({ alerts, lastId });
+      const ten33 = await listTen33Channels(radioAgencyId(req));
+      res.json({ alerts, lastId, ten33 });
     } catch (error) {
       fail(res, error);
     }
@@ -1504,6 +2195,167 @@ export function createApiRouter(): Router {
 
   // --- console: live map + alerts ----------------------------------------
 
+  // Dispatcher toggles the 10-33 marker for a channel; radios poll this via
+  // /radio/inbox and show a warning icon while their tuned channel is flagged.
+  router.get("/ai-dispatch/status", requireAgencyMember, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const platform = getAiDispatchPlatformStatus();
+      const elevenKey = await getAgencyIntegrationValue(agencyId, "elevenlabs_api_key");
+      const voiceId = await getAgencyIntegrationValue(agencyId, "elevenlabs_voice_id");
+      const promptSource = await agencyPromptSource(agencyId);
+      res.json({
+        platform_enabled: platform.enabled,
+        platform_llm_configured: platform.llmConfigured,
+        agency_tts_configured: !!elevenKey && !!voiceId,
+        agency_prompt_configured: promptSource !== "railway_default",
+        agency_prompt_source: promptSource,
+        model: platform.model,
+        dispatch_unit_id: platform.dispatchUnitId,
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post("/channels/ai-dispatch", requireAgencyOperator, async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const channel = String(body.channel ?? "").trim();
+      if (!channel) {
+        res.status(400).json({ error: "missing_channel" });
+        return;
+      }
+      const enabled = body.enabled === true;
+      const agencyId = req.authUser!.agencyId!;
+      await setChannelAiDispatch(agencyId, channel, enabled);
+      const { notifyChannelAiDispatchListenPcm } = await import("./voiceRelay.js");
+      notifyChannelAiDispatchListenPcm(agencyId, channel, enabled);
+      await writeAudit({
+        agencyId: req.authUser!.agencyId!,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: enabled ? "ai_dispatch_on" : "ai_dispatch_off",
+        target: channel,
+        ip: clientIp(req),
+      });
+      res.json({ ok: true, enabled });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get("/ai-dispatch/activity", requireAgencyMember, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const limit = Number(req.query.limit ?? 50);
+      const entries = await listAiDispatchLog(agencyId, Number.isFinite(limit) ? limit : 50);
+      const ten8_active = await listTen8ActiveIncidents(agencyId);
+      const ten8_webhooks = await listTen8WebhookLog(agencyId, 25);
+      res.json({
+        count: entries.length,
+        entries,
+        ten8_active_incidents: ten8_active,
+        ten8_recent_webhooks: ten8_webhooks,
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get("/channels/ai-dispatch", requireAgencyOperator, async (req, res) => {
+    try {
+      const channel = String(req.query.channel ?? "").trim();
+      if (!channel) {
+        res.status(400).json({ error: "missing_channel" });
+        return;
+      }
+      const row = await getChannelAiDispatchRow(req.authUser!.agencyId!, channel);
+      res.json({ enabled: row?.enabled === true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // Admin: type-to-dispatch test page. Runs the full parse / KB / plate / 10-8
+  // body-building pipeline against the typed transcript. Side-effects (10-8
+  // POSTs) only happen when sendForReal === true; TTS is always preview-only
+  // (the dispatcher never keys the radio channel from this endpoint).
+  router.post("/ai-dispatch/test", requireAgencyOperator, async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const transcript = String(body.transcript ?? "").trim();
+      const channelName = String(body.channelName ?? body.channel ?? "test-channel").trim();
+      const unitId = String(body.unitId ?? body.unit ?? "352").trim();
+      const sendForReal = body.sendForReal === true;
+      const synthesizeTts = body.synthesizeTts !== false;
+      if (!transcript) {
+        res.status(400).json({ error: "missing_transcript" });
+        return;
+      }
+      const result = await runAiDispatchDryRun({
+        agencyId: req.authUser!.agencyId!,
+        transcript,
+        channelName,
+        unitId,
+        sendForReal,
+        synthesizeTts,
+      });
+      if (sendForReal) {
+        await writeAudit({
+          agencyId: req.authUser!.agencyId!,
+          actorUserId: req.authUser!.id,
+          actorName: req.authUser!.username,
+          action: "ai_dispatch_test_send_for_real",
+          target: channelName,
+          ip: clientIp(req),
+        });
+      }
+      res.json(result);
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get("/channels/ten33", requireAgencyOperator, async (req, res) => {
+    try {
+      const channel = String(req.query.channel ?? "").trim();
+      if (!channel) {
+        res.status(400).json({ error: "missing_channel" });
+        return;
+      }
+      const active = await getChannelTen33Active(req.authUser!.agencyId!, channel);
+      res.json({ active });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post("/channels/ten33", requireAgencyOperator, async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const channel = String(body.channel ?? "").trim();
+      if (!channel) {
+        res.status(400).json({ error: "missing_channel" });
+        return;
+      }
+      const active = body.active === true;
+      const agencyId = req.authUser!.agencyId!;
+      const platform = getAiDispatchPlatformConfig();
+      await applyChannelTen33Marker({
+        loopbackPort: getAiDispatchLoopbackPort(),
+        agencyId,
+        channelName: channel,
+        active,
+        markerUnitId: platform.dispatchUnitId,
+        source: "manual",
+      });
+      res.json({ ok: true, active });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
   router.get("/locations", requireAgencyMember, async (req, res) => {
     try {
       res.json({ positions: await listPositions(req.authUser!.agencyId!) });
@@ -1512,9 +2364,272 @@ export function createApiRouter(): Router {
     }
   });
 
-  router.get("/channels/roster", requireAgencyMember, (req, res) => {
-    const channel = typeof req.query.channel === "string" ? req.query.channel : "";
-    res.json({ members: listChannelRoster(req.authUser!.agencyId!, channel) });
+  router.get("/ten8/map-incidents", requireAgencyMember, async (req, res) => {
+    try {
+      const incidents = await listTen8MapIncidents(req.authUser!.agencyId!);
+      res.json({ incidents });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // Selectable radio accounts (those with a unit id) for the GPS-log search picker.
+  router.get("/agency/units", requireAgencyOperator, async (req, res) => {
+    try {
+      const users = await listUsers(req.authUser!.agencyId!);
+      const units = users
+        .filter((u) => u.unit_id && !u.disabled)
+        .map((u) => ({ unit_id: u.unit_id as string, display_name: u.display_name }))
+        .sort((a, b) =>
+          (a.display_name || a.unit_id).localeCompare(b.display_name || b.unit_id),
+        );
+      res.json({ units });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // Recorded GPS track for one radio — drives the map's "search GPS logs" tool.
+  router.get("/locations/history", requireAgencyMember, async (req, res) => {
+    try {
+      const unit = String(req.query.unit ?? "").trim().toUpperCase();
+      if (!unit) {
+        res.status(400).json({ error: "missing_unit" });
+        return;
+      }
+      const from = typeof req.query.from === "string" ? req.query.from : undefined;
+      const to = typeof req.query.to === "string" ? req.query.to : undefined;
+      const samples = await listPositionHistory({
+        agencyId: req.authUser!.agencyId!,
+        unitId: unit,
+        from,
+        to,
+      });
+      res.json({ unit, samples });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- console: map geofence overlays ------------------------------------
+
+  router.get("/geofences", requireAgencyMember, async (req, res) => {
+    try {
+      res.json({ geofences: await listGeofences(req.authUser!.agencyId!) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.post("/geofences", requireAgencyOperator, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      const name = String(body.name ?? "").trim();
+      if (!name) {
+        res.status(400).json({ error: "missing_name" });
+        return;
+      }
+      const colorRaw = typeof body.color === "string" ? body.color.trim() : "";
+      const color = /^#[0-9a-fA-F]{6}$/.test(colorRaw) ? colorRaw : null;
+      const shape = body.shape === "polygon" ? "polygon" : "circle";
+
+      let fields: {
+        centerLat: number | null;
+        centerLon: number | null;
+        radiusM: number | null;
+        points: [number, number][] | null;
+        detail: Record<string, unknown>;
+      };
+      if (shape === "polygon") {
+        const raw = Array.isArray(body.points) ? body.points : [];
+        const points: [number, number][] = [];
+        for (const pt of raw) {
+          if (Array.isArray(pt) && pt.length === 2) {
+            const lat = Number(pt[0]);
+            const lon = Number(pt[1]);
+            if (Number.isFinite(lat) && Number.isFinite(lon)) {
+              points.push([lat, lon]);
+            }
+          }
+        }
+        // A polygon needs at least a triangle; cap the vertex count.
+        if (points.length < 3) {
+          res.status(400).json({ error: "missing_fields" });
+          return;
+        }
+        fields = {
+          centerLat: null,
+          centerLon: null,
+          radiusM: null,
+          points: points.slice(0, 200),
+          detail: { vertices: Math.min(points.length, 200) },
+        };
+      } else {
+        const centerLat = Number(body.centerLat);
+        const centerLon = Number(body.centerLon);
+        const radiusM = Number(body.radiusM);
+        if (
+          !Number.isFinite(centerLat) ||
+          !Number.isFinite(centerLon) ||
+          !Number.isFinite(radiusM) ||
+          radiusM <= 0
+        ) {
+          res.status(400).json({ error: "missing_fields" });
+          return;
+        }
+        fields = {
+          centerLat,
+          centerLon,
+          radiusM,
+          points: null,
+          detail: { radius_m: Math.round(radiusM) },
+        };
+      }
+
+      const geofence = await createGeofence({
+        agencyId,
+        name: name.slice(0, 80),
+        shape,
+        color,
+        centerLat: fields.centerLat,
+        centerLon: fields.centerLon,
+        radiusM: fields.radiusM,
+        points: fields.points,
+        createdBy: req.authUser!.displayName,
+      });
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "geofence_create",
+        target: geofence.name,
+        detail: { shape, ...fields.detail },
+        ip: clientIp(req),
+      });
+      res.status(201).json({ geofence });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.delete("/geofences/:id", requireAgencyOperator, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const id = Number(req.params.id);
+      const ok = await deleteGeofence(id, agencyId);
+      if (!ok) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "geofence_delete",
+        target: String(id),
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get("/channels/roster", requireAgencyMember, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const channel = typeof req.query.channel === "string" ? req.query.channel : "";
+      const members = listChannelRoster(agencyId, channel);
+      const counts = unitChannelCounts(agencyId);
+      const locked = withRosterMoveLock(members, counts);
+      res.json({ members: await annotateRosterStatus(agencyId, channel, locked) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // Live Channel Control: every channel with its currently-connected members.
+  router.get("/channels/rosters", requireAgencyOperator, (req, res) => {
+    try {
+      res.json({ channels: listAgencyRosters(req.authUser!.agencyId!) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // Live Channel Control: spin up an emergency channel and pull units into it.
+  router.post("/channels/emergency", requireAgencyOperator, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const rawName = String(req.body?.name ?? "").trim().slice(0, 60);
+      const units: string[] = Array.isArray(req.body?.unit_ids)
+        ? req.body.unit_ids.map((u: unknown) => String(u).trim().toUpperCase()).filter(Boolean)
+        : [];
+      const name = rawName || `EMERGENCY ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`;
+      const existing = await listChannels(agencyId);
+      // Reuse a channel with this name if it already exists, else create it.
+      const channel = existing.find((c) => c.name === name) ?? (await createChannel(agencyId, name));
+      let reached = 0;
+      const moverName = req.authUser!.displayName.trim() || req.authUser!.username;
+      for (const unit of units) {
+        reached += sendMoveCommand(agencyId, unit, channel.name, moverName, null);
+      }
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "emergency_channel",
+        target: channel.name,
+        detail: { channel: channel.name, units, reached },
+        ip: clientIp(req),
+      });
+      res.json({ ok: true, channel: channel.name, reached });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // Live Channel Control: push a live "move to channel" command to a unit.
+  router.post("/channels/move", requireAgencyOperator, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const unit = String(req.body?.unit_id ?? "").trim().toUpperCase();
+      const toChannel = String(req.body?.toChannel ?? "").trim();
+      const fromChannel = req.body?.fromChannel ? String(req.body.fromChannel).trim() : null;
+      const reason = req.body?.reason ? String(req.body.reason).trim().slice(0, 80) : null;
+      if (!unit || !toChannel) {
+        res.status(400).json({ error: "missing_unit_or_channel" });
+        return;
+      }
+      const channels = await listChannels(agencyId);
+      if (!channels.some((c) => c.name === toChannel)) {
+        res.status(404).json({ error: "unknown_channel" });
+        return;
+      }
+      if (isUnitMoveLocked(agencyId, unit)) {
+        res.status(409).json({
+          error: "unit_move_locked",
+          message:
+            "This operator has the dispatch console open on multiple channels and cannot be moved.",
+        });
+        return;
+      }
+      const moverName = req.authUser!.displayName.trim() || req.authUser!.username;
+      const reached = sendMoveCommand(agencyId, unit, toChannel, moverName, fromChannel);
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "channel_move",
+        target: `${unit} → ${toChannel}`,
+        detail: { unit, fromChannel, toChannel, reason, reached },
+        ip: clientIp(req),
+      });
+      res.json({ ok: true, reached });
+    } catch (error) {
+      fail(res, error);
+    }
   });
 
   router.get("/alerts", requireAgencyMember, async (req, res) => {

@@ -6,7 +6,7 @@
 > be reviewed by a licensed attorney (and, for the patent items, by patent/IP
 > counsel) before the platform is distributed or sold.
 
-- **Repository:** `radio-platform` (safeT PTT)
+- **Repository:** `safeT-PTT` (safeT PTT)
 - **Review date:** 2026-05-17
 - **Scope:** Android handset app (`android-app/`), Node/Express backend
   (`server/`), web dispatch console (`server/web-console/`), desktop shell

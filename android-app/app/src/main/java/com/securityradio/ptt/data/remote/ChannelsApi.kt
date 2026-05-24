@@ -7,22 +7,30 @@ import retrofit2.http.POST
 import retrofit2.http.Query
 
 interface ChannelsApi {
-    @GET("v1/channels")
+    /**
+     * Channels this signed-in user is allowed on, with per-channel talk permission.
+     * Calls /v1/me/channels so the radio sees the same talk-priority / talk /
+     * listen-only assignments dispatch sets on the portal.
+     */
+    @GET("/v1/me/channels")
     suspend fun channels(): ChannelsResponseDto
 
-    @GET("v1/air")
+    @GET("/v1/air")
     suspend fun airState(@Query("channel") channel: String? = null): AirStateDto
 
-    /** Optional telemetry for who is keyed on primary vs scan channels (mock via Railway env vars). */
-    @GET("v1/talk-activity")
-    suspend fun talkActivity(): TalkActivityDto
+    /** Live talker hints: home channel plus optional comma-separated scan channel names. */
+    @GET("/v1/talk-activity")
+    suspend fun talkActivity(
+        @Query("home") home: String? = null,
+        @Query("scan") scan: String? = null,
+    ): TalkActivityDto
 
     /** Register this handset on its tuned channel so the server can approximate channel population. */
-    @POST("v1/presence/heartbeat")
+    @POST("/v1/presence/heartbeat")
     suspend fun presenceHeartbeat(@Body body: PresenceHeartbeatDto): PresenceHeartbeatResponseDto
 
     /** Returns how many unique unit identifiers have heartbeated onto this channel lately. */
-    @GET("v1/presence/count")
+    @GET("/v1/presence/count")
     suspend fun presenceCount(@Query("channel") channel: String): PresenceCountDto
 }
 
@@ -57,12 +65,15 @@ data class ChannelsResponseDto(
 )
 
 data class ChannelDto(
-    @SerializedName("id") val id: Int,
+    @SerializedName("id") val id: Int = 0,
     @SerializedName("name") val name: String,
+    /** Server permission string: "talk_priority" / "talk" / "listen_only". */
+    @SerializedName("permission") val permission: String? = null,
 )
 
 data class AirStateDto(
     @SerializedName("occupied") val occupied: Boolean,
     /** Non-null while live PCM keyed on this channel (same TTL as relay “on air”). */
     @SerializedName("transmitting_unit_id") val transmittingUnitId: String? = null,
+    @SerializedName("transmitting_display_name") val transmittingDisplayName: String? = null,
 )
