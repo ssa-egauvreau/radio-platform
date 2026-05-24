@@ -7,4 +7,5 @@ build/
 DerivedData/
 *.xcuserstate
 xcuserdata/
+*.xcresult
 .DS_Store

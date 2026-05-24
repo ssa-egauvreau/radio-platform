@@ -1,0 +1,68 @@
+name: iOS
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'ios-app/**'
+      - '.github/workflows/ios.yml'
+  pull_request:
+    paths:
+      - 'ios-app/**'
+      - '.github/workflows/ios.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Build and test (iOS Simulator)
+    runs-on: macos-14
+    defaults:
+      run:
+        working-directory: ios-app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Resolve a destination
+        id: dest
+        run: |
+          # Pick whichever iPhone the runner has booted/available.
+          DEVICE=$(xcrun simctl list devices available 'iOS' \
+            | grep -E 'iPhone 15( Pro)?( \(.*\))?$' \
+            | head -1 \
+            | sed -E 's/^ +//; s/ \(.*$//')
+          if [ -z "$DEVICE" ]; then
+            DEVICE=$(xcrun simctl list devices available 'iOS' \
+              | grep -E 'iPhone' \
+              | head -1 \
+              | sed -E 's/^ +//; s/ \(.*$//')
+          fi
+          echo "Using simulator: $DEVICE"
+          echo "device=$DEVICE" >> "$GITHUB_OUTPUT"
+
+      - name: Run xcodebuild test
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project SafeTMobile.xcodeproj \
+            -scheme SafeTMobile \
+            -destination "platform=iOS Simulator,name=${{ steps.dest.outputs.device }}" \
+            -resultBundlePath TestResults.xcresult \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            ONLY_ACTIVE_ARCH=YES
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TestResults
+          path: ios-app/TestResults.xcresult

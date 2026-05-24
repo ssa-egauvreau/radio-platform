@@ -45,3 +45,44 @@ targets:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+
+  SafeTMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: SafeTMobileTests
+    dependencies:
+      - target: SafeTMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.safetptt.mobile.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  SafeTMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: SafeTMobileUITests
+    dependencies:
+      - target: SafeTMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.safetptt.mobile.uitests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  SafeTMobile:
+    build:
+      targets:
+        SafeTMobile: all
+        SafeTMobileTests: [test]
+        SafeTMobileUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - SafeTMobileTests
+        - SafeTMobileUITests
