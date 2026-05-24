@@ -37,11 +37,13 @@ targets:
         CFBundleDisplayName: safeT Mobile
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
-        # Server connection — real values live in `Local.xcconfig` (gitignored).
+        # Server connection — real value lives in `Local.xcconfig` (gitignored).
         # See `Local.example.xcconfig` for the format.
         APIBaseURL: "$(SAFET_API_BASE_URL)"
-        RadioAPIKey: "$(SAFET_RADIO_API_KEY)"
         NSLocationWhenInUseUsageDescription: "Your location is shared with dispatch so your unit appears on the live map."
+        NSMicrophoneUsageDescription: "Microphone access is required to transmit voice on the radio channel."
+        UIBackgroundModes:
+          - audio
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait

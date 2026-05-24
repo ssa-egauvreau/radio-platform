@@ -14,13 +14,13 @@ final class RadioApiClientTests: XCTestCase {
         super.tearDown()
     }
 
-    private func makeClient(apiKey: String = "test-key") -> RadioApiClient {
-        RadioApiClient(baseURL: baseURL, apiKey: apiKey, session: StubURLProtocol.makeSession())
+    private func makeClient(token: String? = "test-token") -> RadioApiClient {
+        RadioApiClient(baseURL: baseURL, token: token, session: StubURLProtocol.makeSession())
     }
 
     // MARK: - channels()
 
-    func test_channels_hitsExpectedPath_andDecodesResponse() async throws {
+    func test_channels_hitsMeChannels_withBearerAuth_andDecodesResponse() async throws {
         StubURLProtocol.handler = { _ in
             let json = #"{ "channels": [{ "id": 1, "name": "OPS-1" }, { "id": 2, "name": "OPS-2" }] }"#
             return .init(body: Data(json.utf8))
@@ -32,18 +32,28 @@ final class RadioApiClientTests: XCTestCase {
         XCTAssertEqual(channels.map(\.name), ["OPS-1", "OPS-2"])
 
         let request = try XCTUnwrap(StubURLProtocol.observedRequests.first)
-        XCTAssertEqual(request.url?.path, "/v1/channels")
+        XCTAssertEqual(request.url?.path, "/v1/me/channels")
         XCTAssertEqual(request.httpMethod, "GET")
-        XCTAssertEqual(request.value(forHTTPHeaderField: "X-Radio-Key"), "test-key")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"), "Bearer test-token")
+        XCTAssertNil(request.value(forHTTPHeaderField: "X-Radio-Key"))
     }
 
-    func test_apiKey_isOmitted_whenBlank() async throws {
+    func test_authHeader_isOmitted_whenTokenIsNil() async throws {
         StubURLProtocol.handler = { _ in .init(body: Data(#"{ "channels": [] }"#.utf8)) }
 
-        _ = try await makeClient(apiKey: "").channels()
+        _ = try await makeClient(token: nil).channels()
 
         let request = try XCTUnwrap(StubURLProtocol.observedRequests.first)
-        XCTAssertNil(request.value(forHTTPHeaderField: "X-Radio-Key"))
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
+    }
+
+    func test_authHeader_isOmitted_whenTokenIsBlank() async throws {
+        StubURLProtocol.handler = { _ in .init(body: Data(#"{ "channels": [] }"#.utf8)) }
+
+        _ = try await makeClient(token: "").channels()
+
+        let request = try XCTUnwrap(StubURLProtocol.observedRequests.first)
+        XCTAssertNil(request.value(forHTTPHeaderField: "Authorization"))
     }
 
     func test_non2xx_throwsBadStatus() async {

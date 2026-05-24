@@ -61,10 +61,11 @@ enum RadioApiError: Error {
 
 // MARK: - Client
 
-/// Talks to the safeT PTT server's handset endpoints (shared-key auth).
+/// Talks to the safeT PTT server's authenticated endpoints. The JWT is acquired
+/// at login (`AuthApiClient.login`) and presented here as `Authorization: Bearer`.
 final class RadioApiClient {
     private let baseURL: URL
-    private let apiKey: String
+    private let token: String?
     private let session: URLSession
 
     private let decoder: JSONDecoder = {
@@ -81,17 +82,19 @@ final class RadioApiClient {
 
     init(
         baseURL: URL = RadioConfig.apiBaseURL,
-        apiKey: String = RadioConfig.radioApiKey,
+        token: String? = nil,
         session: URLSession = .shared
     ) {
         self.baseURL = baseURL
-        self.apiKey = apiKey
+        self.token = token
         self.session = session
     }
 
     func channels() async throws -> [ChannelDTO] {
         struct Response: Decodable { let channels: [ChannelDTO] }
-        return try await get("v1/channels", as: Response.self).channels
+        // After login, channel membership is per-user — /me/channels returns
+        // only the channels the JWT is allowed to key or monitor.
+        return try await get("v1/me/channels", as: Response.self).channels
     }
 
     func airState(channel: String?) async throws -> AirState {
@@ -164,8 +167,8 @@ final class RadioApiClient {
     }
 
     private func applyAuth(_ request: inout URLRequest) {
-        if !apiKey.isEmpty {
-            request.setValue(apiKey, forHTTPHeaderField: "X-Radio-Key")
+        if let token, !token.isEmpty {
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         }
     }
 

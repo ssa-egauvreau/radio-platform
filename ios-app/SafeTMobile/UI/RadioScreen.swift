@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// The safeT Mobile radio shell — status strip, channel display, controls,
-/// emergency, and a press-and-hold PTT bar. Voice transmit is not wired yet.
+/// emergency, and a press-and-hold PTT bar.
 struct RadioScreen: View {
-    @StateObject private var viewModel = RadioViewModel()
+    @StateObject var viewModel: RadioViewModel
+    @EnvironmentObject private var session: AuthSession
     @State private var pttDown = false
 
     var body: some View {
@@ -12,6 +13,7 @@ struct RadioScreen: View {
             Color.safetBackground.ignoresSafeArea()
             VStack(spacing: 14) {
                 statusStrip(state)
+                operatorStrip(state)
                 displayPanel(state)
                 channelRow(state)
                 Spacer(minLength: 12)
@@ -35,6 +37,29 @@ struct RadioScreen: View {
                 .foregroundColor(.safetText)
             Spacer()
             networkPill(state.networkLabel)
+        }
+    }
+
+    private func operatorStrip(_ state: RadioUiState) -> some View {
+        HStack(spacing: 8) {
+            Text(state.operatorDisplayName.uppercased())
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.safetTextDim)
+                .lineLimit(1)
+            if !state.agencyName.isEmpty {
+                Text("•").foregroundColor(.safetTextDim.opacity(0.6)).font(.system(size: 10))
+                Text(state.agencyName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.safetTextDim)
+                    .lineLimit(1)
+            }
+            Spacer()
+            Button("SIGN OUT") { session.logout() }
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.safetTextDim)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .overlay(Capsule().stroke(Color.safetBorder, lineWidth: 1))
         }
     }
 
@@ -68,6 +93,14 @@ struct RadioScreen: View {
                     .font(.system(size: 13, weight: .semibold, design: .monospaced))
                     .foregroundColor(.safetTextDim)
                 Spacer()
+                if state.isReceivingAudio {
+                    Text("RX")
+                        .font(.system(size: 11, weight: .heavy))
+                        .foregroundColor(.safetSignal)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .overlay(Capsule().stroke(Color.safetSignal.opacity(0.7), lineWidth: 1))
+                }
                 if let count = state.radiosOnlineOnChannel {
                     Text("\(count) ON CHANNEL")
                         .font(.system(size: 11, weight: .semibold))
@@ -105,7 +138,8 @@ struct RadioScreen: View {
     private func statusColor(_ state: RadioUiState) -> Color {
         if state.isEmergencyActive { return .safetRed }
         if state.pttBusyTone { return .safetAmber }
-        if state.isPttPressed { return .safetGreen }
+        if state.isTransmitting { return .safetGreen }
+        if state.isReceivingAudio { return .safetSignal }
         return .safetTextDim
     }
 
@@ -174,7 +208,7 @@ struct RadioScreen: View {
         VStack(spacing: 4) {
             Text(pttTitle(state))
                 .font(.system(size: 22, weight: .heavy))
-            Text("VOICE TRANSMIT \u{2014} COMING SOON")
+            Text(pttSubtitle(state))
                 .font(.system(size: 10, weight: .semibold))
                 .opacity(0.85)
         }
@@ -200,18 +234,21 @@ struct RadioScreen: View {
 
     private func pttTitle(_ state: RadioUiState) -> String {
         if state.pttBusyTone { return "CHANNEL BUSY" }
-        if state.isPttPressed { return "ON AIR" }
+        if state.isTransmitting { return "ON AIR" }
+        if state.isPttPressed { return "KEYING…" }
         return "HOLD TO TALK"
+    }
+
+    private func pttSubtitle(_ state: RadioUiState) -> String {
+        if !state.canTransmit && state.networkLabel == "ONLINE" { return "MONITOR ONLY ON THIS CHANNEL" }
+        if state.isTransmitting { return "PCM 16K MONO \u{2014} HALF-DUPLEX" }
+        return "PRESS AND HOLD"
     }
 
     private func pttColor(_ state: RadioUiState) -> Color {
         if state.pttBusyTone { return .safetRed }
-        if state.isPttPressed { return .safetGreen }
+        if state.isTransmitting { return .safetGreen }
+        if state.isPttPressed { return .safetGreen.opacity(0.5) }
         return .safetBlue
     }
-}
-
-#Preview {
-    RadioScreen()
-        .preferredColorScheme(.dark)
 }
