@@ -60,6 +60,11 @@ const JOIN_ERRORS: Record<string, string> = {
 /** No inbound audio for this long means the channel is clear again. */
 const RX_GAP_MS = 500;
 
+/** Voice-fallback detector: at least this many raw PCM frames clustered within
+ *  CLEAR_RX_BURST_WINDOW_MS is treated as a sustained talk-spurt (not a marker/tone-out). */
+const CLEAR_RX_BURST_WINDOW_MS = 200;
+const CLEAR_RX_BURST_FRAMES = 4;
+
 const MARKER_INTERVAL_MS = 12000;
 const MARKER_BEEP_MS = 200;
 const MARKER_BEEP_HZ = 950;
@@ -213,10 +218,14 @@ export class VoiceChannelClient {
   private lastInboundMs = 0;
   private receiving = false;
   private rxWatchdog: number | null = null;
-  /** One-shot warning when a peer's audio arrives as raw PCM instead of IMBE — diagnoses fallback. */
-  private warnedClearRx = false;
   /** One-shot warning when our own uplink falls back from IMBE to raw PCM. */
   private warnedClearTx = false;
+  /** Already warned once that a peer is shipping continuous raw PCM (voice fallback). */
+  private warnedClearRx = false;
+  /** Timestamps of recent raw PCM frames received — used to distinguish a sustained
+   *  voice talk-spurt (many frames in quick succession) from a one-shot marker tone or
+   *  tone-out (a single big PCM message). Only the warn-burst window of samples is kept. */
+  private clearRxFrameTimes: number[] = [];
 
   constructor(channelName: string, callbacks: VoiceCallbacks) {
     this.channelName = channelName;
@@ -491,14 +500,24 @@ export class VoiceChannelClient {
       }
       return;
     }
-    // Raw PCM from a peer means that unit's IMBE encoder did not engage — log once per
-    // session so a dispatcher reporting "everything sounds clear, not vocoded" can see
-    // it is a sender-side fallback (handset native lib missing, web vocoder not loaded).
+    // A sustained burst of raw PCM (multiple frames within ~200 ms) means a peer's IMBE
+    // encoder did not engage and they are talking in clear PCM. Filter out one-shots —
+    // 10-33 marker tones and tone-outs are also broadcast as raw PCM but arrive as a
+    // single message — so we only warn after several frames cluster together.
     if (!this.warnedClearRx) {
-      this.warnedClearRx = true;
-      console.warn(
-        `[voice] receiving raw PCM on "${this.channelName}" — peer's IMBE encoder is not active (handset native vocoder missing or web WASM failed to load on the sender).`,
-      );
+      const now = Date.now();
+      const times = this.clearRxFrameTimes;
+      times.push(now);
+      while (times.length > 0 && now - times[0] > CLEAR_RX_BURST_WINDOW_MS) {
+        times.shift();
+      }
+      if (times.length >= CLEAR_RX_BURST_FRAMES) {
+        this.warnedClearRx = true;
+        this.clearRxFrameTimes = [];
+        console.warn(
+          `[voice] receiving raw PCM on "${this.channelName}" — peer's IMBE encoder is not active (handset native vocoder missing or web WASM failed to load on the sender).`,
+        );
+      }
     }
     this.schedulePcm(new Int16Array(buffer, 0, Math.floor(buffer.byteLength / 2)));
   }
