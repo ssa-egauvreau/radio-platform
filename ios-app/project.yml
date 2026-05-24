@@ -23,6 +23,9 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: SafeTMobile
+    configFiles:
+      Debug: Local.xcconfig
+      Release: Local.xcconfig
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.safetptt.mobile
@@ -38,6 +41,9 @@ targets:
         APIBaseURL: "https://safet.up.railway.app"
         RadioAPIKey: ""
         NSLocationWhenInUseUsageDescription: "Your location is shared with dispatch so your unit appears on the live map."
+        NSMicrophoneUsageDescription: "Microphone access is required to transmit voice on the radio channel."
+        UIBackgroundModes:
+          - audio
         UILaunchScreen: {}
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
@@ -45,3 +51,44 @@ targets:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+
+  SafeTMobileTests:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: SafeTMobileTests
+    dependencies:
+      - target: SafeTMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.safetptt.mobile.tests
+        GENERATE_INFOPLIST_FILE: YES
+
+  SafeTMobileUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: SafeTMobileUITests
+    dependencies:
+      - target: SafeTMobile
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.safetptt.mobile.uitests
+        GENERATE_INFOPLIST_FILE: YES
+
+schemes:
+  SafeTMobile:
+    build:
+      targets:
+        SafeTMobile: all
+        SafeTMobileTests: [test]
+        SafeTMobileUITests: [test]
+    run:
+      config: Debug
+    test:
+      config: Debug
+      targets:
+        - SafeTMobileTests
+        - SafeTMobileUITests

@@ -1,19 +1,24 @@
+import AVFoundation
 import Foundation
 
-/// Owns radio state, the server connection, presence/inbox polling, and GPS.
-/// Voice transmit is not wired yet — PTT performs a channel-air check only.
+/// Owns radio state, the server connection, presence/inbox polling, GPS, and
+/// the half-duplex voice transport (mic capture + WebSocket + playback).
 @MainActor
 final class RadioViewModel: ObservableObject {
     @Published private(set) var uiState = RadioUiState()
 
-    private let api = RadioApiClient()
+    private let api: RadioApiClient
     private let locationReporter: LocationReporter
+    private let user: AuthenticatedUser
+    private let voiceAudio: VoiceAudio
+    private let voiceTransport: VoiceTransport
     private let unitId: String
 
     private var channelNames: [String] = []
     private var channelIndex = 0
     private var inboxSince = 0
     private var inboxPrimed = false
+    private var voiceStarted = false
 
     private let clockFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -22,11 +27,23 @@ final class RadioViewModel: ObservableObject {
         return formatter
     }()
 
-    init() {
-        unitId = LocalUnitIdentifier.shortUnitId()
+    init(user: AuthenticatedUser, token: String) {
+        self.user = user
+        unitId = user.radioUnitId
+        api = RadioApiClient(token: token)
+        voiceAudio = VoiceAudio()
+        voiceTransport = VoiceTransport(
+            baseURL: RadioConfig.apiBaseURL,
+            token: token,
+            unitId: unitId,
+            audio: voiceAudio
+        )
         locationReporter = LocationReporter(api: api)
         locationReporter.configure(unitId: unitId)
+
         uiState.localShortUnitId = unitId
+        uiState.operatorDisplayName = user.displayName
+        uiState.agencyName = user.agencyName ?? ""
 
         locationReporter.onAuthorizationChange = { [weak self] authorized in
             Task { @MainActor in self?.handleLocationAuth(authorized) }
@@ -34,10 +51,18 @@ final class RadioViewModel: ObservableObject {
         if uiState.gpsActive {
             locationReporter.start()
         }
+        wireVoiceCallbacks()
         startClock()
         startPresencePolling()
         startInboxPolling()
         Task { await loadCatalog() }
+    }
+
+    deinit {
+        Task { @MainActor [voiceTransport, voiceAudio] in
+            voiceTransport.disconnect()
+            voiceAudio.stop()
+        }
     }
 
     func handle(_ event: RadioUiEvent) {
@@ -72,6 +97,10 @@ final class RadioViewModel: ObservableObject {
             applyTuning()
             uiState.statusMessage = "READY"
             locationReporter.setChannel(currentChannel)
+            await startVoiceIfNeeded()
+            if let channel = currentChannel {
+                voiceTransport.join(channel: channel)
+            }
             await pulsePresence()
         } catch {
             uiState.channelsLoading = false
@@ -100,26 +129,75 @@ final class RadioViewModel: ObservableObject {
         applyTuning()
         uiState.statusMessage = delta > 0 ? "CHANNEL +" : "CHANNEL -"
         uiState.radiosOnlineOnChannel = nil
+        uiState.canTransmit = false
         locationReporter.setChannel(currentChannel)
+        if let channel = currentChannel {
+            voiceTransport.join(channel: channel)
+        }
         Task { await pulsePresence() }
     }
 
-    // MARK: - PTT (air check; voice transmit is a later milestone)
+    // MARK: - voice glue
+
+    private func wireVoiceCallbacks() {
+        voiceAudio.onCapturedFrame = { [weak self] frame in
+            self?.voiceTransport.sendCaptured(frame)
+        }
+        voiceTransport.onJoined = { [weak self] joined in
+            guard let self else { return }
+            self.uiState.canTransmit = joined.permission != .listenOnly
+            self.uiState.statusMessage = joined.permission == .listenOnly ? "MONITOR ONLY" : "READY"
+        }
+        voiceTransport.onError = { [weak self] code in
+            self?.uiState.statusMessage = "LINK: \(code.uppercased())"
+        }
+        voiceTransport.onReceivingChange = { [weak self] receiving in
+            self?.uiState.isReceivingAudio = receiving
+        }
+    }
+
+    private func startVoiceIfNeeded() async {
+        guard !voiceStarted else { return }
+        let granted = await AudioSessionManager.requestRecordPermission()
+        guard granted else {
+            uiState.statusMessage = "MIC DENIED — VOICE OFF"
+            return
+        }
+        do {
+            try voiceAudio.start()
+            voiceStarted = true
+        } catch {
+            uiState.statusMessage = "AUDIO INIT FAILED"
+        }
+    }
+
+    // MARK: - PTT
 
     private func onPttPressed() async {
         uiState.isPttPressed = true
-        uiState.statusMessage = "AIR: CHECKING"
         guard uiState.networkLabel == "ONLINE" else {
             uiState.pttBusyTone = true
             uiState.statusMessage = "NO CONNECTION"
             return
         }
+        guard uiState.canTransmit else {
+            uiState.pttBusyTone = true
+            uiState.statusMessage = "LISTEN ONLY ON THIS CHANNEL"
+            return
+        }
+        uiState.statusMessage = "AIR: CHECKING"
         do {
             let air = try await api.airState(channel: currentChannel)
             guard uiState.isPttPressed else { return }
             let busy = air.occupied && air.transmittingUnitId?.uppercased() != unitId
             uiState.pttBusyTone = busy
-            uiState.statusMessage = busy ? "CHANNEL BUSY" : "CHANNEL CLEAR — VOICE PENDING"
+            if busy {
+                uiState.statusMessage = "CHANNEL BUSY"
+                return
+            }
+            uiState.statusMessage = "ON AIR"
+            uiState.isTransmitting = true
+            voiceAudio.startCapture()
         } catch {
             guard uiState.isPttPressed else { return }
             uiState.pttBusyTone = true
@@ -130,6 +208,10 @@ final class RadioViewModel: ObservableObject {
     private func onPttReleased() {
         uiState.isPttPressed = false
         uiState.pttBusyTone = false
+        if uiState.isTransmitting {
+            voiceAudio.stopCapture()
+            uiState.isTransmitting = false
+        }
         uiState.statusMessage = "RX IDLE"
     }
 
@@ -170,8 +252,6 @@ final class RadioViewModel: ObservableObject {
         }
     }
 
-    /// Reflects the real CoreLocation authorization so the shell never claims
-    /// GPS is on while location access is denied.
     private func handleLocationAuth(_ authorized: Bool) {
         uiState.locationAuthorized = authorized
         guard uiState.gpsActive else { return }
@@ -224,7 +304,6 @@ final class RadioViewModel: ObservableObject {
         }
     }
 
-    /// The first batch primes the cursor silently so old alerts don't replay on launch.
     private func pollInbox() async {
         guard uiState.networkLabel == "ONLINE" else { return }
         do {

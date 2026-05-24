@@ -1,0 +1,18 @@
+// safeT PTT iOS — per-machine configuration template.
+//
+// Copy this file to `Local.xcconfig` (which is gitignored) and replace the
+// placeholder URL with your Railway deployment:
+//
+//     cp Local.example.xcconfig Local.xcconfig
+//
+// Then re-run `xcodegen generate` (or `./setup.sh`) and rebuild in Xcode.
+//
+// Auth is now per-user: sign in with your username + password on the login
+// screen and the server's JWT is used for every request. The legacy
+// `RADIO_API_KEY` is not used by the iOS client anymore.
+//
+// NOTE: xcconfig treats `//` as a start-of-line-comment, so URL values must
+// split the protocol's `//` with `$()` — an empty variable expansion that
+// defeats the comment parser. Keep that pattern when editing.
+
+SAFET_API_BASE_URL = https:$()//your-service-name.up.railway.app

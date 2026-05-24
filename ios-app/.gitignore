@@ -2,9 +2,14 @@
 SafeTMobile.xcodeproj/
 SafeTMobile/Info.plist
 
+# Per-machine config (Railway URL + RADIO_API_KEY). Copy Local.example.xcconfig
+# to Local.xcconfig and edit there — real keys must never be committed.
+Local.xcconfig
+
 # Xcode / build
 build/
 DerivedData/
 *.xcuserstate
 xcuserdata/
+*.xcresult
 .DS_Store

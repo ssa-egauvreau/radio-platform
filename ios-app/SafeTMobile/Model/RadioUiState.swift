@@ -15,7 +15,15 @@ struct RadioUiState {
     var channelsLoading = true
     var channelSyncError: String?
     var localShortUnitId = ""
+    var operatorDisplayName = ""
+    var agencyName = ""
     var radiosOnlineOnChannel: Int?
     var gpsActive = true
     var locationAuthorized = false
+    /// True while the speaker is playing audio received from another unit.
+    var isReceivingAudio = false
+    /// True while the mic is hot and frames are being streamed to the server.
+    var isTransmitting = false
+    /// The server's permission grant for the current channel — gates the mic.
+    var canTransmit = false
 }
