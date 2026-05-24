@@ -106,14 +106,19 @@ struct DispatchScreen: View {
     private func ten33Row(channel: String) -> some View {
         let cell = ten33[channel]
         let busy = ten33Loading.contains(channel)
+        // Pattern-match against Ten33Cell? — the `.some(...)` wrappers are
+        // required because cell is optional; the bare `if case .known = cell`
+        // form doesn't compile for an Optional<Enum>.
         let isActive: Bool = {
-            if case .known(let on) = cell { return on } else { return false }
+            if case .some(.known(let on)) = cell { return on } else { return false }
         }()
         // Treat BOTH .failed (read errored) and .none (initial load not yet
         // returned) as "unknown" — letting the operator toggle during the
         // initial load could POST a value before we've ever read the real
         // server state, overwriting an active 10-33 with stale local default.
-        let isKnown: Bool = { if case .known = cell { return true } else { return false } }()
+        let isKnown: Bool = {
+            if case .some(.known) = cell { return true } else { return false }
+        }()
         return HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 Text(channel)
