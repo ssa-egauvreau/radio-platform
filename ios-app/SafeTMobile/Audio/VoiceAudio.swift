@@ -24,7 +24,7 @@ final class VoiceAudio {
     /// player: float32 mono 16 kHz, non-interleaved (the player's native shape).
     private let processingFormat = AVAudioFormat(
         commonFormat: .pcmFormatFloat32,
-        sampleRate: sampleRate,
+        sampleRate: Self.sampleRate,
         channels: 1,
         interleaved: false
     )!
