@@ -6,6 +6,7 @@ struct RadioScreen: View {
     @StateObject var viewModel: RadioViewModel
     @EnvironmentObject private var session: AuthSession
     @State private var pttDown = false
+    @State private var showingMap = false
     @State private var showingTranscripts = false
 
     var body: some View {
@@ -22,6 +23,21 @@ struct RadioScreen: View {
                 pttBar(state)
             }
             .padding(16)
+        }
+        .sheet(isPresented: $showingMap) {
+            if let token = session.token {
+                NavigationStack {
+                    MapScreen(api: RadioApiClient(token: token))
+                        .toolbar {
+                            ToolbarItem(placement: .navigationBarLeading) {
+                                Button("CLOSE") { showingMap = false }
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(.safetText)
+                            }
+                        }
+                }
+                .preferredColorScheme(.dark)
+            }
         }
         .sheet(isPresented: $showingTranscripts) {
             if let token = session.token {
@@ -70,6 +86,20 @@ struct RadioScreen: View {
                     .lineLimit(1)
             }
             Spacer()
+            Button {
+                showingMap = true
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "map")
+                        .font(.system(size: 10, weight: .bold))
+                    Text("MAP")
+                        .font(.system(size: 10, weight: .bold))
+                }
+                .foregroundColor(.safetTextDim)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .overlay(Capsule().stroke(Color.safetBorder, lineWidth: 1))
+            }
             Button {
                 showingTranscripts = true
             } label: {
