@@ -56,6 +56,21 @@ struct ToneOut: Decodable, Identifiable, Hashable {
     let hasImage: Bool
     let hasAudio: Bool
     let sortOrder: Int
+/// One row from `GET /v1/locations`. Mirrors server `RadioPosition`. All
+/// position fields are required; channel / display / accuracy / heading /
+/// speed / device type are optional metadata.
+struct UnitPosition: Decodable, Identifiable, Hashable {
+    var id: String { unitId }
+    let unitId: String
+    let displayName: String?
+    let channelName: String?
+    let lat: Double
+    let lon: Double
+    let accuracyM: Double?
+    let heading: Double?
+    let speedMps: Double?
+    let deviceType: String?
+    let updatedAt: String
 }
 
 /// Body of `POST /v1/radio/location`. Unknown fields are omitted (not sent as
@@ -189,6 +204,11 @@ final class RadioApiClient {
         var request = URLRequest(url: baseURL.appendingPathComponent("v1/tone-outs/\(id)/audio"))
         applyAuth(&request)
         return try await sendDiscardingBody(request)
+    /// `GET /v1/locations` — every reporting unit in this user's agency with
+    /// its latest fix. Server enforces agency scoping; nothing to filter here.
+    func positions() async throws -> [UnitPosition] {
+        struct Response: Decodable { let positions: [UnitPosition] }
+        return try await get("v1/locations", as: Response.self).positions
     }
 
     func setEmergency(unitId: String, channel: String?, active: Bool, message: String?) async throws {
