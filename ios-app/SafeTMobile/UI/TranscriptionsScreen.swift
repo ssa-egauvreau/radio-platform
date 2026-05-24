@@ -19,6 +19,14 @@ struct TranscriptionsScreen: View {
 
     /// Debounce the search input so we don't fire a request on every keystroke.
     @State private var searchTask: Task<Void, Never>?
+    /// Current in-flight reload — tracked so a fresh search query can cancel
+    /// the stale one. Without this, a slow response for an older query could
+    /// overwrite newer results.
+    @State private var reloadTask: Task<Void, Never>?
+    /// Current in-flight audio fetch — tracked so a second row tap cancels the
+    /// first. Otherwise a slow download for row A could finish after row B's
+    /// quick one and unexpectedly switch playback back to A.
+    @State private var audioFetchTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -186,18 +194,37 @@ struct TranscriptionsScreen: View {
     private func handleTap(_ tx: Transmission) {
         if player.playingId == tx.id {
             player.stop()
+            audioFetchTask?.cancel()
+            audioFetchTask = nil
             return
         }
-        Task { await loadAndPlay(tx) }
+        // Replace any in-flight fetch — the user's latest tap wins. Without
+        // this, a slow A-download finishing after a fast B-download would
+        // hand back to play() and stomp on the user's actual selection.
+        audioFetchTask?.cancel()
+        audioFetchTask = Task { await loadAndPlay(tx) }
     }
 
     private func loadAndPlay(_ tx: Transmission) async {
         loadingAudioId = tx.id
-        defer { loadingAudioId = nil }
+        defer {
+            // Only clear the spinner if it's still showing OUR row — a newer
+            // fetch may have already taken over.
+            if loadingAudioId == tx.id { loadingAudioId = nil }
+        }
         do {
             let data = try await api.transmissionAudio(id: tx.id)
+            // After the await, the task may have been cancelled (user tapped
+            // another row) or the user may have explicitly stopped. Bail in
+            // both cases — don't play stale audio.
+            guard !Task.isCancelled, loadingAudioId == tx.id else { return }
             player.play(id: tx.id, data: data)
+        } catch is CancellationError {
+            return
         } catch {
+            // URLSession's data(for:) rethrows a URLError(.cancelled) on
+            // Task.cancel(); treat it like CancellationError.
+            if (error as? URLError)?.code == .cancelled { return }
             self.error = "Couldn't load audio: \(error.localizedDescription)"
         }
     }
@@ -213,12 +240,33 @@ struct TranscriptionsScreen: View {
     }
 
     private func reload() async {
+        // Cancel any in-flight reload — fast typing was causing slow responses
+        // for older queries to clobber newer results. Capture the query at the
+        // start so we can also discard if the user has changed it before our
+        // request returns.
+        reloadTask?.cancel()
+        let snapshot = search.isEmpty ? nil : search
+        let task = Task { [snapshot] in
+            await performReload(query: snapshot)
+        }
+        reloadTask = task
+        await task.value
+    }
+
+    private func performReload(query: String?) async {
         loading = true
         error = nil
         defer { loading = false }
         do {
-            transmissions = try await api.transmissions(search: search.isEmpty ? nil : search)
+            let result = try await api.transmissions(search: query)
+            // Drop the result if the user has changed the search box while we
+            // were in-flight, or if a newer reload took over.
+            guard !Task.isCancelled, (query ?? "") == search else { return }
+            transmissions = result
+        } catch is CancellationError {
+            return
         } catch {
+            if (error as? URLError)?.code == .cancelled { return }
             self.error = "\(error)"
         }
     }
