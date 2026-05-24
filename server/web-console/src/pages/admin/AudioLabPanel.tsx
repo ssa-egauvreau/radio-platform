@@ -522,6 +522,58 @@ export function AudioLabPanel() {
         <fieldset>
           <legend>Pre-IMBE conditioning</legend>
           <Toggle
+            label="Wind gate (adaptive)"
+            value={config.preImbe.windGateEnabled}
+            onChange={(v) => updatePre("windGateEnabled", v)}
+          />
+          <RangeRow
+            label="Wind gate threshold"
+            unit="dB"
+            min={0}
+            max={18}
+            step={1}
+            value={config.preImbe.windGateThresholdDb}
+            disabled={!config.preImbe.windGateEnabled}
+            onChange={(v) => updatePre("windGateThresholdDb", v)}
+          />
+          <RangeRow
+            label="Wind gate attenuation"
+            unit="dB"
+            min={-30}
+            max={-6}
+            step={1}
+            value={config.preImbe.windGateAttenuationDb}
+            disabled={!config.preImbe.windGateEnabled}
+            onChange={(v) => updatePre("windGateAttenuationDb", v)}
+          />
+          <Toggle
+            label="Wind HPF (steep)"
+            value={config.preImbe.windHpfEnabled}
+            onChange={(v) => updatePre("windHpfEnabled", v)}
+          />
+          <RangeRow
+            label="Wind HPF cutoff"
+            unit="Hz"
+            min={120}
+            max={300}
+            step={10}
+            value={config.preImbe.windHpfHz}
+            disabled={!config.preImbe.windHpfEnabled}
+            onChange={(v) => updatePre("windHpfHz", v)}
+          />
+          <label className={"audio-lab-range" + (!config.preImbe.windHpfEnabled ? " disabled" : "")}>
+            <span className="audio-lab-range-label">Wind HPF slope</span>
+            <select
+              value={config.preImbe.windHpfOrder}
+              disabled={!config.preImbe.windHpfEnabled}
+              onChange={(e) => updatePre("windHpfOrder", Number(e.target.value) as 2 | 4 | 6)}
+            >
+              <option value={2}>12 dB/oct</option>
+              <option value={4}>24 dB/oct</option>
+              <option value={6}>36 dB/oct</option>
+            </select>
+          </label>
+          <Toggle
             label="High-pass filter"
             value={config.preImbe.hpfEnabled}
             onChange={(v) => updatePre("hpfEnabled", v)}
