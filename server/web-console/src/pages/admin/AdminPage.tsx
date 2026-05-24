@@ -11,6 +11,7 @@ import { IntegrationsPanel } from "./IntegrationsPanel";
 import { KnowledgeBasePanel } from "./KnowledgeBasePanel";
 import { AndroidAppPanel } from "./AndroidAppPanel";
 import { AiTestPanel } from "./AiTestPanel";
+import { AudioLabPanel } from "./AudioLabPanel";
 
 type TabId =
   | "users"
@@ -19,6 +20,7 @@ type TabId =
   | "integrations"
   | "knowledge"
   | "ai-test"
+  | "audio-lab"
   | "android"
   | "sounds"
   | "soundboard"
@@ -32,6 +34,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "integrations", label: "Integrations" },
   { id: "knowledge", label: "Knowledge Base" },
   { id: "ai-test", label: "AI Test" },
+  { id: "audio-lab", label: "Audio Lab" },
   { id: "android", label: "Android App" },
   { id: "sounds", label: "Sounds" },
   { id: "soundboard", label: "Soundboard" },
@@ -65,6 +68,7 @@ export function AdminPage() {
           {tab === "integrations" && <IntegrationsPanel />}
           {tab === "knowledge" && <KnowledgeBasePanel />}
           {tab === "ai-test" && <AiTestPanel />}
+          {tab === "audio-lab" && <AudioLabPanel />}
           {tab === "android" && <AndroidAppPanel />}
           {tab === "sounds" && <SoundsPanel />}
           {tab === "soundboard" && <ToneOutsPanel />}

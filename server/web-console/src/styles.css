@@ -7465,3 +7465,209 @@ code.mono {
   color: var(--text-dim);
   font-weight: 500;
 }
+
+/* ---------- Audio Lab ---------- */
+.audio-lab {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 1100px;
+}
+.audio-lab header h2 {
+  margin: 0 0 6px;
+}
+.audio-lab header .muted {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+.audio-lab-banner {
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  line-height: 1.4;
+  border: 1px solid var(--border);
+}
+.audio-lab-banner.error {
+  border-color: #b34;
+  background: rgba(190, 60, 70, 0.12);
+  color: #ffd0d6;
+}
+.audio-lab-banner.info {
+  border-color: var(--border);
+  background: var(--panel);
+  color: var(--text-dim);
+}
+.audio-lab-record,
+.audio-lab-presets,
+.audio-lab-pipeline,
+.audio-lab-latency,
+.audio-lab-server-config,
+.audio-lab-push {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+}
+.audio-lab-record {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.audio-lab-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.audio-lab-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.audio-lab-presets label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.audio-lab-presets select {
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.audio-lab-dirty {
+  font-size: 11px;
+  color: #d97;
+  font-style: italic;
+}
+.audio-lab-pipeline {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 14px;
+  padding: 0;
+  background: transparent;
+  border: none;
+}
+.audio-lab-pipeline fieldset {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin: 0;
+}
+.audio-lab-pipeline legend {
+  color: var(--text-dim);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 0 6px;
+}
+.audio-lab-pipeline fieldset[disabled] {
+  opacity: 0.5;
+}
+.audio-lab-pipeline label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin: 6px 0;
+}
+.audio-lab-pipeline label > span:first-child {
+  min-width: 140px;
+}
+.audio-lab-pipeline select {
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-family: inherit;
+  font-size: 13px;
+  flex: 1;
+}
+.audio-lab-toggle {
+  cursor: pointer;
+}
+.audio-lab-range {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+}
+.audio-lab-range input[type="range"] {
+  flex: 1;
+}
+.audio-lab-range-label {
+  flex: 0 0 140px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.audio-lab-range-value {
+  flex: 0 0 80px;
+  text-align: right;
+  font-family: ui-monospace, monospace;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.audio-lab-range.disabled .audio-lab-range-label,
+.audio-lab-range.disabled .audio-lab-range-value {
+  opacity: 0.4;
+}
+.audio-lab-latency h3,
+.audio-lab-server-config h3,
+.audio-lab-push h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.audio-lab-config-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 8px;
+  font-size: 12px;
+}
+.audio-lab-config-table td {
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+}
+.audio-lab-config-table td:first-child {
+  color: var(--text-dim);
+  width: 240px;
+}
+.audio-lab-config-table td:last-child {
+  font-family: ui-monospace, monospace;
+}
+.audio-lab-latency-total td {
+  border-bottom: none;
+  padding-top: 8px;
+}
+.audio-lab-push-row {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.audio-lab-push-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-dim);
+  flex: 0 1 240px;
+}
+.audio-lab-push-row select {
+  background: var(--bg-input);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: 13px;
+}
+.small {
+  font-size: 12px;
+}
