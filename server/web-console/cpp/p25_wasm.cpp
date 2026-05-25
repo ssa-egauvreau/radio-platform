@@ -29,12 +29,10 @@ int imbe_init() {
   if (gEncoder != nullptr) {
     gEncoder->setGainAdjust(1.0f);
   }
-  if (gDecoder != nullptr) {
-    // Defensive — matches the Android JNI bridge. The MBEDecoder constructor
-    // now defaults autoGain to true, but keep the explicit set so any future
-    // upstream churn that drops the default still leaves audio loud + level.
-    gDecoder->setAutoGain(true);
-  }
+  // Intentionally leave gDecoder->autoGain at the constructor default (false).
+  // Web + server run ImbeAgc on the decoded PCM, which is a 1:1 port of the
+  // native autoGain ramp. Opting in here would stack two identical compressors
+  // and over-drive loud talk-spurts.
   return (gEncoder != nullptr && gDecoder != nullptr) ? 1 : 0;
 }
 
@@ -64,13 +62,10 @@ int imbe_decode(uint8_t* codeword11, int16_t* samples160) {
 
 EMSCRIPTEN_KEEPALIVE
 MBEDecoder* imbe_decoder_create() {
-  auto* decoder = new (std::nothrow) MBEDecoder(DECODE_88BIT_IMBE);
-  if (decoder != nullptr) {
-    // Same reason as imbe_init() — match the Android JNI behaviour so the
-    // per-stream decoder doesn't silently fall back to a flat 1.0 gain.
-    decoder->setAutoGain(true);
-  }
-  return decoder;
+  // autoGain stays at the constructor default (false). See imbe_init() — the
+  // server's recording pipeline (imbeServerCodec.ts) also runs ImbeAgc on the
+  // decoded PCM, so the native ramp would duplicate it.
+  return new (std::nothrow) MBEDecoder(DECODE_88BIT_IMBE);
 }
 
 EMSCRIPTEN_KEEPALIVE
