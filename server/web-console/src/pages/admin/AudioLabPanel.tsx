@@ -127,6 +127,13 @@ export function AudioLabPanel() {
   const [measuringLatency, setMeasuringLatency] = useState(false);
 
   const playCtxRef = useRef<AudioContext | null>(null);
+  // Track the rate we *asked* the context to run at, not the one it actually
+  // ended up at — Safari (and some Chromium builds) ignore the constructor's
+  // sampleRate option and stick to the device default (44.1/48 kHz). Comparing
+  // the *requested* rate keeps "did the caller change modes?" honest; comparing
+  // ctx.sampleRate would say "yes" on every click in those browsers and burn
+  // through the per-tab AudioContext budget.
+  const playCtxRequestedRateRef = useRef<number | null>(null);
   const playSourceRef = useRef<AudioBufferSourceNode | null>(null);
   const recordTimerRef = useRef<number | null>(null);
   // Mirror of `recording` state so stable callbacks (onAutoStop, unmount cleanup) can
@@ -170,6 +177,7 @@ export function AudioLabPanel() {
         /* already stopped */
       }
       void playCtxRef.current?.close().catch(() => undefined);
+      playCtxRequestedRateRef.current = null;
       if (recordTimerRef.current !== null) {
         window.clearInterval(recordTimerRef.current);
         recordTimerRef.current = null;
@@ -318,12 +326,18 @@ export function AudioLabPanel() {
     // The cached AudioContext is locked to whatever sampleRate it was created
     // at — recreate it if the caller now wants a different rate (e.g. switching
     // between the 16 kHz production preset and the polyphase24 listening mode).
-    if (playCtxRef.current && playCtxRef.current.sampleRate !== sampleRate) {
+    // Compare the *requested* rate, not ctx.sampleRate: Safari and some
+    // Chromium builds ignore the constructor option and run at the device
+    // default, which would make this branch fire on every click and exhaust
+    // the per-tab AudioContext budget on rapid A/B-ing.
+    if (playCtxRef.current && playCtxRequestedRateRef.current !== sampleRate) {
       void playCtxRef.current.close();
       playCtxRef.current = null;
+      playCtxRequestedRateRef.current = null;
     }
     if (!playCtxRef.current) {
       playCtxRef.current = new AudioContext({ sampleRate });
+      playCtxRequestedRateRef.current = sampleRate;
     }
     const ctx = playCtxRef.current;
     if (ctx.state === "suspended") {
