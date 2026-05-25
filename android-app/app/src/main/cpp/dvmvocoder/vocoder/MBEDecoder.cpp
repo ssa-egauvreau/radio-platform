@@ -72,7 +72,15 @@ namespace vocoder {
     MBEDecoder::MBEDecoder(MBE_DECODER_MODE mode) :
         m_mbelibParms(NULL),
         m_mbeMode(mode),
-        m_gainAdjust(1.0f)
+        m_gainAdjust(1.0f),
+        // m_autoGain was previously left uninitialized (the __PROPERTY macro
+        // doesn't add an in-class default). Whether the auto-gain ramp ran was
+        // undefined — driven by whatever bytes happened to live in the heap
+        // slot when the decoder was allocated. The Android JNI bridge masked
+        // this by explicitly calling setAutoGain(true); the WASM (web + server)
+        // path didn't, so audio could sound quiet or inconsistent there.
+        // Default to true so the path matches what every caller actually wants.
+        m_autoGain(true)
     {
         m_mbelibParms = new mbelibParms();
         mbe_initMbeParms(m_mbelibParms->m_cur_mp, m_mbelibParms->m_prev_mp, m_mbelibParms->m_prev_mp_enhanced);

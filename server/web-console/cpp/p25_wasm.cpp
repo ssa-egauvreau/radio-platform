@@ -29,6 +29,12 @@ int imbe_init() {
   if (gEncoder != nullptr) {
     gEncoder->setGainAdjust(1.0f);
   }
+  if (gDecoder != nullptr) {
+    // Defensive — matches the Android JNI bridge. The MBEDecoder constructor
+    // now defaults autoGain to true, but keep the explicit set so any future
+    // upstream churn that drops the default still leaves audio loud + level.
+    gDecoder->setAutoGain(true);
+  }
   return (gEncoder != nullptr && gDecoder != nullptr) ? 1 : 0;
 }
 
@@ -58,7 +64,13 @@ int imbe_decode(uint8_t* codeword11, int16_t* samples160) {
 
 EMSCRIPTEN_KEEPALIVE
 MBEDecoder* imbe_decoder_create() {
-  return new (std::nothrow) MBEDecoder(DECODE_88BIT_IMBE);
+  auto* decoder = new (std::nothrow) MBEDecoder(DECODE_88BIT_IMBE);
+  if (decoder != nullptr) {
+    // Same reason as imbe_init() — match the Android JNI behaviour so the
+    // per-stream decoder doesn't silently fall back to a flat 1.0 gain.
+    decoder->setAutoGain(true);
+  }
+  return decoder;
 }
 
 EMSCRIPTEN_KEEPALIVE
