@@ -498,6 +498,14 @@ export async function ensureSchema(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_ten8_webhook_log_agency_ts
       ON ten8_webhook_log (agency_id, received_at DESC);
+
+    CREATE TABLE IF NOT EXISTS global_audio_config (
+      agency_id INT NOT NULL PRIMARY KEY REFERENCES agencies(id) ON DELETE CASCADE,
+      config JSONB NOT NULL,
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_by_user_id INT REFERENCES users(id) ON DELETE SET NULL,
+      updated_by_username TEXT
+    );
   `);
 
   // --- migrate any pre-existing single-tenant data into the default agency ---

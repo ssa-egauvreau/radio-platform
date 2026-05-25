@@ -119,6 +119,8 @@ import {
   updateUser,
   upsertPosition,
   writeAudit,
+  getGlobalAudioConfig,
+  setGlobalAudioConfig,
   type Permission,
   type TransmissionSort,
 } from "./store.js";
@@ -2707,6 +2709,97 @@ export function createApiRouter(): Router {
         ip: clientIp(req),
       });
       res.json({ alert });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // Global audio config — apply Audio Lab settings agency-wide
+  // ---------------------------------------------------------------------------
+
+  /** GET /v1/admin/audio-config — admin: read current agency-wide audio config */
+  router.get("/admin/audio-config", requireAdmin, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const row = await getGlobalAudioConfig(agencyId);
+      res.json({
+        config: row?.config ?? null,
+        updatedAt: row?.updated_at ?? null,
+        updatedBy: row?.updated_by_username ?? null,
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /** PUT /v1/admin/audio-config — admin: push new agency-wide audio config */
+  router.put("/admin/audio-config", requireAdmin, async (req, res) => {
+    try {
+      const me = req.authUser!;
+      const agencyId = me.agencyId!;
+      const config: unknown = req.body?.config ?? req.body;
+      if (!config || typeof config !== "object" || Array.isArray(config)) {
+        res.status(400).json({ error: "missing_fields" });
+        return;
+      }
+      const row = await setGlobalAudioConfig(agencyId, config, me.id, me.username);
+      await writeAudit({
+        agencyId,
+        actorUserId: me.id,
+        actorName: me.username,
+        action: "audio_config_push",
+        target: "global",
+        ip: clientIp(req),
+      });
+      res.json({
+        ok: true,
+        config: row.config,
+        updatedAt: row.updated_at,
+        updatedBy: row.updated_by_username,
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * GET /v1/audio/config — any authenticated agency member.
+   * Returns a device-oriented summary derived from the global audio config so
+   * Android/iOS clients can apply agency-wide AGC and noise-suppression settings
+   * without needing to understand the full AudioLabConfig schema.
+   */
+  router.get("/audio/config", requireAgencyMember, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const row = await getGlobalAudioConfig(agencyId);
+      if (!row) {
+        res.json({ config: null });
+        return;
+      }
+      // Derive a simplified Android-compatible config from the full AudioLabConfig.
+      const full = row.config as {
+        preImbe?: {
+          agcEnabled?: boolean;
+          agcMaxGain?: number;
+          windGateEnabled?: boolean;
+        };
+      };
+      const agcEnabled = Boolean(full.preImbe?.agcEnabled ?? false);
+      const agcMaxGain = Number(full.preImbe?.agcMaxGain ?? 6);
+      const windGate = Boolean(full.preImbe?.windGateEnabled ?? false);
+      // Map agcMaxGain (1–12) → gainMultiplier (0.5–3.0)
+      const gainMultiplier = agcEnabled
+        ? Math.max(0.5, Math.min(3.0, (agcMaxGain / 12.0) * 3.0))
+        : 1.0;
+      res.json({
+        config: {
+          agcEnabled,
+          noiseSuppression: windGate,
+          gainMultiplier: Math.round(gainMultiplier * 100) / 100,
+        },
+        updatedAt: row.updated_at,
+      });
     } catch (error) {
       fail(res, error);
     }

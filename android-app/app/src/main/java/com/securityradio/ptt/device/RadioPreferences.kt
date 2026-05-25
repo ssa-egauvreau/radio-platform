@@ -153,6 +153,44 @@ class RadioPreferences(context: Context) {
         prefs.edit().putBoolean(KEY_MP22_USE_PHYSICAL_DISPLAY, usePhysical).apply()
     }
 
+    // -------------------------------------------------------------------------
+    // Server-pushed audio config (set by an admin in the Audio Lab → Apply live)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Saves the agency-wide audio config fetched from /v1/audio/config.
+     * Calling this overrides any local mic-audio settings until [clearServerAudioConfig] is called.
+     */
+    fun setServerAudioConfig(agcEnabled: Boolean, noiseSuppression: Boolean, gainMultiplier: Float) {
+        prefs.edit()
+            .putBoolean(KEY_SERVER_AGC_ENABLED, agcEnabled)
+            .putBoolean(KEY_SERVER_NOISE_SUPPRESSION, noiseSuppression)
+            .putFloat(KEY_SERVER_GAIN_MULTIPLIER, gainMultiplier.coerceIn(MIN_MIC_GAIN, MAX_MIC_GAIN))
+            .putBoolean(KEY_SERVER_CONFIG_SET, true)
+            .apply()
+    }
+
+    /** True when a server-pushed config is stored and should take precedence over local prefs. */
+    fun hasServerAudioConfig(): Boolean = prefs.getBoolean(KEY_SERVER_CONFIG_SET, false)
+
+    fun getServerAgcEnabled(): Boolean = prefs.getBoolean(KEY_SERVER_AGC_ENABLED, DEFAULT_MIC_AUTO_GAIN)
+
+    fun getServerNoiseSuppression(): Boolean = prefs.getBoolean(KEY_SERVER_NOISE_SUPPRESSION, DEFAULT_MIC_NOISE_SUPPRESSION)
+
+    fun getServerGainMultiplier(): Float =
+        prefs.getFloat(KEY_SERVER_GAIN_MULTIPLIER, DEFAULT_MIC_GAIN_MULTIPLIER)
+            .coerceIn(MIN_MIC_GAIN, MAX_MIC_GAIN)
+
+    /** Removes the server-pushed config; device falls back to local per-user settings. */
+    fun clearServerAudioConfig() {
+        prefs.edit()
+            .remove(KEY_SERVER_AGC_ENABLED)
+            .remove(KEY_SERVER_NOISE_SUPPRESSION)
+            .remove(KEY_SERVER_GAIN_MULTIPLIER)
+            .putBoolean(KEY_SERVER_CONFIG_SET, false)
+            .apply()
+    }
+
     companion object {
         const val MIN_MIC_GAIN: Float = 0.5f
         const val MAX_MIC_GAIN: Float = 3.0f
@@ -178,5 +216,10 @@ class RadioPreferences(context: Context) {
         private const val KEY_MIC_GAIN_MULTIPLIER = "mic_gain_multiplier"
         private const val KEY_MP22_USE_PHYSICAL_DISPLAY = "mp22_use_physical_display"
         private const val DEFAULT_VOICE_ANNOUNCE = true
+        // Server-pushed audio config
+        private const val KEY_SERVER_CONFIG_SET = "server_audio_config_set"
+        private const val KEY_SERVER_AGC_ENABLED = "server_agc_enabled"
+        private const val KEY_SERVER_NOISE_SUPPRESSION = "server_noise_suppression"
+        private const val KEY_SERVER_GAIN_MULTIPLIER = "server_gain_multiplier"
     }
 }

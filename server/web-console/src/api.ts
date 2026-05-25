@@ -471,6 +471,19 @@ export class ApiError extends Error {
   }
 }
 
+export interface GlobalAudioConfigResponse {
+  config: unknown | null;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
+export interface GlobalAudioConfigPushResponse {
+  ok: boolean;
+  config: unknown;
+  updatedAt: string;
+  updatedBy: string | null;
+}
+
 let authToken: string | null = null;
 
 export function setToken(token: string | null): void {
@@ -853,6 +866,12 @@ export const api = {
   updateSimulcast: (id: number, patch: { name?: string; channelIds?: number[] }) =>
     request<{ ok: boolean }>("PUT", `/v1/simulcast/${id}`, patch),
   deleteSimulcast: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/simulcast/${id}`),
+
+  /** Admin: read the current agency-wide audio config (null if never set). */
+  getGlobalAudioConfig: () => request<GlobalAudioConfigResponse>("GET", "/v1/admin/audio-config"),
+  /** Admin: push a new agency-wide audio config to all users and devices. */
+  setGlobalAudioConfig: (config: unknown) =>
+    request<GlobalAudioConfigPushResponse>("PUT", "/v1/admin/audio-config", config),
 };
 
 /** Uploads a custom agency logo (raw image body — not JSON). */
