@@ -404,10 +404,15 @@ export function upsamplePlayback16To24(pcm16k: Int16Array): Int16Array {
 let cached24Kernel: [Float32Array, Float32Array, Float32Array] | null = null;
 function polyphase24Kernel(): [Float32Array, Float32Array, Float32Array] {
   if (cached24Kernel) return cached24Kernel;
-  // 17-tap windowed-sinc per phase. Phase 0 is the identity (input sample passes
-  // through), phases 1 and 2 sample the sinc at fractional offsets 2/3 and 4/3.
-  // Cutoff is the 24 kHz output's effective Nyquist (8 kHz from the IMBE source
-  // is the only spectrum that matters; nothing above it to alias).
+  // 17-tap windowed-sinc per phase. Phase 0 is the identity (input sample
+  // passes through); phases 1 and 2 sample the sinc at the *fractional* part
+  // of srcPos relative to centreIn = floor(srcPos):
+  //   phase 1 → srcPos % 1 = 2/3
+  //   phase 2 → srcPos % 1 = 1/3   (NOT 4/3 — that's the absolute srcPos,
+  //                                  which is why centreIn = floor(srcPos)
+  //                                  already pulled the integer 1 out)
+  // Cutoff is the 24 kHz output's effective Nyquist (8 kHz from the IMBE
+  // source is the only spectrum that matters; nothing above it to alias).
   const N = 17;
   const HALF = (N - 1) >> 1;
   const fc = 0.5; // half-band cutoff at the 16 kHz input rate
@@ -416,8 +421,9 @@ function polyphase24Kernel(): [Float32Array, Float32Array, Float32Array] {
     new Float32Array(N),
     new Float32Array(N),
   ];
+  const FRAC_OFFSET = [0, 2 / 3, 1 / 3];
   for (let phase = 1; phase < 3; phase++) {
-    const offset = phase * (2 / 3); // 2/3 or 4/3
+    const offset = FRAC_OFFSET[phase]!;
     let norm = 0;
     for (let i = 0; i < N; i++) {
       const x = i - HALF - offset;
