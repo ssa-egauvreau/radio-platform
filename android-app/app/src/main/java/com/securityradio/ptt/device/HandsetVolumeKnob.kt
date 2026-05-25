@@ -13,14 +13,17 @@ object HandsetVolumeKnob {
 
     const val DEBOUNCE_MS = 120L
 
-    private var lastDownEventTimeMs = Long.MIN_VALUE
-    private var lastUpEventTimeMs = Long.MIN_VALUE
+    // 0L sentinel, not Long.MIN_VALUE: event.eventTime is uptimeMillis() (non-negative), and
+    // subtracting Long.MIN_VALUE overflows to a large negative, making the debounce check
+    // permanently reject every press.
+    private var lastDownEventTimeMs = 0L
+    private var lastUpEventTimeMs = 0L
 
     /** True when this DOWN should adjust volume (first in a detent window). */
     fun acceptDown(event: KeyEvent): Boolean {
         if (event.repeatCount != 0) return false
         val t = event.eventTime
-        if (t - lastDownEventTimeMs < DEBOUNCE_MS) return false
+        if (lastDownEventTimeMs != 0L && t - lastDownEventTimeMs < DEBOUNCE_MS) return false
         lastDownEventTimeMs = t
         return true
     }
@@ -28,7 +31,7 @@ object HandsetVolumeKnob {
     /** True when this UP should be forwarded (paired release for a real detent). */
     fun acceptUp(event: KeyEvent): Boolean {
         val t = event.eventTime
-        if (t - lastUpEventTimeMs < DEBOUNCE_MS) return false
+        if (lastUpEventTimeMs != 0L && t - lastUpEventTimeMs < DEBOUNCE_MS) return false
         lastUpEventTimeMs = t
         return true
     }
