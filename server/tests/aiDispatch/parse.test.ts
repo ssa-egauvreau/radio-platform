@@ -194,6 +194,7 @@ test("normalizeAiDispatchParse: only documented info_request types are accepted"
     "active_calls_for_unit",
     "call_details",
     "unit_location",
+    "unit_status",
     "phone",
     "contact",
     "legal_code",
@@ -213,6 +214,22 @@ test("normalizeAiDispatchParse: only documented info_request types are accepted"
     info_request: { type: "freeform_chat", account_code: null, subject: null },
   });
   assert.equal(bogus?.info_request, null, "unknown info_request types must be discarded silently");
+});
+
+test("normalizeAiDispatchParse: 'unit_status' info_request type is accepted (added in commit 2ad66ee for 'is X 10-8?' questions)", () => {
+  // Without an explicit pin, a future refactor that drops `unit_status`
+  // from the validTypes set would silently re-route every "is 27-020
+  // 10-8?" question back to `active_calls_for_unit`, where it gets
+  // answered with "no active calls" — the exact bug the original PR
+  // fixed. Pin the acceptance independently of the bulk-types loop so
+  // a regression here is unambiguous.
+  const out = normalizeAiDispatchParse({
+    ...base(),
+    info_request: { type: "unit_status", account_code: null, subject: "27-020" },
+  });
+  assert.ok(out?.info_request, "unit_status info_request must pass the validator");
+  assert.equal(out!.info_request!.type, "unit_status");
+  assert.equal(out!.info_request!.subject, "27-020");
 });
 
 test("normalizeAiDispatchParse: info_request.account_code follows the same 3-5 digit rule", () => {

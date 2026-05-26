@@ -154,6 +154,7 @@ test("infoRequestNeedsAsync: local / DB-backed types return false (answered sync
     "active_calls_for_unit",
     "call_details",
     "unit_location", // local position store + reverse geocode but treated sync at this layer
+    "unit_status", // commit 2ad66ee: same fast path as unit_location (no web search)
     "unknown",
   ];
   for (const t of no) {
@@ -163,4 +164,17 @@ test("infoRequestNeedsAsync: local / DB-backed types return false (answered sync
       `${t} must NOT be async`,
     );
   }
+});
+
+test("infoRequestNeedsAsync: 'unit_status' stays on the synchronous path (commit 2ad66ee)", () => {
+  // The unit_status feature was specifically designed as a local DB
+  // read so the "is 27-020 10-8?" answer comes back inside one
+  // dispatcher turn — pulling it onto the async path would re-introduce
+  // the "Copy. Standby." → silence pause that the feature was added
+  // to remove for status questions. Pin the contract independently of
+  // the bulk-types loop so a regression here is loud.
+  assert.equal(
+    infoRequestNeedsAsync({ type: "unit_status", account_code: null, subject: "27-020" }),
+    false,
+  );
 });
