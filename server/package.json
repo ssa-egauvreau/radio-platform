@@ -8,6 +8,7 @@
     "build": "tsc -p tsconfig.json && node scripts/copy-server-assets.mjs && npm --prefix web-console install --no-audit --no-fund --include=dev && npm --prefix web-console run build",
     "build:server": "npm run build",
     "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test --test-reporter=spec \"tests/**/*.test.ts\""
   },
   "dependencies": {
