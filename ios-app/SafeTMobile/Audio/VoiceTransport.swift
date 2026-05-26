@@ -34,6 +34,10 @@ final class VoiceTransport {
     private var pcmFrameScratch = Data(count: P25ImbeNative.Frames.pcm16kFrameBytes)
     private var lastConsumeNs: UInt64 = 0
     private var warnedClearTx = false
+    // Each PTT key-up/key-down pair gets a unique capture session id from
+    // VoiceAudio. We only accept frames for the currently armed session so
+    // late frames from a prior key-up cannot repopulate `pcmAcc`.
+    private var activeCaptureSessionId: UInt64?
 
     private let imbeMagic: [UInt8] = [0xF5, 0xAB]
     private let listenPcmMagic: [UInt8] = [0xF6, 0xAC]
@@ -65,6 +69,16 @@ final class VoiceTransport {
         task = nil
         currentChannel = nil
         reconnectAttempts = 0
+        stopUplinkCapture()
+    }
+
+    func startUplinkCapture(sessionId: UInt64) {
+        activeCaptureSessionId = sessionId
+        resetUplinkState()
+    }
+
+    func stopUplinkCapture() {
+        activeCaptureSessionId = nil
         resetUplinkState()
     }
 
@@ -75,14 +89,15 @@ final class VoiceTransport {
     }
 
     /// Send one captured PCM16 frame (320 bytes @ 16 kHz). Encodes to IMBE when available.
-    nonisolated func sendCaptured(_ frame: Data) {
+    nonisolated func sendCaptured(_ frame: Data, captureSessionId: UInt64) {
         Task { @MainActor [weak self] in
-            self?.sendCapturedOnMain(frame)
+            self?.sendCapturedOnMain(frame, captureSessionId: captureSessionId)
         }
     }
 
-    private func sendCapturedOnMain(_ frame: Data) {
+    private func sendCapturedOnMain(_ frame: Data, captureSessionId: UInt64) {
         guard let task, !frame.isEmpty else { return }
+        guard activeCaptureSessionId == captureSessionId else { return }
 
         let p25 = P25ImbeNative.isAvailable
         if !p25 {

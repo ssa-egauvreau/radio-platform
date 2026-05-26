@@ -13,9 +13,9 @@ final class VoiceAudio {
     static let frameBytes = 320
     static let sampleRate: Double = 16_000
 
-    /// Called with each fully assembled 320-byte capture frame. Configure before
-    /// calling `startCapture()`.
-    var onCapturedFrame: ((Data) -> Void)?
+    /// Called with each fully assembled 320-byte capture frame plus the capture
+    /// session id that produced it. Configure before calling `startCapture()`.
+    var onCapturedFrame: ((Data, UInt64) -> Void)?
 
     private let engine = AVAudioEngine()
     private let player = AVAudioPlayerNode()
@@ -35,6 +35,7 @@ final class VoiceAudio {
     private var captureConverter: AVAudioConverter?
     private var captureBuffer = Data()
     private var capturing = false
+    private var captureSessionId: UInt64 = 0
 
     init() {
         engine.attach(player)
@@ -70,8 +71,9 @@ final class VoiceAudio {
 
     // MARK: - capture (mic → callback)
 
-    func startCapture() {
-        guard !capturing else { return }
+    @discardableResult
+    func startCapture() -> UInt64? {
+        guard !capturing else { return captureSessionId }
 
         let inputNode = engine.inputNode
         let nativeFormat = inputNode.outputFormat(forBus: 0)
@@ -80,9 +82,7 @@ final class VoiceAudio {
         // wired, `outputFormat` can return a 0-channel / 0 Hz format. Installing
         // a tap with that crashes AVAudioEngine. Bail cleanly so PTT just no-ops
         // instead of taking the app down.
-        guard nativeFormat.channelCount > 0, nativeFormat.sampleRate > 0 else {
-            return
-        }
+        guard nativeFormat.channelCount > 0, nativeFormat.sampleRate > 0 else { return nil }
 
         let pcm16Mono16k = AVAudioFormat(
             commonFormat: .pcmFormatInt16,
@@ -90,22 +90,23 @@ final class VoiceAudio {
             channels: 1,
             interleaved: true
         )!
-        guard let converter = AVAudioConverter(from: nativeFormat, to: pcm16Mono16k) else {
-            return
-        }
+        guard let converter = AVAudioConverter(from: nativeFormat, to: pcm16Mono16k) else { return nil }
         captureConverter = converter
         captureBuffer.removeAll(keepingCapacity: true)
+        captureSessionId &+= 1
+        let sessionId = captureSessionId
 
         // Install the tap inside a do/catch via @objc exception bridging would be
         // nicer, but Swift can't catch ObjC exceptions. The format guards above
         // cover the known-bad cases; if AVAudioEngine still throws here, the bug
         // is in the engine state and we want the crash report.
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: nativeFormat) { [weak self] buffer, _ in
-            self?.handle(captureBuffer: buffer, target: pcm16Mono16k)
+            self?.handle(captureBuffer: buffer, target: pcm16Mono16k, sessionId: sessionId)
         }
         // Mark capturing AFTER a successful tap install so a failure path doesn't
         // leave stopCapture() trying to remove a tap that was never added.
         capturing = true
+        return sessionId
     }
 
     func stopCapture() {
@@ -116,7 +117,7 @@ final class VoiceAudio {
         captureConverter = nil
     }
 
-    private func handle(captureBuffer source: AVAudioPCMBuffer, target: AVAudioFormat) {
+    private func handle(captureBuffer source: AVAudioPCMBuffer, target: AVAudioFormat, sessionId: UInt64) {
         guard let converter = captureConverter else { return }
         // Convert at the input/output sample-rate ratio plus a small headroom.
         let ratio = target.sampleRate / source.format.sampleRate
@@ -141,14 +142,14 @@ final class VoiceAudio {
         int16[0].withMemoryRebound(to: UInt8.self, capacity: byteCount) { bytes in
             captureBuffer.append(bytes, count: byteCount)
         }
-        flushFramesIfReady()
+        flushFramesIfReady(sessionId: sessionId)
     }
 
-    private func flushFramesIfReady() {
+    private func flushFramesIfReady(sessionId: UInt64) {
         while captureBuffer.count >= Self.frameBytes {
             let frame = captureBuffer.prefix(Self.frameBytes)
             captureBuffer.removeFirst(Self.frameBytes)
-            onCapturedFrame?(Data(frame))
+            onCapturedFrame?(Data(frame), sessionId)
         }
     }
 
