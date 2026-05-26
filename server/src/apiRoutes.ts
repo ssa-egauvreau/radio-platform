@@ -133,7 +133,6 @@ import {
   parseAnalyticsRange,
 } from "./analytics.js";
 import { normalizeClientType } from "./clientType.js";
-import { deriveDeviceAudioConfig } from "./audioConfig.js";
 import {
   deriveDeviceAudioConfig,
   type GlobalAudioLabConfigPreImbe,
@@ -161,6 +160,7 @@ import {
   handleAndroidUpdateApk,
   handleAndroidUpdateManifest,
   handleAndroidUpdatePublish,
+  requireAndroidUpdatePublishAuth,
 } from "./appUpdate.js";
 import { listTen8MapIncidents } from "./ten8/mapIncidents.js";
 import { listTen8ActiveIncidents, listTen8WebhookLog } from "./ten8/store.js";
@@ -350,9 +350,10 @@ export function createApiRouter(): Router {
   // Public, unauthenticated: the sideloaded Android fleet polls these to self-update.
   router.get("/app/android/version", handleAndroidUpdateManifest);
   router.get("/app/android/apk", handleAndroidUpdateApk);
-  // CI publishes new builds here (bearer-token auth inside the handler); raw APK body.
+  // CI publishes new builds here; auth runs before raw parsing to avoid unauthenticated body DoS.
   router.post(
     "/app/android/publish",
+    requireAndroidUpdatePublishAuth,
     raw({ type: () => true, limit: "200mb" }),
     handleAndroidUpdatePublish,
   );
@@ -2803,11 +2804,9 @@ export function createApiRouter(): Router {
         return;
       }
       // The full AudioLabConfig → device-facing summary mapping lives in
-      // `audioConfig.ts` (and is unit-tested in `tests/audioConfig.test.ts`)
+      // `audioConfigDerive.ts` (and is unit-tested in `tests/audioConfigDerive.test.ts`)
       // so a regression in the bypass/AGC/wind-noise derivation can't sneak
       // through without a test failure.
-      res.json({
-        config: deriveDeviceAudioConfig(row.config),
       // Pure transform — see audioConfigDerive.ts for the mapping rules and
       // the regression notes about bypass / gainMultiplier coupling.
       const summary = deriveDeviceAudioConfig(

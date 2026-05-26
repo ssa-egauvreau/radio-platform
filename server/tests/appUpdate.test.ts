@@ -39,7 +39,12 @@ const updatesDir = mkdtempSync(join(tmpdir(), "appupdate-test-"));
 process.env.APP_UPDATES_DIR = updatesDir;
 process.env.APP_UPDATE_PUBLISH_TOKEN = "test-publish-token";
 
-const { handleAndroidUpdateManifest, handleAndroidUpdatePublish, handleAndroidUpdateApk } = await import(
+const {
+  handleAndroidUpdateManifest,
+  handleAndroidUpdatePublish,
+  handleAndroidUpdateApk,
+  requireAndroidUpdatePublishAuth,
+} = await import(
   "../src/appUpdate.js"
 );
 
@@ -88,6 +93,14 @@ function mockReq(opts: { headers?: Record<string, string>; body?: Buffer | undef
     headers: opts.headers ?? {},
     body: opts.body,
   } as unknown as import("express").Request;
+}
+
+function mockNext(): { next: import("express").NextFunction; called: () => boolean } {
+  let wasCalled = false;
+  const next = (() => {
+    wasCalled = true;
+  }) as import("express").NextFunction;
+  return { next, called: () => wasCalled };
 }
 
 function clearUpdatesDir(): void {
@@ -256,6 +269,82 @@ test("handleAndroidUpdateApk: streams the APK and sets package-archive content t
     captured.sentFile && captured.sentFile.endsWith("safet-ptt-6.apk"),
     `sentFile=${captured.sentFile}`,
   );
+});
+
+// ===== publish route/middleware guards =================================
+
+test("createApiRouter: /app/android/publish runs auth before raw parsing middleware", async () => {
+  const { createApiRouter } = await import("../src/apiRoutes.js");
+  const router = createApiRouter() as unknown as {
+    stack?: Array<{
+      route?: {
+        path?: string;
+        methods?: Record<string, boolean>;
+        stack?: Array<{ handle?: { name?: string } }>;
+      };
+    }>;
+  };
+
+  const publishLayer = router.stack?.find(
+    (layer) => layer.route?.path === "/app/android/publish" && layer.route?.methods?.post,
+  );
+  assert.ok(publishLayer?.route?.stack, "publish route stack missing");
+
+  const middlewareOrder = publishLayer.route.stack.map((layer) => layer.handle?.name ?? "(anonymous)");
+  assert.equal(
+    middlewareOrder[0],
+    "requireAndroidUpdatePublishAuth",
+    `expected auth gate first; got ${middlewareOrder.join(" -> ")}`,
+  );
+  assert.equal(
+    middlewareOrder[middlewareOrder.length - 1],
+    "handleAndroidUpdatePublish",
+    `expected publish handler last; got ${middlewareOrder.join(" -> ")}`,
+  );
+});
+
+test("requireAndroidUpdatePublishAuth: 503 when APP_UPDATE_PUBLISH_TOKEN is unset", () => {
+  const saved = process.env.APP_UPDATE_PUBLISH_TOKEN;
+  delete process.env.APP_UPDATE_PUBLISH_TOKEN;
+  try {
+    const { res, captured } = mockRes();
+    const { next, called } = mockNext();
+    requireAndroidUpdatePublishAuth(mockReq(), res, next);
+    assert.equal(captured.status, 503);
+    assert.deepEqual(captured.body, { error: "publish_disabled" });
+    assert.equal(called(), false);
+  } finally {
+    if (saved !== undefined) process.env.APP_UPDATE_PUBLISH_TOKEN = saved;
+  }
+});
+
+test("requireAndroidUpdatePublishAuth: 401 when bearer token is missing or wrong", () => {
+  for (const auth of [undefined, "", "Bearer wrong", "wrong"]) {
+    const headers: Record<string, string> = {};
+    if (auth !== undefined) headers.authorization = auth;
+    const { res, captured } = mockRes();
+    const { next, called } = mockNext();
+    requireAndroidUpdatePublishAuth(mockReq({ headers }), res, next);
+    assert.equal(captured.status, 401, `auth=${String(auth)}`);
+    assert.deepEqual(captured.body, { error: "unauthorized" });
+    assert.equal(called(), false);
+  }
+});
+
+test("requireAndroidUpdatePublishAuth: calls next() when bearer token is valid", () => {
+  const { res, captured } = mockRes();
+  const { next, called } = mockNext();
+  requireAndroidUpdatePublishAuth(
+    mockReq({
+      headers: {
+        authorization: "Bearer test-publish-token",
+      },
+    }),
+    res,
+    next,
+  );
+  assert.equal(called(), true);
+  assert.equal(captured.status, undefined);
 });
 
 // ===== handleAndroidUpdatePublish =====================================

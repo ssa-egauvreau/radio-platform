@@ -18,7 +18,7 @@ import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Request, Response } from "express";
+import type { NextFunction, Request, Response } from "express";
 
 const updatesDir = process.env.APP_UPDATES_DIR
   ? resolve(process.env.APP_UPDATES_DIR)
@@ -45,6 +45,25 @@ interface ResolvedManifest {
 
 // Cache the APK hash by size+mtime so polling handsets don't re-hash on every check.
 let shaCache: { key: string; sha256: string } | null = null;
+
+function extractBearerToken(header: string | string[] | undefined): string {
+  const raw = Array.isArray(header) ? (header[0] ?? "") : (header ?? "");
+  return raw.replace(/^Bearer\s+/i, "").trim();
+}
+
+function ensureAndroidUpdatePublishAuth(req: Request, res: Response): boolean {
+  const token = process.env.APP_UPDATE_PUBLISH_TOKEN?.trim();
+  if (!token) {
+    res.status(503).json({ error: "publish_disabled" });
+    return false;
+  }
+  const provided = extractBearerToken(req.headers.authorization);
+  if (provided.length === 0 || provided !== token) {
+    res.status(401).json({ error: "unauthorized" });
+    return false;
+  }
+  return true;
+}
 
 function apkSha256(apkPath: string): string {
   const st = statSync(apkPath);
@@ -109,6 +128,14 @@ export function handleAndroidUpdateManifest(_req: Request, res: Response): void 
   });
 }
 
+/** Auth gate for the publish route (run before raw body parsing). */
+export function requireAndroidUpdatePublishAuth(req: Request, res: Response, next: NextFunction): void {
+  if (!ensureAndroidUpdatePublishAuth(req, res)) {
+    return;
+  }
+  next();
+}
+
 /**
  * CI publish endpoint: writes a freshly-built APK + version.json into the updates dir so the next
  * handset poll picks it up. Authenticated with a shared bearer token (APP_UPDATE_PUBLISH_TOKEN);
@@ -116,14 +143,7 @@ export function handleAndroidUpdateManifest(_req: Request, res: Response): void 
  * headers so the body stays a clean binary stream.
  */
 export function handleAndroidUpdatePublish(req: Request, res: Response): void {
-  const token = process.env.APP_UPDATE_PUBLISH_TOKEN?.trim();
-  if (!token) {
-    res.status(503).json({ error: "publish_disabled" });
-    return;
-  }
-  const provided = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
-  if (provided.length === 0 || provided !== token) {
-    res.status(401).json({ error: "unauthorized" });
+  if (!ensureAndroidUpdatePublishAuth(req, res)) {
     return;
   }
 
