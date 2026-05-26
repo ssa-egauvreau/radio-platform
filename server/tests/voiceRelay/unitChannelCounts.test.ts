@@ -47,6 +47,7 @@ function record(overrides: Partial<UnitChannelCountRecord> & {
     channelName,
     unitId,
     kind: "account",
+    client: "android",
     deviceType: "dispatch_console",
     ...rest,
   };
@@ -149,21 +150,23 @@ test("computeUnitChannelCounts: dashboard-on-one-channel + handset-on-another st
   assert.equal(counts.get("27-040"), 1);
 });
 
-test("computeUnitChannelCounts: account with null deviceType is ignored", () => {
-  // A brand-new account session before the device_type lookup completes has
-  // deviceType === null. It must NOT be treated as a console.
+test("computeUnitChannelCounts: null deviceType on non-console client is ignored", () => {
+  // A non-web/desktop account session before the device_type lookup completes
+  // (deviceType === null) must not be treated as a dispatch console.
   const counts = computeUnitChannelCounts(
     [
       record({
         agencyId: 1,
         channelName: "Green 1",
         unitId: "DISP-1",
+        client: "android",
         deviceType: null,
       }),
       record({
         agencyId: 1,
         channelName: "Green 2",
         unitId: "DISP-1",
+        client: "ios",
         deviceType: null,
       }),
     ],
