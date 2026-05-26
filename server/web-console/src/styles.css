@@ -3642,7 +3642,23 @@ code.mono {
   margin-top: 12px;
 }
 
-/* --- admin: Android app download --- */
+/* --- admin: Downloads (Android handset + desktop console) ---
+ * Existing `.android-app-*` classes are reused for the inner card layout so
+ * the two download sections share the same look. New `.downloads-section*`
+ * rules wrap each section and add the per-section title spacing. */
+.downloads-section {
+  margin-bottom: 1.75rem;
+}
+.downloads-section:last-of-type {
+  margin-bottom: 0;
+}
+.downloads-section-title {
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin: 0 0 0.5rem;
+}
 .android-app-panel {
   max-width: 42rem;
 }
