@@ -83,6 +83,13 @@ final class VoiceTransport {
         lastConsumeNs = 0
     }
 
+    #if DEBUG
+    /// Test-only read-back of the uplink gate flag used by `sendCapturedOnMain`.
+    /// Exposed so unit tests can pin the begin/reset state-machine contract
+    /// without standing up a real WebSocket task. Do not call from production.
+    var _uplinkActiveForTest: Bool { uplinkActive }
+    #endif
+
     /// Send one captured PCM16 frame (320 bytes @ 16 kHz). Encodes to IMBE when available.
     nonisolated func sendCaptured(_ frame: Data) {
         Task { @MainActor [weak self] in
