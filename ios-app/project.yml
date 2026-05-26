@@ -23,6 +23,11 @@ targets:
     deploymentTarget: "16.0"
     sources:
       - path: SafeTMobile
+        excludes:
+          - Native/**
+      - path: SafeTMobile/Native
+      - path: ../android-app/app/src/main/cpp/dvmvocoder/vocoder
+        compilerFlags: "-std=c++17"
     configFiles:
       Debug: Local.xcconfig
       Release: Local.xcconfig
@@ -31,6 +36,12 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.safetptt.mobile
         TARGETED_DEVICE_FAMILY: "1,2"
         GENERATE_INFOPLIST_FILE: NO
+        SWIFT_OBJC_BRIDGING_HEADER: SafeTMobile/SafeTMobile-Bridging-Header.h
+        CLANG_CXX_LANGUAGE_STANDARD: "c++17"
+        HEADER_SEARCH_PATHS:
+          - $(SRCROOT)/../android-app/app/src/main/cpp/dvmvocoder/vocoder
+          - $(SRCROOT)/../android-app/app/src/main/cpp/dvmvocoder/vocoder/imbe
+        OTHER_LDFLAGS: "-lc++"
     info:
       path: SafeTMobile/Info.plist
       properties:
