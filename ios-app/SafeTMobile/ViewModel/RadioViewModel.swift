@@ -233,6 +233,8 @@ final class RadioViewModel: ObservableObject {
             sounds.play(.pttPermit)
             uiState.statusMessage = P25ImbeNative.isAvailable ? "ON AIR · IMBE" : "ON AIR · CLEAR PCM"
             uiState.isTransmitting = true
+            voiceTransport.beginUplink()
+            voiceAudio.startCapture()
         } catch {
             guard uiState.isPttPressed else { return }
             enterBusy("AIR CHECK FAILED")
