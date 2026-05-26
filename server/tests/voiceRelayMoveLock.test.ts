@@ -19,7 +19,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { unitChannelCountsFromRecords } from "../src/voiceRelay.js";
+import {
+  unitChannelCountsFromRecords,
+  withRosterMoveLock,
+  type RosterMember,
+} from "../src/voiceRelay.js";
 
 test("unitChannelCountsFromRecords: locks multi-channel web/desktop scanning even when deviceType is null", () => {
   const counts = unitChannelCountsFromRecords(42, [
@@ -333,4 +337,205 @@ test("unitChannelCountsFromRecords: dedupes the same channel name even for the w
     },
   ]);
   assert.equal(counts.get("DISP1"), 2, "same-channel reseat must not inflate the count");
+});
+test("unitChannelCountsFromRecords: dedupes duplicate channel rows for the same unit", () => {
+  const counts = unitChannelCountsFromRecords(5, [
+    {
+      channelKey: "5 alpha",
+      channelName: "Alpha",
+      unitId: "DISP",
+      kind: "account",
+      client: "web",
+      deviceType: "dispatch_console",
+    },
+    {
+      channelKey: "5 alpha",
+      channelName: "Alpha",
+      unitId: "DISP",
+      kind: "account",
+      client: "desktop",
+      deviceType: null,
+    },
+  ]);
+
+  assert.equal(counts.get("DISP"), 1);
+});
+
+test("unitChannelCountsFromRecords: counts explicit dispatch_console device type", () => {
+  const counts = unitChannelCountsFromRecords(1, [
+    {
+      channelKey: "1 a",
+      channelName: "A",
+      unitId: "OPS",
+      kind: "account",
+      client: "android",
+      deviceType: "dispatch_console",
+    },
+    {
+      channelKey: "1 b",
+      channelName: "B",
+      unitId: "OPS",
+      kind: "account",
+      client: "ios",
+      deviceType: "dispatch_console",
+    },
+  ]);
+
+  assert.equal(counts.get("OPS"), 2);
+});
+
+test("unitChannelCountsFromRecords: combines explicit dispatch_console + null-deviceType web for the same unit", () => {
+  const counts = unitChannelCountsFromRecords(3, [
+    {
+      channelKey: "3 alpha",
+      channelName: "Alpha",
+      unitId: "Mix-1",
+      kind: "account",
+      client: "android",
+      deviceType: "dispatch_console",
+    },
+    {
+      channelKey: "3 bravo",
+      channelName: "Bravo",
+      unitId: "MIX-1",
+      kind: "account",
+      client: "web",
+      deviceType: null,
+    },
+  ]);
+
+  assert.equal(counts.get("MIX-1"), 2);
+});
+
+test("unitChannelCountsFromRecords: bridge sessions never contribute to the move lock", () => {
+  const counts = unitChannelCountsFromRecords(11, [
+    {
+      channelKey: "11 alpha",
+      channelName: "Alpha",
+      unitId: "BRG",
+      kind: "bridge",
+      client: "bridge",
+      deviceType: null,
+    },
+    {
+      channelKey: "11 bravo",
+      channelName: "Bravo",
+      unitId: "BRG",
+      kind: "bridge",
+      client: "bridge",
+      deviceType: "dispatch_console",
+    },
+  ]);
+
+  assert.equal(counts.size, 0);
+});
+
+test("unitChannelCountsFromRecords: empty input yields an empty count map", () => {
+  const counts = unitChannelCountsFromRecords(1, []);
+  assert.equal(counts.size, 0);
+});
+
+function makeRosterMember(overrides: Partial<RosterMember> = {}): RosterMember {
+  return {
+    unit_id: "U-1",
+    display_name: null,
+    kind: "account",
+    client: "web",
+    device_type: null,
+    connected_ms: 0,
+    ...overrides,
+  };
+}
+
+test("withRosterMoveLock: stamps move_locked on accounts with multi-channel counts (case-insensitive unit match)", () => {
+  const members = [
+    makeRosterMember({ unit_id: "disp-1", client: "web", device_type: null }),
+    makeRosterMember({ unit_id: "U-OTHER", client: "web", device_type: null }),
+  ];
+  const counts = new Map<string, number>([["DISP-1", 2]]);
+
+  const result = withRosterMoveLock(members, counts);
+
+  assert.equal(result[0].move_locked, true);
+  assert.equal(result[1].move_locked, undefined);
+});
+
+test("withRosterMoveLock: locks explicit dispatch_console even when count is 1", () => {
+  const members = [
+    makeRosterMember({
+      unit_id: "DISP-2",
+      client: "web",
+      device_type: "dispatch_console",
+    }),
+  ];
+  const counts = new Map<string, number>([["DISP-2", 1]]);
+
+  const result = withRosterMoveLock(members, counts);
+
+  assert.equal(result[0].move_locked, true);
+});
+
+test("withRosterMoveLock: does not lock non-account members even with high counts", () => {
+  const members = [
+    makeRosterMember({
+      unit_id: "BRIDGE-A",
+      kind: "bridge",
+      client: "bridge",
+      device_type: null,
+    }),
+    makeRosterMember({
+      unit_id: "RADIO-B",
+      kind: "legacy",
+      client: "android",
+      device_type: null,
+    }),
+  ];
+  const counts = new Map<string, number>([
+    ["BRIDGE-A", 5],
+    ["RADIO-B", 5],
+  ]);
+
+  const result = withRosterMoveLock(members, counts);
+
+  assert.equal(result[0].move_locked, undefined);
+  assert.equal(result[1].move_locked, undefined);
+});
+
+test("withRosterMoveLock: single-channel non-console account stays movable", () => {
+  const members = [
+    makeRosterMember({
+      unit_id: "MOBILE-1",
+      client: "android",
+      device_type: "phone",
+    }),
+  ];
+  const counts = new Map<string, number>([["MOBILE-1", 1]]);
+
+  const result = withRosterMoveLock(members, counts);
+
+  assert.equal(result[0].move_locked, undefined);
+});
+
+test("withRosterMoveLock: returns a new array and preserves all original fields on locked members", () => {
+  const original = makeRosterMember({
+    unit_id: "DISP-3",
+    display_name: "Dispatcher Three",
+    client: "desktop",
+    device_type: null,
+    connected_ms: 9999,
+  });
+  const counts = new Map<string, number>([["DISP-3", 3]]);
+
+  const result = withRosterMoveLock([original], counts);
+
+  assert.notEqual(result[0], original);
+  assert.equal(result[0].unit_id, "DISP-3");
+  assert.equal(result[0].display_name, "Dispatcher Three");
+  assert.equal(result[0].connected_ms, 9999);
+  assert.equal(result[0].move_locked, true);
+});
+
+test("withRosterMoveLock: empty roster returns empty array", () => {
+  const result = withRosterMoveLock([], new Map());
+  assert.deepEqual(result, []);
 });
