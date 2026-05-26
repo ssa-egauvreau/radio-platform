@@ -401,16 +401,13 @@ function countsAsDispatchConsoleSession(record: MoveLockRosterRecord): boolean {
 }
 
 /**
- * How many distinct voice channels each unit is currently dispatching on
- * (live control). A user's handset/phone channel should not count against this;
- * only console-style sessions do.
- */
-export function unitChannelCountsFromRecords(
-  agencyId: number,
-  records: Iterable<MoveLockRosterRecord>,
  * Subset of a {@link RosterRecord} that {@link computeUnitChannelCounts} cares
  * about. Broken out so the counting rule can be exercised in unit tests
  * without spinning up a WebSocket server to seed the live roster.
+ *
+ * `client` is optional because the older test fixtures (pre-PR #151) don't
+ * carry it — newer call sites pass it in so the null-deviceType web/desktop
+ * fallback in {@link countsAsDispatchConsoleSession} can fire.
  */
 export interface UnitChannelCountRecord {
   channelKey: string;
@@ -418,17 +415,17 @@ export interface UnitChannelCountRecord {
   unitId: string;
   kind: "account" | "legacy" | "bridge";
   deviceType: string | null;
+  client?: string;
 }
 
 /**
  * Pure helper backing {@link unitChannelCounts}. Counts distinct voice
  * channels each unit is currently dispatching on for the given agency.
  *
- * Only `account`-kind sessions with `device_type === "dispatch_console"`
- * count — a user who just has a handset/phone on one channel and the
- * dashboard open on another must still be drag-droppable. Multi-channel
- * scanning is a dispatch-console signal, not a "this person is everywhere"
- * signal.
+ * Only console-style sessions count (see {@link countsAsDispatchConsoleSession})
+ * — a user who just has a handset/phone on one channel and the dashboard open
+ * on another must still be drag-droppable. Multi-channel scanning is a
+ * dispatch-console signal, not a "this person is everywhere" signal.
  */
 export function computeUnitChannelCounts(
   records: Iterable<UnitChannelCountRecord>,
@@ -440,7 +437,14 @@ export function computeUnitChannelCounts(
     if (!record.channelKey.startsWith(prefix)) {
       continue;
     }
-    if (!countsAsDispatchConsoleSession(record)) {
+    if (!countsAsDispatchConsoleSession({
+      channelKey: record.channelKey,
+      channelName: record.channelName,
+      unitId: record.unitId,
+      kind: record.kind,
+      client: record.client ?? "",
+      deviceType: record.deviceType,
+    })) {
       continue;
     }
     const unit = record.unitId.toUpperCase();
@@ -455,11 +459,21 @@ export function computeUnitChannelCounts(
   return counts;
 }
 
-export function unitChannelCounts(agencyId: number): Map<string, number> {
-  return unitChannelCountsFromRecords(agencyId, voiceRoster.values());
+/**
+ * Backwards-compatible alias for {@link computeUnitChannelCounts} with the
+ * arguments swapped. Kept so existing call sites and tests that already
+ * pass `(agencyId, records)` continue to work.
+ */
+export function unitChannelCountsFromRecords(
+  agencyId: number,
+  records: Iterable<MoveLockRosterRecord>,
+): Map<string, number> {
+  return computeUnitChannelCounts(records, agencyId);
+}
+
 /**
  * How many distinct voice channels each unit is currently dispatching on
- * (live control). Only dispatch_console sessions count here — a user who just
+ * (live control). Only console-style sessions count here — a user who just
  * has their handset/phone on one channel and the dashboard open on another
  * should still be movable. Multi-channel scanning is a dispatch-console signal.
  */
