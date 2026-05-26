@@ -38,6 +38,7 @@ class ScanVoiceListenTransport(
         }
 
     private val imbeWsMagic = byteArrayOf(0xF5.toByte(), 0xAB.toByte())
+    private val openVbeWsMagic = byteArrayOf(0xF7.toByte(), 0xAD.toByte())
 
     /** Lowercase channel label → live socket. */
     private val channels = ConcurrentHashMap<String, ScanChannelConnection>()
@@ -109,6 +110,7 @@ class ScanVoiceListenTransport(
         private val socketReady = AtomicBoolean(false)
         private val reconnectAttempt = AtomicInteger(0)
         private val reconnectPending = AtomicBoolean(false)
+        private val openVbeDecoder = OpenVbe2pCodec.Decoder()
         @Volatile
         private var webSocket: WebSocket? = null
 
@@ -227,6 +229,15 @@ class ScanVoiceListenTransport(
                 }
                 val codeword = payload.copyOfRange(2, 13)
                 val pcm8k160 = P25ImbeNative.decodeCodeword11(codeword) ?: return
+                val pcm16 = P25ImbeNative.Frames.upsampleDup8kToLe16Mono(pcm8k160)
+                inbound.writePcmFromScan(channelLabel, pcm16)
+                return
+            }
+            if (payload.size == 2 + OpenVbe2pCodec.FrameBytes &&
+                payload[0] == openVbeWsMagic[0] &&
+                payload[1] == openVbeWsMagic[1]
+            ) {
+                val pcm8k160 = openVbeDecoder.decodeFrame(payload.copyOfRange(2, payload.size)) ?: return
                 val pcm16 = P25ImbeNative.Frames.upsampleDup8kToLe16Mono(pcm8k160)
                 inbound.writePcmFromScan(channelLabel, pcm16)
                 return

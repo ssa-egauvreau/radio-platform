@@ -40,11 +40,12 @@ fun httpApiBaseUrlToVoiceWebSocketUrl(httpBaseUrl: String): String {
  * Half-duplex voice path over the relay WebSocket.
  *
  * - Default transport: PCM 16-bit signed LE mono @ 16000 Hz (Android capture).
- * - Uplink path: encode with P25-style 88-bit IMBE whenever [P25ImbeNative.isAvailable].
- * - Downlink auto-detects IMBE (13-byte magic frame) whenever the JNI codec can load — peers stay
- *   audible on mixed builds; uplink stays clear PCM until the codec loads after startup.
+ * - Uplink path: follows the agency codec config; auto prefers P25 IMBE when native support exists.
+ * - If native IMBE is unavailable, auto/IMBE uplink falls back to safeT OpenVBE2P compact digital voice.
+ * - Downlink auto-detects IMBE and OpenVBE2P frames so mixed builds stay audible.
  *
- * Codec: see [VoiceAudioSpecs] (PCM); IMBE via bundled dvmvocoder (GPL — see cpp/dvmvocoder).
+ * Codec: see [VoiceAudioSpecs] (PCM); IMBE via bundled dvmvocoder (GPL — see cpp/dvmvocoder);
+ * OpenVBE2P is safeT-owned experimental LPC voice coding.
  */
 sealed interface VoiceControlEvent {
     data class Joined(
@@ -66,6 +67,8 @@ class VoiceRelayTransport(
     private val authTokenProvider: () -> String,
     private val apiKeyProvider: () -> String,
     private val inbound: InboundVoicePlayer,
+    private val codecModeProvider: () -> String = { "auto" },
+    private val audioConfigConsumer: ((Boolean, Boolean, Float, String) -> Unit)? = null,
 ) : StreamingPcmSink {
 
     private val _controlEvents = MutableSharedFlow<VoiceControlEvent>(extraBufferCapacity = 16)
@@ -94,17 +97,22 @@ class VoiceRelayTransport(
 
     private var pcmAcc = ByteArray(2048)
     private var pcmAccLen = 0
-    private var lastP25TxEnabled: Boolean? = null
-    /** One-shot Logcat warning when our uplink falls back from IMBE to clear PCM. */
+    private var lastTxCodec: TxCodec? = null
+    /** One-shot Logcat warning when our uplink is intentionally clear PCM. */
     private var warnedClearTx = false
+    /** One-shot Logcat warning when our uplink falls back from IMBE to OpenVBE2P. */
+    private var warnedOpenVbeTx = false
     private val pcmFrameScratch = ByteArray(P25ImbeNative.Frames.PCM_16K_FRAME_BYTES)
 
     /** Speech conditioning for the IMBE uplink; reset at the start of each talk-spurt. */
     private val txConditioner = ImbeTxConditioner()
+    private val openVbeDecoder = OpenVbe2pCodec.Decoder()
     private var lastConsumeNs = 0L
 
     /** Two-byte sentinel so random PCM blobs are unlikely to collide; followed by an 11-byte codeword. */
     private val imbeWsMagic = byteArrayOf(0xF5.toByte(), 0xAB.toByte())
+    /** Two-byte sentinel followed by a 23-byte safeT OpenVBE2P frame. */
+    private val openVbeWsMagic = byteArrayOf(0xF7.toByte(), 0xAD.toByte())
     /** Recording / AI sideband — server records only; not broadcast on the channel. */
     private val listenPcmMagic = byteArrayOf(0xF6.toByte(), 0xAC.toByte())
 
@@ -163,6 +171,15 @@ class VoiceRelayTransport(
                     aiDispatchListenPcm = json.optBoolean("enabled", false)
                     _controlEvents.tryEmit(VoiceControlEvent.AiDispatchPcm(enabled = aiDispatchListenPcm))
                 }
+                "audio_config" -> {
+                    val cfg = json.optJSONObject("config") ?: return
+                    audioConfigConsumer?.invoke(
+                        cfg.optBoolean("agcEnabled", false),
+                        cfg.optBoolean("noiseSuppression", false),
+                        cfg.optDouble("gainMultiplier", 1.0).toFloat(),
+                        cfg.optString("codecMode", "auto"),
+                    )
+                }
                 "error" -> {
                     _controlEvents.tryEmit(
                         VoiceControlEvent.Error(code = json.optString("code", "voice_error")),
@@ -209,6 +226,21 @@ class VoiceRelayTransport(
             inbound.writePcmFromMain(pcm16LittleEndian)
             return
         }
+        if (payload.size == 2 + OpenVbe2pCodec.FrameBytes &&
+            payload[0] == openVbeWsMagic[0] &&
+            payload[1] == openVbeWsMagic[1]
+        ) {
+            val frame = payload.copyOfRange(2, payload.size)
+            val pcm8k160 =
+                openVbeDecoder.decodeFrame(frame)
+                    ?: run {
+                        Log.w(TAG, "OpenVBE2P decode returned null for one frame")
+                        return
+                    }
+            val pcm16LittleEndian = P25ImbeNative.Frames.upsampleDup8kToLe16Mono(pcm8k160)
+            inbound.writePcmFromMain(pcm16LittleEndian)
+            return
+        }
         inbound.writePcmFromMain(payload)
     }
 
@@ -222,15 +254,24 @@ class VoiceRelayTransport(
     @Volatile
     private var recordListenPcm: Boolean = false
 
-    private fun p25UplinkEligible(): Boolean = P25ImbeNative.isAvailable
+    private fun selectedTxCodec(): TxCodec {
+        val mode = codecModeProvider().trim().lowercase(Locale.US)
+        return when (mode) {
+            "pcm", "clear_pcm", "bypass" -> TxCodec.PCM
+            "openvbe2p", "openvbe" -> TxCodec.OPENVBE2P
+            "imbe", "p25" -> if (P25ImbeNative.isAvailable) TxCodec.P25_IMBE else TxCodec.OPENVBE2P
+            else -> if (P25ImbeNative.isAvailable) TxCodec.P25_IMBE else TxCodec.OPENVBE2P
+        }
+    }
 
-    private fun reconcileAccumulatorForModeToggle() {
-        val cur = p25UplinkEligible()
-        val prev = lastP25TxEnabled
+    private fun reconcileAccumulatorForModeToggle(): TxCodec {
+        val cur = selectedTxCodec()
+        val prev = lastTxCodec
         if (prev != null && prev != cur) {
             pcmAccLen = 0
         }
-        lastP25TxEnabled = cur
+        lastTxCodec = cur
+        return cur
     }
 
     private fun appendAccumulator(fragment: ByteArray, len: Int) {
@@ -247,6 +288,14 @@ class VoiceRelayTransport(
             .write(payload, 0, payload.size)
             .readByteString(payload.size.toLong())
         ws.send(bs)
+    }
+
+    private fun sendListenSideband(ws: WebSocket, buffer: ByteArray, length: Int) {
+        val side = ByteArray(2 + length)
+        side[0] = listenPcmMagic[0]
+        side[1] = listenPcmMagic[1]
+        System.arraycopy(buffer, 0, side, 2, length)
+        sendBinaryWs(ws, side)
     }
 
     /**
@@ -285,26 +334,53 @@ class VoiceRelayTransport(
 
     override fun consumePcm(buffer: ByteArray, length: Int) {
         if (!wantOnline.get() || length <= 0) return
-        reconcileAccumulatorForModeToggle()
+        val txCodec = reconcileAccumulatorForModeToggle()
 
         val wsPrepared = acquireActiveSocketPrepared()
         val active = wsPrepared ?: return
 
-        val p25 = p25UplinkEligible()
-        if (!p25) {
-            // Native vocoder didn't load → uplink is clear PCM, peers will hear non-vocoded
-            // audio. Log once per process so this is visible in Logcat when troubleshooting
-            // "everything sounds raw on the dispatch portal".
+        if (txCodec == TxCodec.PCM) {
             if (!warnedClearTx) {
                 warnedClearTx = true
-                Log.w(
-                    TAG,
-                    "P25 IMBE encoder unavailable — transmitting clear PCM (peers will hear non-vocoded audio). " +
-                        "Check libsecurityradiovocoder.so was packaged for this ABI.",
-                )
+                Log.w(TAG, "Transmitting clear PCM because the fleet audio config selected PCM/bypass.")
             }
             pcmAccLen = 0
             sendBinaryWs(active, buffer.copyOfRange(0, length))
+            return
+        }
+
+        if (txCodec == TxCodec.OPENVBE2P) {
+            if (!warnedOpenVbeTx) {
+                warnedOpenVbeTx = true
+                Log.w(
+                    TAG,
+                    "Transmitting safeT OpenVBE2P digital voice. " +
+                        "This may be the agency-selected codec or the fallback when native P25 IMBE is unavailable.",
+                )
+            }
+            sendListenSideband(active, buffer, length)
+
+            val now = System.nanoTime()
+            if (now - lastConsumeNs > TX_GAP_RESET_NS) {
+                txConditioner.reset()
+            }
+            lastConsumeNs = now
+
+            appendAccumulator(buffer, length)
+            while (pcmAccLen >= pcmFrameScratch.size) {
+                System.arraycopy(pcmAcc, 0, pcmFrameScratch, 0, pcmFrameScratch.size)
+                System.arraycopy(pcmAcc, pcmFrameScratch.size, pcmAcc, 0, pcmAccLen - pcmFrameScratch.size)
+                pcmAccLen -= pcmFrameScratch.size
+
+                txConditioner.conditionLe16(pcmFrameScratch, pcmFrameScratch.size)
+                val pcm8k = P25ImbeNative.Frames.downsampleAvg16kToImbe(pcmFrameScratch)
+                val frame = OpenVbe2pCodec.encodeFrame(pcm8k) ?: continue
+                val packet = ByteArray(2 + frame.size)
+                packet[0] = openVbeWsMagic[0]
+                packet[1] = openVbeWsMagic[1]
+                System.arraycopy(frame, 0, packet, 2, frame.size)
+                sendBinaryWs(active, packet)
+            }
             return
         }
 
@@ -314,11 +390,7 @@ class VoiceRelayTransport(
         // `record_listen_pcm` join ack: that arrives asynchronously, so a talk-spurt keyed before
         // (or right after a reconnect, before) the ack would ship IMBE only and the recorder would
         // store nothing — leaving the transmission silent in the log and invisible to AI dispatch.
-        val side = ByteArray(2 + length)
-        side[0] = listenPcmMagic[0]
-        side[1] = listenPcmMagic[1]
-        System.arraycopy(buffer, 0, side, 2, length)
-        sendBinaryWs(active, side)
+        sendListenSideband(active, buffer, length)
 
         // A gap between mic frames means a fresh key-up — re-learn the noise floor.
         val now = System.nanoTime()
@@ -465,4 +537,10 @@ class VoiceRelayTransport(
         /** A pause this long between mic frames marks a new talk-spurt (≈300 ms). */
         private const val TX_GAP_RESET_NS = 300_000_000L
     }
+}
+
+private enum class TxCodec {
+    P25_IMBE,
+    OPENVBE2P,
+    PCM,
 }

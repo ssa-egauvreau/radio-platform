@@ -161,11 +161,17 @@ class RadioPreferences(context: Context) {
      * Saves the agency-wide audio config fetched from /v1/audio/config.
      * Calling this overrides any local mic-audio settings until [clearServerAudioConfig] is called.
      */
-    fun setServerAudioConfig(agcEnabled: Boolean, noiseSuppression: Boolean, gainMultiplier: Float) {
+    fun setServerAudioConfig(
+        agcEnabled: Boolean,
+        noiseSuppression: Boolean,
+        gainMultiplier: Float,
+        codecMode: String = DEFAULT_SERVER_CODEC_MODE,
+    ) {
         prefs.edit()
             .putBoolean(KEY_SERVER_AGC_ENABLED, agcEnabled)
             .putBoolean(KEY_SERVER_NOISE_SUPPRESSION, noiseSuppression)
             .putFloat(KEY_SERVER_GAIN_MULTIPLIER, gainMultiplier.coerceIn(MIN_MIC_GAIN, MAX_MIC_GAIN))
+            .putString(KEY_SERVER_CODEC_MODE, normalizeServerCodecMode(codecMode))
             .putBoolean(KEY_SERVER_CONFIG_SET, true)
             .apply()
     }
@@ -186,15 +192,27 @@ class RadioPreferences(context: Context) {
         prefs.getFloat(KEY_SERVER_GAIN_MULTIPLIER, 1.0f)
             .coerceIn(MIN_MIC_GAIN, MAX_MIC_GAIN)
 
+    fun getServerCodecMode(): String =
+        normalizeServerCodecMode(prefs.getString(KEY_SERVER_CODEC_MODE, DEFAULT_SERVER_CODEC_MODE))
+
     /** Removes the server-pushed config; device falls back to local per-user settings. */
     fun clearServerAudioConfig() {
         prefs.edit()
             .remove(KEY_SERVER_AGC_ENABLED)
             .remove(KEY_SERVER_NOISE_SUPPRESSION)
             .remove(KEY_SERVER_GAIN_MULTIPLIER)
+            .remove(KEY_SERVER_CODEC_MODE)
             .putBoolean(KEY_SERVER_CONFIG_SET, false)
             .apply()
     }
+
+    private fun normalizeServerCodecMode(raw: String?): String =
+        when (raw?.trim()?.lowercase()) {
+            "imbe", "p25" -> "imbe"
+            "openvbe2p", "openvbe" -> "openvbe2p"
+            "pcm", "clear_pcm", "bypass" -> "pcm"
+            else -> DEFAULT_SERVER_CODEC_MODE
+        }
 
     companion object {
         const val MIN_MIC_GAIN: Float = 0.5f
@@ -226,5 +244,7 @@ class RadioPreferences(context: Context) {
         private const val KEY_SERVER_AGC_ENABLED = "server_agc_enabled"
         private const val KEY_SERVER_NOISE_SUPPRESSION = "server_noise_suppression"
         private const val KEY_SERVER_GAIN_MULTIPLIER = "server_gain_multiplier"
+        private const val KEY_SERVER_CODEC_MODE = "server_codec_mode"
+        private const val DEFAULT_SERVER_CODEC_MODE = "auto"
     }
 }

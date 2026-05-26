@@ -15,6 +15,7 @@ import {
   isUnitMoveLocked,
   listAgencyRosters,
   listChannelRoster,
+  notifyAgencyAudioConfig,
   unitChannelCounts,
   withRosterMoveLock,
   peekVoiceTransmittingUnit,
@@ -22,6 +23,7 @@ import {
   type PresenceStatus,
   type RosterMember,
 } from "./voiceRelay.js";
+import { summarizeGlobalAudioConfig } from "./audioConfigSummary.js";
 import { getBridgeStatus } from "./bridgeWorker.js";
 import {
   AGENCY_ROLES,
@@ -2755,6 +2757,8 @@ export function createApiRouter(): Router {
         return;
       }
       const row = await setGlobalAudioConfig(agencyId, config, me.id, me.username);
+      const deviceConfig = summarizeGlobalAudioConfig(row.config);
+      notifyAgencyAudioConfig(agencyId, deviceConfig);
       await writeAudit({
         agencyId,
         actorUserId: me.id,
@@ -2777,7 +2781,7 @@ export function createApiRouter(): Router {
   /**
    * GET /v1/audio/config — any authenticated agency member.
    * Returns a device-oriented summary derived from the global audio config so
-   * Android/iOS clients can apply agency-wide AGC and noise-suppression settings
+   * Android/iOS clients can apply agency-wide codec, AGC, gain, and noise settings
    * without needing to understand the full AudioLabConfig schema.
    */
   router.get("/audio/config", requireAgencyMember, async (req, res) => {
@@ -2788,36 +2792,8 @@ export function createApiRouter(): Router {
         res.json({ config: null });
         return;
       }
-      // Derive a simplified Android-compatible config from the full AudioLabConfig.
-      const full = row.config as {
-        preImbe?: {
-          agcEnabled?: boolean;
-          agcMaxGain?: number;
-          windGateEnabled?: boolean;
-          windHpfEnabled?: boolean;
-        };
-      };
-      const agcEnabled = Boolean(full.preImbe?.agcEnabled ?? false);
-      const agcMaxGain = Number(full.preImbe?.agcMaxGain ?? 6);
-      // Wind reduction is "on" on Android if EITHER the adaptive gate OR the
-      // steep HPF is enabled — both contribute to noise rejection upstream of
-      // IMBE, and Android only exposes a single NoiseSuppressor toggle.
-      const windReduce =
-        Boolean(full.preImbe?.windGateEnabled ?? false) ||
-        Boolean(full.preImbe?.windHpfEnabled ?? false);
-      // Map agcMaxGain (1–12) → gainMultiplier (1.0–3.0). The range starts at
-      // 1.0 so the lowest simple-UI preset ("A little", agcMaxGain=4) still
-      // delivers an audible boost — a linear (gain/12)*3 map collapses to 1.0×
-      // at gain=4, making the preset indistinguishable from "off" on device.
-      const gainMultiplier = agcEnabled
-        ? Math.max(1.0, Math.min(3.0, 1.0 + (agcMaxGain / 12.0) * 2.0))
-        : 1.0;
       res.json({
-        config: {
-          agcEnabled,
-          noiseSuppression: windReduce,
-          gainMultiplier: Math.round(gainMultiplier * 100) / 100,
-        },
+        config: summarizeGlobalAudioConfig(row.config),
         updatedAt: row.updated_at,
       });
     } catch (error) {

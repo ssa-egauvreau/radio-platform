@@ -1,11 +1,15 @@
 // Audio Lab processing pipeline. Operates on Int16 PCM @ 16 kHz mono, end-to-end:
-//   raw mic clip → pre-IMBE conditioning → IMBE encode/decode (or bypass) → post-decode shaping
+//   raw mic clip → pre-codec conditioning → selected codec round-trip (or bypass) → post-decode shaping
 // Everything runs in plain JS so a 10-second clip stays well under a frame budget. Mirrors
-// the production TX/RX paths (imbeTxConditioner.ts, imbeVocoder.ts) so the lab's "Default"
-// preset reproduces what a real talker would sound like today.
+// the production TX/RX paths so the lab can compare IMBE, OpenVBE2P, and clear PCM honestly.
 
 import { ImbeTxConditioner } from "../../../voice/imbeTxConditioner";
 import { imbeDecode, imbeEncode, imbeReady, initImbe } from "../../../voice/imbeVocoder";
+import {
+  OPENVBE2P_FRAME_8K_SAMPLES,
+  OpenVbe2pDecoder,
+  openVbe2pEncodeFrame,
+} from "../../../voice/openvbe2p";
 
 /** Worklet frame length the production capture path emits — 40 ms @ 16 kHz. The TX
  *  conditioner's adaptive AGC / gate update once per frame, so running the lab's
@@ -15,6 +19,7 @@ const PRODUCTION_FRAME_16K = 640;
 const FS = 16_000;
 
 export type UpsampleMode = "duplicate" | "linear" | "polyphase" | "polyphase24";
+export type LabCodecMode = "imbe" | "openvbe2p" | "pcm";
 
 /** Sample rate of `processClip`'s output PCM under each upsample mode. The
  *  three 8 → 16 kHz modes return 16 kHz; "polyphase24" returns 16 kHz too,
@@ -46,6 +51,8 @@ export interface AudioLabConfig {
     agcMaxGain: number;
   };
   vocoder: {
+    /** Codec to use for the lab round-trip and fleet push. `bypass` maps to clear PCM. */
+    codec: Exclude<LabCodecMode, "pcm">;
     bypass: boolean;
   };
   postDecode: {
@@ -60,6 +67,21 @@ export interface AudioLabConfig {
     highShelfEnabled: boolean;
     highShelfHz: number;
     highShelfDb: number;
+  };
+}
+
+export function effectiveLabCodecMode(cfg: AudioLabConfig): LabCodecMode {
+  return cfg.vocoder.bypass ? "pcm" : cfg.vocoder.codec;
+}
+
+export function setLabCodecMode(cfg: AudioLabConfig, mode: LabCodecMode): AudioLabConfig {
+  return {
+    ...cfg,
+    vocoder: {
+      ...cfg.vocoder,
+      bypass: mode === "pcm",
+      codec: mode === "openvbe2p" ? "openvbe2p" : "imbe",
+    },
   };
 }
 
@@ -479,6 +501,27 @@ export async function processClip(input: Int16Array, cfg: AudioLabConfig): Promi
   let postVocoder: Int16Array;
   if (cfg.vocoder.bypass) {
     postVocoder = conditioned;
+  } else if (cfg.vocoder.codec === "openvbe2p") {
+    const pcm8k = downsample16To8(conditioned);
+    const decoded8k = new Int16Array(pcm8k.length);
+    const decoder = new OpenVbe2pDecoder();
+    let outOff = 0;
+    for (let off = 0; off + OPENVBE2P_FRAME_8K_SAMPLES <= pcm8k.length; off += OPENVBE2P_FRAME_8K_SAMPLES) {
+      const frame = openVbe2pEncodeFrame(pcm8k.subarray(off, off + OPENVBE2P_FRAME_8K_SAMPLES));
+      if (!frame) continue;
+      const dec = decoder.decodeFrame(frame);
+      if (!dec) continue;
+      decoded8k.set(dec, outOff);
+      outOff += OPENVBE2P_FRAME_8K_SAMPLES;
+    }
+    const decoded = decoded8k.subarray(0, outOff);
+    postVocoder =
+      cfg.postDecode.upsampleMode === "linear"
+        ? upsampleLinear8To16(decoded)
+        : cfg.postDecode.upsampleMode === "polyphase" ||
+            cfg.postDecode.upsampleMode === "polyphase24"
+          ? upsamplePolyphase8To16(decoded)
+          : upsampleDup8To16(decoded);
   } else {
     if (!imbeReady()) {
       const ok = await initImbe();
@@ -590,6 +633,7 @@ export const DEFAULT_PRESET: AudioLabConfig = {
     agcMaxGain: 6,
   },
   vocoder: {
+    codec: "imbe",
     bypass: false,
   },
   postDecode: {
@@ -626,6 +670,7 @@ export const PHASE2_PRESET: AudioLabConfig = {
     agcMaxGain: 6,
   },
   vocoder: {
+    codec: "imbe",
     bypass: false,
   },
   postDecode: {
@@ -662,6 +707,7 @@ export const BYPASS_PRESET: AudioLabConfig = {
     agcMaxGain: 6,
   },
   vocoder: {
+    codec: "imbe",
     bypass: true,
   },
   postDecode: {
@@ -701,6 +747,7 @@ export const DEEP_MOBILE_PRESET: AudioLabConfig = {
     agcMaxGain: 6,
   },
   vocoder: {
+    codec: "imbe",
     bypass: false,
   },
   postDecode: {
@@ -738,6 +785,7 @@ export const CRISP_DISPATCHER_PRESET: AudioLabConfig = {
     agcMaxGain: 6,
   },
   vocoder: {
+    codec: "imbe",
     bypass: false,
   },
   postDecode: {
@@ -775,6 +823,7 @@ export const WARM_PORTABLE_PRESET: AudioLabConfig = {
     agcMaxGain: 6,
   },
   vocoder: {
+    codec: "imbe",
     bypass: false,
   },
   postDecode: {
@@ -814,6 +863,7 @@ export const WINDY_MOBILE_PRESET: AudioLabConfig = {
     agcMaxGain: 6,
   },
   vocoder: {
+    codec: "imbe",
     bypass: false,
   },
   postDecode: {
@@ -834,8 +884,46 @@ export const WINDY_MOBILE_PRESET: AudioLabConfig = {
   },
 };
 
+/** OpenVBE2P test — safeT-owned LPC codec path for compact digital voice on
+ *  devices that should not depend on the bundled P25 IMBE vocoder. */
+export const OPENVBE2P_PRESET: AudioLabConfig = {
+  preImbe: {
+    windGateEnabled: false,
+    windGateThresholdDb: 6,
+    windGateAttenuationDb: -18,
+    windHpfEnabled: false,
+    windHpfHz: 200,
+    windHpfOrder: 4,
+    hpfEnabled: true,
+    hpfHz: 180,
+    lpfEnabled: true,
+    lpfHz: 3400,
+    agcEnabled: true,
+    agcTargetRms: 6000,
+    agcMaxGain: 6,
+  },
+  vocoder: {
+    codec: "openvbe2p",
+    bypass: false,
+  },
+  postDecode: {
+    upsampleMode: "polyphase",
+    hpfEnabled: false,
+    hpfHz: 250,
+    lpfEnabled: true,
+    lpfHz: 3300,
+    lowShelfEnabled: false,
+    lowShelfHz: 200,
+    lowShelfDb: 0,
+    highShelfEnabled: true,
+    highShelfHz: 2500,
+    highShelfDb: -2,
+  },
+};
+
 export const BUILTIN_PRESETS: Record<string, AudioLabConfig> = {
   "Default IMBE": DEFAULT_PRESET,
+  "OpenVBE2P test": OPENVBE2P_PRESET,
   "Phase 2 voice": PHASE2_PRESET,
   Bypass: BYPASS_PRESET,
   "Deep P25 mobile": DEEP_MOBILE_PRESET,

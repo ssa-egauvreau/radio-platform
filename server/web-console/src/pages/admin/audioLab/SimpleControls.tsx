@@ -3,7 +3,13 @@
 // several underlying knobs at once. Power users can flip to "Show advanced
 // tuning" in the parent panel to see every individual knob.
 
-import type { AudioLabConfig, UpsampleMode } from "./pipeline";
+import {
+  effectiveLabCodecMode,
+  setLabCodecMode,
+  type AudioLabConfig,
+  type LabCodecMode,
+  type UpsampleMode,
+} from "./pipeline";
 
 // ---------- Composite-control level mappings ----------
 
@@ -162,6 +168,21 @@ interface SimpleControlsProps {
 export function SimpleControls({ config, setConfig }: SimpleControlsProps) {
   return (
     <section className="audio-lab-simple">
+      <SimpleSection
+        title="Radio codec"
+        description="Choose the over-the-air voice codec that will be used when this preset is applied live."
+      >
+        <ButtonGroup<LabCodecMode>
+          value={effectiveLabCodecMode(config)}
+          onChange={(v) => setConfig(setLabCodecMode(config, v))}
+          options={[
+            { value: "imbe", label: "P25 IMBE" },
+            { value: "openvbe2p", label: "OpenVBE2P" },
+            { value: "pcm", label: "Clear PCM" },
+          ]}
+        />
+      </SimpleSection>
+
       <SimpleSection
         title="Boost quiet voices"
         description="Automatically lifts soft talkers so everyone sounds about the same loudness. Higher settings rescue more, but can also amplify background hiss in silent moments."

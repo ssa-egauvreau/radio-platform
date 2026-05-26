@@ -3,17 +3,21 @@ import { api, describeError, type UserChannel } from "../../api";
 import { imbeDecode, imbeEncode, imbeReady, initImbe } from "../../voice/imbeVocoder";
 import {
   DEFAULT_PRESET,
+  effectiveLabCodecMode,
   outputSampleRate,
   processClip,
   processClipProduction,
+  setLabCodecMode,
   upsamplePlayback16To24,
   type AudioLabConfig,
+  type LabCodecMode,
   type UpsampleMode,
 } from "./audioLab/pipeline";
 import { LAB_SAMPLE_RATE, MAX_CLIP_SECONDS, startLabRecorder, type LabRecorder } from "./audioLab/recorder";
 import { deleteUserPreset, listPresets, saveUserPreset, type PresetRecord } from "./audioLab/presets";
 import { pushClipToChannel } from "./audioLab/channelPush";
 import { SimpleControls } from "./audioLab/SimpleControls";
+import { OpenVbe2pDecoder, openVbe2pEncodeFrame } from "../../voice/openvbe2p";
 
 type LabState = "idle" | "recording" | "processing" | "playing" | "pushing";
 type ViewMode = "simple" | "advanced";
@@ -36,6 +40,7 @@ const PRODUCTION_AUDIO_CONFIG = {
 };
 
 interface LatencyMeasurement {
+  codecMode: LabCodecMode;
   /** Network RTT to /health endpoint (ms). */
   rttMs: number;
   /** Time to IMBE-encode one 20 ms frame (ms). */
@@ -70,8 +75,11 @@ async function measureNetworkRtt(samples = 6): Promise<number> {
   return sorted[Math.floor(sorted.length / 2)] ?? sorted[0]!;
 }
 
-async function measureCodecRoundtrip(): Promise<{ encodeMs: number; decodeMs: number }> {
-  if (!imbeReady()) {
+async function measureCodecRoundtrip(codecMode: LabCodecMode): Promise<{ encodeMs: number; decodeMs: number }> {
+  if (codecMode === "pcm") {
+    return { encodeMs: 0, decodeMs: 0 };
+  }
+  if (codecMode === "imbe" && !imbeReady()) {
     const ok = await initImbe();
     if (!ok) throw new Error("IMBE WASM is not loaded");
   }
@@ -83,12 +91,17 @@ async function measureCodecRoundtrip(): Promise<{ encodeMs: number; decodeMs: nu
   let encodeTotal = 0;
   let decodeTotal = 0;
   const ITER = 50;
+  const openVbeDecoder = new OpenVbe2pDecoder();
   for (let i = 0; i < ITER; i++) {
     const t0 = performance.now();
-    const cw = imbeEncode(probe);
+    const cw = codecMode === "openvbe2p" ? openVbe2pEncodeFrame(probe) : imbeEncode(probe);
     const t1 = performance.now();
     if (!cw) continue;
-    imbeDecode(cw);
+    if (codecMode === "openvbe2p") {
+      openVbeDecoder.decodeFrame(cw);
+    } else {
+      imbeDecode(cw);
+    }
     const t2 = performance.now();
     encodeTotal += t1 - t0;
     decodeTotal += t2 - t1;
@@ -440,8 +453,9 @@ export function AudioLabPanel() {
     setInfo_(null);
     setMeasuringLatency(true);
     try {
-      const [rttMs, codec] = await Promise.all([measureNetworkRtt(), measureCodecRoundtrip()]);
-      setLatency({ rttMs, encodeMs: codec.encodeMs, decodeMs: codec.decodeMs, takenAt: Date.now() });
+      const codecMode = effectiveLabCodecMode(config);
+      const [rttMs, codec] = await Promise.all([measureNetworkRtt(), measureCodecRoundtrip(codecMode)]);
+      setLatency({ codecMode, rttMs, encodeMs: codec.encodeMs, decodeMs: codec.decodeMs, takenAt: Date.now() });
     } catch (err) {
       setError_(describeError(err));
     } finally {
@@ -470,6 +484,7 @@ export function AudioLabPanel() {
       const handle = pushClipToChannel({
         channelName: pushChannel,
         pcm: processedClip,
+        codecMode: effectiveLabCodecMode(config),
       });
       await handle.finished;
       setInfo_(`Pushed to "${pushChannel}".`);
@@ -506,9 +521,8 @@ export function AudioLabPanel() {
       const res = await api.setGlobalAudioConfig(config);
       setGlobalConfig({ updatedAt: res.updatedAt, updatedBy: res.updatedBy });
       setInfo_(
-        "Settings applied globally. Web users pick up the full pipeline; Android handsets " +
-          "apply the boost (AGC + gain) and wind/noise toggles only — EQ, post-decode filters, " +
-          "and upsample mode are listen-only on the web console.",
+        "Settings applied globally. Connected clients receive the codec choice now; Android handsets " +
+          "also apply the boost (AGC + gain) and wind/noise toggles on the next PTT.",
       );
     } catch (err) {
       setError_(`Could not apply globally: ${describeError(err)}`);
@@ -524,7 +538,7 @@ export function AudioLabPanel() {
       <header>
         <h2>Audio Lab</h2>
         <p className="muted">
-          Record a short clip, run it through a configurable IMBE pipeline, and play it back to hear the
+          Record a short clip, run it through a configurable voice-codec pipeline, and play it back to hear the
           effect of each setting. Optionally push the processed clip onto a real channel to hear it
           over the air. Nothing here changes the production audio path until you wire a preset in.
         </p>
@@ -557,7 +571,7 @@ export function AudioLabPanel() {
             disabled={busy || !recordedClip || recordedClip.length === 0}
             title="Run the recorded clip through the exact production audio path (live ImbeTxConditioner + IMBE round-trip + sample-duplicate upsample, no post-decode shaping)."
           >
-            ▶ Play with live server settings
+            ▶ Play baseline IMBE
           </button>
           <button
             className="btn primary"
@@ -570,7 +584,7 @@ export function AudioLabPanel() {
         </div>
         <div className="muted small">
           {recordedClip
-            ? `Clip: ${(recordedClip.length / LAB_SAMPLE_RATE).toFixed(1)}s recorded. Use the two ▶ buttons to A/B the production path against your custom settings on the same clip.`
+            ? `Clip: ${(recordedClip.length / LAB_SAMPLE_RATE).toFixed(1)}s recorded. Use the two ▶ buttons to A/B baseline IMBE against your custom settings on the same clip.`
             : "No clip recorded yet."}
         </div>
       </section>
@@ -773,13 +787,21 @@ export function AudioLabPanel() {
         </fieldset>
 
         <fieldset>
-          <legend>Vocoder (IMBE codec)</legend>
-          <Toggle
-            label="Bypass IMBE (clean PCM only)"
-            value={config.vocoder.bypass}
-            onChange={(v) => setConfig({ ...config, vocoder: { bypass: v } })}
-          />
-          <div className="muted small">When bypass is OFF, the clip round-trips through the IMBE vocoder (encode → decode) the same way a real on-air talk-spurt does.</div>
+          <legend>Vocoder</legend>
+          <label>
+            <span>On-air codec</span>
+            <select
+              value={effectiveLabCodecMode(config)}
+              onChange={(e) => setConfig(setLabCodecMode(config, e.target.value as LabCodecMode))}
+            >
+              <option value="imbe">P25 IMBE</option>
+              <option value="openvbe2p">OpenVBE2P</option>
+              <option value="pcm">Clear PCM / bypass</option>
+            </select>
+          </label>
+          <div className="muted small">
+            The selected codec is used for lab playback, channel push, and the fleet-wide setting when you apply live.
+          </div>
         </fieldset>
 
         <fieldset disabled={config.vocoder.bypass}>
@@ -902,10 +924,9 @@ export function AudioLabPanel() {
       </section>
 
       <section className="audio-lab-server-config">
-        <h3>Live server audio config</h3>
+        <h3>Default build audio config</h3>
         <p className="muted small">
-          What the production audio path is doing right now. These are the values baked
-          into the running build — the Audio Lab settings above don't affect them.
+          Baseline values baked into the running build before an Audio Lab preset is applied live.
         </p>
         <table className="audio-lab-config-table">
           <tbody>
@@ -1026,7 +1047,7 @@ function LatencyBreakdown({ latency }: { latency: LatencyMeasurement | null }) {
   if (!latency) {
     return (
       <div className="muted small">
-        Click <b>Measure now</b> to ping the server and time the IMBE codec on this device.
+        Click <b>Measure now</b> to ping the server and time the selected codec on this device.
       </div>
     );
   }
@@ -1041,13 +1062,16 @@ function LatencyBreakdown({ latency }: { latency: LatencyMeasurement | null }) {
     FIXED.listenerCushionMs +
     FIXED.outputBufferMs;
 
+  const codecLabel =
+    latency.codecMode === "openvbe2p" ? "OpenVBE2P" : latency.codecMode === "pcm" ? "PCM" : "IMBE";
+
   const rows: { label: string; value: string; note?: string }[] = [
     { label: "Mic capture wait (½ worklet frame)", value: `${FIXED.micWaitMs} ms` },
     { label: "TX conditioning", value: `~${FIXED.preConditionMs} ms` },
-    { label: "IMBE encode (measured)", value: `${latency.encodeMs.toFixed(2)} ms` },
+    { label: `${codecLabel} encode (measured)`, value: `${latency.encodeMs.toFixed(2)} ms` },
     { label: "Network round-trip (measured)", value: `${latency.rttMs.toFixed(1)} ms` },
     { label: "Relay forward", value: `~${FIXED.relayForwardMs} ms` },
-    { label: "IMBE decode (measured)", value: `${latency.decodeMs.toFixed(2)} ms` },
+    { label: `${codecLabel} decode (measured)`, value: `${latency.decodeMs.toFixed(2)} ms` },
     { label: "Listener jitter cushion", value: `${FIXED.listenerCushionMs} ms` },
     { label: "Web Audio output buffer", value: `~${FIXED.outputBufferMs} ms` },
   ];

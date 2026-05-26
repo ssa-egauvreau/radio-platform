@@ -33,9 +33,9 @@ export function listPresets(): PresetRecord[] {
  *  with defaults so legacy localStorage entries keep working after a schema bump. */
 function migrateConfig(cfg: AudioLabConfig): AudioLabConfig {
   return {
-    preImbe: { ...DEFAULT_PRESET.preImbe, ...cfg.preImbe },
-    vocoder: { ...DEFAULT_PRESET.vocoder, ...cfg.vocoder },
-    postDecode: { ...DEFAULT_PRESET.postDecode, ...cfg.postDecode },
+    preImbe: { ...DEFAULT_PRESET.preImbe, ...(cfg.preImbe ?? {}) },
+    vocoder: { ...DEFAULT_PRESET.vocoder, ...(cfg.vocoder ?? {}) },
+    postDecode: { ...DEFAULT_PRESET.postDecode, ...(cfg.postDecode ?? {}) },
   };
 }
 

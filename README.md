@@ -28,6 +28,13 @@ boot. Handsets bind to an agency with a per-agency radio key (the legacy global
 - Repo: GitHub monorepo [`safeT-PTT`](https://github.com/ssa-egauvreau/safeT-PTT)
 - Distribution: private APKs
 
+## Voice codecs
+- Primary digital voice remains the bundled P25-style IMBE path when native/WASM vocoder support is available.
+- safeT also includes **OpenVBE2P**, an original experimental LPC voice codec used as a compact digital fallback when IMBE is unavailable.
+- OpenVBE2P is not AMBE, AMBE+2, IMBE, or bitstream-compatible with proprietary vocoders.
+- The relay recognizes raw PCM, IMBE packets, and OpenVBE2P packets; digital transmitters still send a clear-PCM sideband for recording, transcription, and AI dispatch.
+- Admins can test P25 IMBE, OpenVBE2P, and clear PCM in Audio Lab, then apply the selected codec agency-wide. Connected web clients receive the setting immediately; Android handsets cache it from `/v1/audio/config` and from live relay `audio_config` messages.
+
 Step-by-step Railway + Android configuration: `docs/railway-android-setup.md`.
 
 **Production API / web console:** `https://safet.up.railway.app/`

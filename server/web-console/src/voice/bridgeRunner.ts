@@ -5,6 +5,7 @@
 
 import { getToken } from "../api";
 import { imbeDecode, initImbe } from "./imbeVocoder";
+import { OpenVbe2pDecoder, isOpenVbe2pPacket } from "./openvbe2p";
 
 export type BridgeRunState = "idle" | "connecting" | "running" | "error" | "closed";
 
@@ -83,6 +84,7 @@ export class BridgeRunnerClient {
   private lastInboundMs = 0;
   private receiving = false;
   private rxWatchdog: number | null = null;
+  private readonly openVbeDecoder = new OpenVbe2pDecoder();
 
   constructor(config: BridgeRunnerConfig, callbacks: BridgeRunnerCallbacks) {
     this.config = config;
@@ -291,6 +293,13 @@ export class BridgeRunnerClient {
     const bytes = new Uint8Array(buffer);
     if (bytes.byteLength === 13 && bytes[0] === IMBE_MAGIC_0 && bytes[1] === IMBE_MAGIC_1) {
       const pcm8k = imbeDecode(bytes.subarray(2));
+      if (pcm8k) {
+        this.schedulePcm(upsample8kTo16k(pcm8k));
+      }
+      return;
+    }
+    if (isOpenVbe2pPacket(bytes)) {
+      const pcm8k = this.openVbeDecoder.decodeFrame(bytes.subarray(2));
       if (pcm8k) {
         this.schedulePcm(upsample8kTo16k(pcm8k));
       }

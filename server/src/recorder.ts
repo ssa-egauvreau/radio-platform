@@ -7,6 +7,7 @@ import { encodeWavPcm16 } from "./wav.js";
 import { enqueueTranscription } from "./transcribe.js";
 import { isAiDispatchChannelCached } from "./aiDispatch/channelCache.js";
 import { createImbeDecoder, type ImbeStreamDecoder } from "./imbeServerCodec.js";
+import { OpenVbe2pStreamDecoder, isOpenVbe2pFrame } from "./openvbe2pCodec.js";
 
 const SAMPLE_RATE = 16000;
 /** Silence after the last frame that closes a transmission. */
@@ -45,8 +46,10 @@ interface ActiveRecording extends FrameAttribution {
   lastFrameMs: number;
   chunks: Buffer[];
   bytes: number;
-  /** Decoder dedicated to this talk-spurt's digital frames (created on demand). */
-  decoder: ImbeStreamDecoder | null;
+  /** IMBE decoder dedicated to this talk-spurt's digital frames (created on demand). */
+  imbeDecoder: ImbeStreamDecoder | null;
+  /** OpenVBE2P decoder dedicated to this talk-spurt's digital frames (created on demand). */
+  openVbeDecoder: OpenVbe2pStreamDecoder | null;
 }
 
 const active = new Map<string, ActiveRecording>();
@@ -60,10 +63,11 @@ async function finalize(rec: ActiveRecording): Promise<void> {
   if (active.get(recKey(rec)) === rec) {
     active.delete(recKey(rec));
   }
-  if (rec.decoder) {
-    rec.decoder.free();
-    rec.decoder = null;
+  if (rec.imbeDecoder) {
+    rec.imbeDecoder.free();
+    rec.imbeDecoder = null;
   }
+  rec.openVbeDecoder = null;
   if (rec.bytes < MIN_BYTES) {
     return;
   }
@@ -102,7 +106,15 @@ export function recordFrame(attr: FrameAttribution, payload: Buffer): void {
     rec = undefined;
   }
   if (!rec) {
-    rec = { ...attr, startedAt: now, lastFrameMs: now, chunks: [], bytes: 0, decoder: null };
+    rec = {
+      ...attr,
+      startedAt: now,
+      lastFrameMs: now,
+      chunks: [],
+      bytes: 0,
+      imbeDecoder: null,
+      openVbeDecoder: null,
+    };
     active.set(key, rec);
   }
   const preferClearPcm =
@@ -116,10 +128,22 @@ export function recordFrame(attr: FrameAttribution, payload: Buffer): void {
     if (preferClearPcm) {
       return;
     }
-    if (!rec.decoder) {
-      rec.decoder = createImbeDecoder();
+    if (!rec.imbeDecoder) {
+      rec.imbeDecoder = createImbeDecoder();
     }
-    const decoded = rec.decoder ? rec.decoder.decode(payload) : null;
+    const decoded = rec.imbeDecoder ? rec.imbeDecoder.decode(payload) : null;
+    if (!decoded) {
+      return;
+    }
+    pcm = decoded;
+  } else if (isOpenVbe2pFrame(payload)) {
+    if (preferClearPcm) {
+      return;
+    }
+    if (!rec.openVbeDecoder) {
+      rec.openVbeDecoder = new OpenVbe2pStreamDecoder();
+    }
+    const decoded = rec.openVbeDecoder.decode(payload);
     if (!decoded) {
       return;
     }

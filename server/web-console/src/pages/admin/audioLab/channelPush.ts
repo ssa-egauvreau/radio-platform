@@ -1,10 +1,16 @@
 // Pushes a processed Audio Lab clip onto a real voice channel — opens a transient
 // WebSocket to the relay, keys it as a one-off "LAB" unit, and streams the clip as
-// IMBE frames (with clear-PCM sideband for the recorder). Real-time-paced so listeners
+// the selected codec (with clear-PCM sideband for the recorder). Real-time-paced so listeners
 // hear it like any other talk-spurt rather than a fire-hose burst.
 
 import { getToken } from "../../../api";
 import { imbeEncode, imbeReady, initImbe } from "../../../voice/imbeVocoder";
+import {
+  OPENVBE2P_FRAME_8K_SAMPLES,
+  openVbe2pEncodeFrame,
+  wrapOpenVbe2pFrame,
+} from "../../../voice/openvbe2p";
+import type { LabCodecMode } from "./pipeline";
 
 const IMBE_MAGIC_0 = 0xf5;
 const IMBE_MAGIC_1 = 0xab;
@@ -45,6 +51,8 @@ export interface ChannelPushOptions {
   /** If true, also send the clear-PCM sideband so the transmission lands in the recorder
    *  / transmission log. Default true so the lab push is searchable later. */
   recordSideband?: boolean;
+  /** Codec used for the actual over-the-air test. */
+  codecMode?: LabCodecMode;
 }
 
 export interface ChannelPushHandle {
@@ -54,15 +62,15 @@ export interface ChannelPushHandle {
   cancel(): void;
 }
 
-/** Streams a processed clip onto a channel as IMBE + sideband, paced to real time so it
+/** Streams a processed clip onto a channel, paced to real time so it
  *  sounds like a normal talk-spurt to listeners. Caller awaits `finished`. */
 export function pushClipToChannel(opts: ChannelPushOptions): ChannelPushHandle {
-  const { channelName, pcm, recordSideband = true } = opts;
+  const { channelName, pcm, recordSideband = true, codecMode = "imbe" } = opts;
   let cancelled = false;
   let ws: WebSocket | null = null;
 
   const finished = (async () => {
-    if (!imbeReady()) {
+    if (codecMode === "imbe" && !imbeReady()) {
       const ok = await initImbe();
       if (!ok) {
         throw new Error("IMBE vocoder unavailable — cannot push to channel");
@@ -140,7 +148,7 @@ export function pushClipToChannel(opts: ChannelPushOptions): ChannelPushHandle {
         return;
       }
 
-      // Stream IMBE + sideband at the real 20 ms frame cadence. The relay's claimAir is
+      // Stream at the real 20 ms frame cadence. The relay's claimAir is
       // refreshed by each binary frame, so pacing keeps the channel held for the duration.
       const pcm8k = downsample16To8(pcm);
       const start = performance.now();
@@ -149,15 +157,27 @@ export function pushClipToChannel(opts: ChannelPushOptions): ChannelPushHandle {
         if (cancelled || ws.readyState !== WebSocket.OPEN) {
           break;
         }
-        const cw = imbeEncode(pcm8k.subarray(off, off + IMBE_FRAME_8K_SAMPLES));
-        if (cw) {
-          const frame = new Uint8Array(13);
-          frame[0] = IMBE_MAGIC_0;
-          frame[1] = IMBE_MAGIC_1;
-          frame.set(cw, 2);
-          ws.send(frame);
+        if (codecMode === "openvbe2p") {
+          const frame = openVbe2pEncodeFrame(pcm8k.subarray(off, off + OPENVBE2P_FRAME_8K_SAMPLES));
+          if (frame) {
+            ws.send(wrapOpenVbe2pFrame(frame));
+          }
+        } else if (codecMode === "pcm") {
+          const slice16k = pcm.subarray(frameIndex * FRAME_16K_SAMPLES, (frameIndex + 1) * FRAME_16K_SAMPLES);
+          if (slice16k.length === FRAME_16K_SAMPLES) {
+            ws.send(new Uint8Array(slice16k.buffer, slice16k.byteOffset, slice16k.byteLength));
+          }
+        } else {
+          const cw = imbeEncode(pcm8k.subarray(off, off + IMBE_FRAME_8K_SAMPLES));
+          if (cw) {
+            const frame = new Uint8Array(13);
+            frame[0] = IMBE_MAGIC_0;
+            frame[1] = IMBE_MAGIC_1;
+            frame.set(cw, 2);
+            ws.send(frame);
+          }
         }
-        if (recordSideband) {
+        if (recordSideband && codecMode !== "pcm") {
           // The relay records the sideband but does not broadcast it (see voiceRelay.ts).
           const slice16k = pcm.subarray(frameIndex * FRAME_16K_SAMPLES, (frameIndex + 1) * FRAME_16K_SAMPLES);
           if (slice16k.length === FRAME_16K_SAMPLES) {

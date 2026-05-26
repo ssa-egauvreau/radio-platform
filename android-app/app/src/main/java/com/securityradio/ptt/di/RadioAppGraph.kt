@@ -129,6 +129,21 @@ class RadioAppGraph(val application: Application) {
         authTokenProvider = authTokenProvider,
         apiKeyProvider = radioApiKeyProvider,
         inbound = inboundVoicePlayer,
+        codecModeProvider = {
+            if (radioPreferences.hasServerAudioConfig()) {
+                radioPreferences.getServerCodecMode()
+            } else {
+                "auto"
+            }
+        },
+        audioConfigConsumer = { agcEnabled, noiseSuppression, gainMultiplier, codecMode ->
+            radioPreferences.setServerAudioConfig(
+                agcEnabled = agcEnabled,
+                noiseSuppression = noiseSuppression,
+                gainMultiplier = gainMultiplier,
+                codecMode = codecMode,
+            )
+        },
     )
 
     val scanVoiceListen: ScanVoiceListenTransport = ScanVoiceListenTransport(
@@ -200,6 +215,7 @@ class RadioAppGraph(val application: Application) {
                         agcEnabled = cfg.agcEnabled,
                         noiseSuppression = cfg.noiseSuppression,
                         gainMultiplier = cfg.gainMultiplier,
+                        codecMode = cfg.codecMode,
                     )
                 }
                 // If the server has no config (cfg == null), leave whatever was cached — don't

@@ -5,8 +5,16 @@ import { getToken, type Permission } from "../api";
 import { ImbeTxConditioner } from "./imbeTxConditioner";
 import { imbeDecode, imbeEncode, imbeReady, initImbe } from "./imbeVocoder";
 import { loadMarker1033Pcm } from "./marker1033";
+import {
+  OPENVBE2P_FRAME_8K_SAMPLES,
+  OpenVbe2pDecoder,
+  isOpenVbe2pPacket,
+  openVbe2pEncodeFrame,
+  wrapOpenVbe2pFrame,
+} from "./openvbe2p";
 
 export type VoiceState = "idle" | "connecting" | "listening" | "transmitting" | "error" | "closed";
+export type VoiceCodecMode = "auto" | "imbe" | "openvbe2p" | "pcm";
 
 export interface VoiceCallbacks {
   onState: (state: VoiceState, detail?: string) => void;
@@ -48,6 +56,14 @@ function voiceSocketUrl(): string {
 /** Console client platform — "desktop" inside the Electron shell, otherwise "web". */
 function consolePlatform(): string {
   return (window as { safetDesktop?: boolean }).safetDesktop === true ? "desktop" : "web";
+}
+
+function normalizeVoiceCodecMode(raw: unknown): VoiceCodecMode {
+  const value = String(raw ?? "auto").trim().toLowerCase();
+  if (value === "openvbe2p" || value === "openvbe") return "openvbe2p";
+  if (value === "imbe" || value === "p25") return "imbe";
+  if (value === "pcm" || value === "clear_pcm" || value === "bypass") return "pcm";
+  return "auto";
 }
 
 const JOIN_ERRORS: Record<string, string> = {
@@ -177,6 +193,22 @@ function encodeImbeFrames(pcm16k: Int16Array): ArrayBuffer[] {
   return frames;
 }
 
+/** Encodes 16 kHz mic PCM to safeT OpenVBE2P frames (2-byte marker + 23-byte frame). */
+function encodeOpenVbe2pFrames(pcm16k: Int16Array): ArrayBuffer[] {
+  const pcm8k = new Int16Array(pcm16k.length >> 1);
+  for (let i = 0; i < pcm8k.length; i++) {
+    pcm8k[i] = (pcm16k[2 * i] + pcm16k[2 * i + 1]) >> 1;
+  }
+  const frames: ArrayBuffer[] = [];
+  for (let offset = 0; offset + OPENVBE2P_FRAME_8K_SAMPLES <= pcm8k.length; offset += OPENVBE2P_FRAME_8K_SAMPLES) {
+    const frame = openVbe2pEncodeFrame(pcm8k.subarray(offset, offset + OPENVBE2P_FRAME_8K_SAMPLES));
+    if (frame) {
+      frames.push(wrapOpenVbe2pFrame(frame));
+    }
+  }
+  return frames;
+}
+
 export class VoiceChannelClient {
   private readonly channelName: string;
   private readonly callbacks: VoiceCallbacks;
@@ -208,11 +240,13 @@ export class VoiceChannelClient {
   /** Active looping soundboard tone-outs, keyed by tone-out id. */
   private readonly customLoops = new Map<number, number>();
   private digitalTx = true;
+  private codecMode: VoiceCodecMode = "auto";
   /** Server asked for clear PCM uplink so AI dispatch can transcribe speech. */
   private aiDispatchListenPcm = false;
   /** Server wants clear PCM for the transmission log (all channels). */
   private recordListenPcm = false;
   private readonly txConditioner = new ImbeTxConditioner();
+  private readonly openVbeDecoder = new OpenVbe2pDecoder();
   private gestureUnbind: (() => void) | null = null;
 
   private lastInboundMs = 0;
@@ -245,9 +279,14 @@ export class VoiceChannelClient {
     return Date.now() - this.lastInboundMs < RX_GAP_MS;
   }
 
-  /** Chooses P25 IMBE (true) or clear PCM (false) for outgoing audio. */
+  /** Chooses compact digital voice (true) or clear PCM (false) for outgoing audio. */
   setDigitalTx(on: boolean): void {
     this.digitalTx = on;
+  }
+
+  /** Agency-wide codec preference from Audio Lab. Local clear-PCM mode still wins. */
+  setCodecMode(mode: VoiceCodecMode): void {
+    this.codecMode = mode;
   }
 
   /** Also uplink clear PCM for AI dispatch (sideband; on-air may stay IMBE). */
@@ -262,6 +301,16 @@ export class VoiceChannelClient {
 
   private listenPcmSidebandRequired(): boolean {
     return this.aiDispatchListenPcm || this.recordListenPcm;
+  }
+
+  private selectedTxCodec(): Exclude<VoiceCodecMode, "auto"> {
+    if (!this.digitalTx || this.codecMode === "pcm") {
+      return "pcm";
+    }
+    if (this.codecMode === "openvbe2p") {
+      return "openvbe2p";
+    }
+    return imbeReady() ? "imbe" : "openvbe2p";
   }
 
   /** Sets channel listen volume (0–1). Takes effect immediately and on next connect. */
@@ -440,6 +489,7 @@ export class VoiceChannelClient {
       unit_id?: string;
       channel?: string;
       by?: string;
+      config?: { codecMode?: string };
       ai_dispatch_listen_pcm?: boolean;
       record_listen_pcm?: boolean;
       enabled?: boolean;
@@ -461,6 +511,8 @@ export class VoiceChannelClient {
       this.setState("listening");
     } else if (msg.type === "ai_dispatch_pcm") {
       this.setAiDispatchListenPcm(msg.enabled === true);
+    } else if (msg.type === "audio_config") {
+      this.setCodecMode(normalizeVoiceCodecMode(msg.config?.codecMode));
     } else if (msg.type === "busy") {
       // The relay rejected our audio — another unit holds the channel.
       if (this.transmitting) {
@@ -495,6 +547,13 @@ export class VoiceChannelClient {
     // P25 IMBE digital-voice frame: 2-byte marker + 11-byte codeword.
     if (bytes.byteLength === 13 && bytes[0] === IMBE_MAGIC_0 && bytes[1] === IMBE_MAGIC_1) {
       const pcm8k = imbeDecode(bytes.subarray(2));
+      if (pcm8k) {
+        this.schedulePcm(upsample8kTo16k(pcm8k));
+      }
+      return;
+    }
+    if (isOpenVbe2pPacket(bytes)) {
+      const pcm8k = this.openVbeDecoder.decodeFrame(bytes.subarray(2));
       if (pcm8k) {
         this.schedulePcm(upsample8kTo16k(pcm8k));
       }
@@ -604,7 +663,8 @@ export class VoiceChannelClient {
         return;
       }
       const pcmBuf = event.data;
-      if (this.digitalTx && imbeReady()) {
+      const txCodec = this.selectedTxCodec();
+      if (txCodec === "imbe") {
         // On-air: P25 IMBE. Recording / AI may still need clear PCM on a sideband.
         const pcm = new Int16Array(pcmBuf);
         this.txConditioner.process(pcm);
@@ -614,10 +674,20 @@ export class VoiceChannelClient {
         if (this.listenPcmSidebandRequired()) {
           ws.send(wrapListenPcm(pcmBuf));
         }
+      } else if (txCodec === "openvbe2p") {
+        // On-air: safeT OpenVBE2P fallback. Recording / AI still gets clear PCM sideband.
+        const pcm = new Int16Array(pcmBuf);
+        this.txConditioner.process(pcm);
+        for (const frame of encodeOpenVbe2pFrames(pcm)) {
+          ws.send(frame);
+        }
+        if (this.listenPcmSidebandRequired()) {
+          ws.send(wrapListenPcm(pcmBuf));
+        }
       } else {
         if (!this.warnedClearTx) {
           this.warnedClearTx = true;
-          const reason = !this.digitalTx ? "HQ/analog mode selected" : "IMBE WASM not ready";
+          const reason = !this.digitalTx ? "HQ/analog mode selected" : "global PCM codec selected";
           console.warn(
             `[voice] transmitting raw PCM on "${this.channelName}" (${reason}) — peers will hear clear audio, not vocoded.`,
           );

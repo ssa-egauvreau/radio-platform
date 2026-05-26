@@ -3,7 +3,9 @@
  *
  * Protocol:
  * - First control message MUST be UTF-8 JSON: { type: "join", unit_id, channel }
- * - Subsequent binary frames: raw PCM mono 16-bit LE, 16000 Hz (matches Android capture).
+ * - Subsequent binary frames: raw PCM mono 16-bit LE @ 16 kHz, P25 IMBE packets, or safeT
+ *   OpenVBE2P packets. Clear-PCM sideband packets may accompany digital on-air audio for
+ *   recording/transcription and are never broadcast.
  *
  * Authentication:
  * - Browser console clients pass a JWT as `?token=` — their agency and channel
@@ -29,10 +31,12 @@ import {
   setAiDispatchChannelCached,
   isAiDispatchChannelCached,
 } from "./aiDispatch/channelCache.js";
+import { summarizeGlobalAudioConfig, type DeviceAudioConfigSummary } from "./audioConfigSummary.js";
 import {
   getAgencyById,
   getBridgeById,
   getChannelByName,
+  getGlobalAudioConfig,
   getMembership,
   getSimulcastByName,
   getUserById,
@@ -224,6 +228,24 @@ export function notifyChannelAiDispatchListenPcm(
     meta.aiDispatchListenPcm = enabled;
     try {
       ws.send(JSON.stringify({ type: "ai_dispatch_pcm", enabled }));
+    } catch {
+      /* socket closing */
+    }
+  }
+}
+
+/** Tells connected clients that an agency-wide Audio Lab config changed. */
+export function notifyAgencyAudioConfig(
+  agencyId: number,
+  config: DeviceAudioConfigSummary,
+): void {
+  const payload = JSON.stringify({ type: "audio_config", config });
+  for (const [ws, meta] of clientMeta) {
+    if (meta.agencyId !== agencyId || ws.readyState !== WebSocket.OPEN) {
+      continue;
+    }
+    try {
+      ws.send(payload);
     } catch {
       /* socket closing */
     }
@@ -981,6 +1003,10 @@ export function attachVoiceRelay(
         ...(aiListenPcm ? { ai_dispatch_listen_pcm: true } : {}),
       }),
     );
+    const audioRow = await getGlobalAudioConfig(meta.agencyId).catch(() => null);
+    if (audioRow) {
+      ws.send(JSON.stringify({ type: "audio_config", config: summarizeGlobalAudioConfig(audioRow.config) }));
+    }
   }
 
   wss.on("connection", (ws: WebSocket) => {

@@ -52,11 +52,13 @@ data class AudioConfigResponseDto(
  *  agcEnabled      → enable Android AutomaticGainControl and software gain
  *  noiseSuppression→ enable Android NoiseSuppressor
  *  gainMultiplier  → software gain (0.5 – 3.0); only effective when agcEnabled
+ *  codecMode       → auto, imbe, openvbe2p, or pcm/bypass
  */
 data class AudioConfigDto(
     @SerializedName("agcEnabled") val agcEnabled: Boolean = false,
     @SerializedName("noiseSuppression") val noiseSuppression: Boolean = false,
     @SerializedName("gainMultiplier") val gainMultiplier: Float = 1.0f,
+    @SerializedName("codecMode") val codecMode: String = "auto",
 )
 
 data class LocationReportDto(
