@@ -34,7 +34,10 @@ final class VoiceTransport {
     private var pcmFrameScratch = Data(count: P25ImbeNative.Frames.pcm16kFrameBytes)
     private var lastConsumeNs: UInt64 = 0
     private var warnedClearTx = false
-    private var uplinkActive = false
+    // Each PTT key-up/key-down pair gets a unique capture session id from
+    // VoiceAudio. We only accept frames for the currently armed session so
+    // late frames from a prior key-up cannot repopulate `pcmAcc`.
+    private var activeCaptureSessionId: UInt64?
 
     private let imbeMagic: [UInt8] = [0xF5, 0xAB]
     private let listenPcmMagic: [UInt8] = [0xF6, 0xAC]
@@ -66,39 +69,35 @@ final class VoiceTransport {
         task = nil
         currentChannel = nil
         reconnectAttempts = 0
+        stopUplinkCapture()
+    }
+
+    func startUplinkCapture(sessionId: UInt64) {
+        activeCaptureSessionId = sessionId
         resetUplinkState()
     }
 
-    /// Arms uplink processing for a fresh PTT key-up.
-    func beginUplink() {
-        uplinkActive = true
+    func stopUplinkCapture() {
+        activeCaptureSessionId = nil
+        resetUplinkState()
     }
 
     func resetUplinkState() {
-        // Captured frames are bounced through `Task { @MainActor ... }`.
-        // Disable uplink first so any queued post-release frames are dropped.
-        uplinkActive = false
         pcmAcc.removeAll(keepingCapacity: true)
         txConditioner.reset()
         lastConsumeNs = 0
     }
 
-    #if DEBUG
-    /// Test-only read-back of the uplink gate flag used by `sendCapturedOnMain`.
-    /// Exposed so unit tests can pin the begin/reset state-machine contract
-    /// without standing up a real WebSocket task. Do not call from production.
-    var _uplinkActiveForTest: Bool { uplinkActive }
-    #endif
-
     /// Send one captured PCM16 frame (320 bytes @ 16 kHz). Encodes to IMBE when available.
-    nonisolated func sendCaptured(_ frame: Data) {
+    nonisolated func sendCaptured(_ frame: Data, captureSessionId: UInt64) {
         Task { @MainActor [weak self] in
-            self?.sendCapturedOnMain(frame)
+            self?.sendCapturedOnMain(frame, captureSessionId: captureSessionId)
         }
     }
 
-    private func sendCapturedOnMain(_ frame: Data) {
-        guard let task, !frame.isEmpty, uplinkActive else { return }
+    private func sendCapturedOnMain(_ frame: Data, captureSessionId: UInt64) {
+        guard let task, !frame.isEmpty else { return }
+        guard activeCaptureSessionId == captureSessionId else { return }
 
         let p25 = P25ImbeNative.isAvailable
         if !p25 {

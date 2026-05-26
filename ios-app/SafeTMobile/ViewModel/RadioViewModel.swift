@@ -148,8 +148,8 @@ final class RadioViewModel: ObservableObject {
     // MARK: - voice glue
 
     private func wireVoiceCallbacks() {
-        voiceAudio.onCapturedFrame = { [weak self] frame in
-            self?.voiceTransport.sendCaptured(frame)
+        voiceAudio.onCapturedFrame = { [weak self] frame, captureSessionId in
+            self?.voiceTransport.sendCaptured(frame, captureSessionId: captureSessionId)
         }
         voiceTransport.onJoined = { [weak self] joined in
             guard let self else { return }
@@ -169,7 +169,7 @@ final class RadioViewModel: ObservableObject {
                 let msg = peer.map { "CHANNEL BUSY — \($0)" } ?? "CHANNEL BUSY"
                 self.enterBusy(msg)
                 self.voiceAudio.stopCapture()
-                self.voiceTransport.resetUplinkState()
+                self.voiceTransport.stopUplinkCapture()
                 self.uiState.isTransmitting = false
             }
         }
@@ -222,19 +222,16 @@ final class RadioViewModel: ObservableObject {
             // Air is clear — play the permit beep, then start capturing. The beep
             // overlaps the first ~250 ms of mic capture; that's how Android does
             // it too, and the listener side hasn't started decoding yet anyway.
-            guard voiceAudio.startCapture() else {
-                // Route/format failures can leave capture inert (no tap installed).
-                // Do not show "ON AIR" when no mic frames are actually flowing.
-                voiceTransport.resetUplinkState()
-                uiState.isTransmitting = false
-                enterBusy("VOICE UNAVAILABLE")
-                return
-            }
             sounds.play(.pttPermit)
             uiState.statusMessage = P25ImbeNative.isAvailable ? "ON AIR · IMBE" : "ON AIR · CLEAR PCM"
             uiState.isTransmitting = true
-            voiceTransport.beginUplink()
-            voiceAudio.startCapture()
+            guard let captureSessionId = voiceAudio.startCapture() else {
+                uiState.isTransmitting = false
+                enterBusy("VOICE UNAVAILABLE")
+                voiceTransport.stopUplinkCapture()
+                return
+            }
+            voiceTransport.startUplinkCapture(sessionId: captureSessionId)
         } catch {
             guard uiState.isPttPressed else { return }
             enterBusy("AIR CHECK FAILED")
@@ -263,9 +260,9 @@ final class RadioViewModel: ObservableObject {
             voiceAudio.stopCapture()
             uiState.isTransmitting = false
         }
-        // Always drop any fractional IMBE accumulator tail so a denied/aborted
-        // key-up cannot leak stale audio into the next transmission.
-        voiceTransport.resetUplinkState()
+        // Always tear down uplink state so a denied/aborted key-up cannot leak
+        // stale PCM/IMBE data into the next transmission.
+        voiceTransport.stopUplinkCapture()
         uiState.statusMessage = "RX IDLE"
     }
 
