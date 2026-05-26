@@ -382,20 +382,40 @@ export function listAgencyRosters(agencyId: number): AgencyChannelRoster[] {
     .sort((a, b) => a.channel.localeCompare(b.channel));
 }
 
+type MoveLockRosterRecord = Pick<
+  RosterRecord,
+  "channelKey" | "channelName" | "unitId" | "kind" | "client" | "deviceType"
+>;
+
+function countsAsDispatchConsoleSession(record: MoveLockRosterRecord): boolean {
+  if (record.kind !== "account") {
+    return false;
+  }
+  if (record.deviceType === "dispatch_console") {
+    return true;
+  }
+  // Older rows (or temporary DB misses during join) can leave `deviceType`
+  // null. Treat web/desktop account sessions as console-style for the
+  // multi-channel move lock so scanning dispatchers still cannot be force-moved.
+  return record.client === "web" || record.client === "desktop";
+}
+
 /**
  * How many distinct voice channels each unit is currently dispatching on
- * (live control). Only dispatch_console sessions count here — a user who just
- * has their handset/phone on one channel and the dashboard open on another
- * should still be movable. Multi-channel scanning is a dispatch-console signal.
+ * (live control). A user's handset/phone channel should not count against this;
+ * only console-style sessions do.
  */
-export function unitChannelCounts(agencyId: number): Map<string, number> {
+export function unitChannelCountsFromRecords(
+  agencyId: number,
+  records: Iterable<MoveLockRosterRecord>,
+): Map<string, number> {
   const prefix = `${agencyId} `;
   const byUnit = new Map<string, Set<string>>();
-  for (const record of voiceRoster.values()) {
+  for (const record of records) {
     if (!record.channelKey.startsWith(prefix)) {
       continue;
     }
-    if (record.kind !== "account" || record.deviceType !== "dispatch_console") {
+    if (!countsAsDispatchConsoleSession(record)) {
       continue;
     }
     const unit = record.unitId.toUpperCase();
@@ -408,6 +428,10 @@ export function unitChannelCounts(agencyId: number): Map<string, number> {
     counts.set(unit, channels.size);
   }
   return counts;
+}
+
+export function unitChannelCounts(agencyId: number): Map<string, number> {
+  return unitChannelCountsFromRecords(agencyId, voiceRoster.values());
 }
 
 /** Marks console operators who must not be live-moved (multi-channel dispatch). */
