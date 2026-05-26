@@ -30,7 +30,34 @@ interface RadioApi {
     /** Live profile read — picks up display-name and unit-id changes made on the portal. */
     @GET("/v1/auth/me")
     suspend fun me(): MeResponseDto
+
+    /**
+     * Agency-wide audio config set by an admin in the Audio Lab.
+     * Returns [AudioConfigResponseDto] with a null [AudioConfigResponseDto.config] when
+     * no global config has been pushed yet.
+     */
+    @GET("/v1/audio/config")
+    suspend fun audioConfig(): AudioConfigResponseDto
 }
+
+/** Wrapper returned by /v1/audio/config. */
+data class AudioConfigResponseDto(
+    @SerializedName("config") val config: AudioConfigDto? = null,
+    @SerializedName("updatedAt") val updatedAt: String? = null,
+)
+
+/**
+ * Device-oriented audio config derived from the admin's AudioLabConfig.
+ *
+ *  agcEnabled      → enable Android AutomaticGainControl and software gain
+ *  noiseSuppression→ enable Android NoiseSuppressor
+ *  gainMultiplier  → software gain (0.5 – 3.0); only effective when agcEnabled
+ */
+data class AudioConfigDto(
+    @SerializedName("agcEnabled") val agcEnabled: Boolean = false,
+    @SerializedName("noiseSuppression") val noiseSuppression: Boolean = false,
+    @SerializedName("gainMultiplier") val gainMultiplier: Float = 1.0f,
+)
 
 data class LocationReportDto(
     @SerializedName("unit_id") val unitId: String,

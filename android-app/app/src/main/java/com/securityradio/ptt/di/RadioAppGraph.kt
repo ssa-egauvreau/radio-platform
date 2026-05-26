@@ -1,6 +1,7 @@
 package com.securityradio.ptt.di
 
 import android.app.Application
+import android.util.Log
 import com.securityradio.ptt.BuildConfig
 import com.securityradio.ptt.data.RadioChannelGateway
 import com.securityradio.ptt.data.StubChannelRepository
@@ -32,6 +33,10 @@ import com.securityradio.ptt.device.ScanVoiceListenTransport
 import com.securityradio.ptt.device.ServerReachabilityMonitor
 import com.securityradio.ptt.device.VoiceRelayTransport
 import com.securityradio.ptt.domain.ChannelRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -43,6 +48,9 @@ class RadioAppGraph(val application: Application) {
     }
 
     val radioPreferences = RadioPreferences(application)
+
+    /** Background scope for fire-and-forget network tasks (audio config refresh, etc.). */
+    private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     /** Over-the-air APK self-updater for the sideloaded fleet. */
     val appUpdater: AppUpdater = AppUpdater(
@@ -134,12 +142,23 @@ class RadioAppGraph(val application: Application) {
     val pttMicCapture: PttMicCapture = AudioRecordPttCapture(
         enableSidetone = false,
         streamingSink = voiceRelay,
+        // Server-pushed config (from Audio Lab → "Apply live") takes precedence over
+        // per-device settings when an admin has set it.  Falls back to local user prefs
+        // if no server config has been fetched yet.
         configProvider = {
-            MicCaptureConfig(
-                noiseSuppression = radioPreferences.isNoiseSuppressionEnabled(),
-                autoGain = radioPreferences.isMicAutoGainEnabled(),
-                gainMultiplier = radioPreferences.getMicGainMultiplier(),
-            )
+            if (radioPreferences.hasServerAudioConfig()) {
+                MicCaptureConfig(
+                    noiseSuppression = radioPreferences.getServerNoiseSuppression(),
+                    autoGain = radioPreferences.getServerAgcEnabled(),
+                    gainMultiplier = radioPreferences.getServerGainMultiplier(),
+                )
+            } else {
+                MicCaptureConfig(
+                    noiseSuppression = radioPreferences.isNoiseSuppressionEnabled(),
+                    autoGain = radioPreferences.isMicAutoGainEnabled(),
+                    gainMultiplier = radioPreferences.getMicGainMultiplier(),
+                )
+            }
         },
     )
 
@@ -159,13 +178,50 @@ class RadioAppGraph(val application: Application) {
         onUnauthorized = { _authExpired.tryEmit(Unit) },
     )
 
+    /**
+     * Fetches the agency-wide audio config from the server and persists it so
+     * [pttMicCapture]'s configProvider picks it up on the next PTT key-down.
+     * Skips the call when there's no auth session yet — the endpoint requires an
+     * agency member, so calling it pre-login would just produce a 401 we'd
+     * silently swallow. Real failures (deserialization, server 5xx, persistent
+     * network outages) are logged at warn level so they're visible in production
+     * logcat.
+     */
+    fun refreshAudioConfigAsync() {
+        if (!radioPreferences.isLoggedIn()) {
+            return
+        }
+        bgScope.launch {
+            try {
+                val response = radioApi.audioConfig()
+                val cfg = response.config
+                if (cfg != null) {
+                    radioPreferences.setServerAudioConfig(
+                        agcEnabled = cfg.agcEnabled,
+                        noiseSuppression = cfg.noiseSuppression,
+                        gainMultiplier = cfg.gainMultiplier,
+                    )
+                }
+                // If the server has no config (cfg == null), leave whatever was cached — don't
+                // clear it so the device keeps working if the server is momentarily unreachable.
+            } catch (e: Exception) {
+                Log.w("RadioAppGraph", "Audio config refresh failed: ${e.message}")
+            }
+        }
+    }
+
     fun onAuthSessionChanged() {
         voiceRelay.reconnect()
         customSoundDownloader.refreshAsync()
+        refreshAudioConfigAsync()
     }
 
     fun signOut() {
         radioPreferences.clearAuthSession()
+        // Drop any agency-pushed audio config so a re-login under a different
+        // agency doesn't transmit the previous agency's gain/noise settings on
+        // the first PTT before refreshAudioConfigAsync() completes.
+        radioPreferences.clearServerAudioConfig()
         voiceRelay.disconnect()
         scanVoiceListen.disconnect()
     }
@@ -181,5 +237,7 @@ class RadioAppGraph(val application: Application) {
     init {
         // Pull this agency's custom tones in the background on startup.
         customSoundDownloader.refreshAsync()
+        // Pull the admin-pushed audio config (if any) so the next PTT uses it.
+        refreshAudioConfigAsync()
     }
 }

@@ -2213,3 +2213,52 @@ export async function listKbChunksForAgency(
   );
   return res.rows;
 }
+
+// ---------------------------------------------------------------------------
+// Global audio config — agency-wide setting applied to all RX pipelines
+// ---------------------------------------------------------------------------
+
+export interface GlobalAudioConfigRow {
+  config: unknown;
+  updated_at: string;
+  updated_by_username: string | null;
+}
+
+/**
+ * Returns the stored global audio config for an agency, or null if none has
+ * been pushed yet.
+ */
+export async function getGlobalAudioConfig(agencyId: number): Promise<GlobalAudioConfigRow | null> {
+  const res = await requirePool().query<GlobalAudioConfigRow>(
+    `SELECT config, updated_at, updated_by_username
+       FROM global_audio_config
+      WHERE agency_id = $1;`,
+    [agencyId],
+  );
+  return res.rows[0] ?? null;
+}
+
+/**
+ * Upserts the global audio config for an agency.  `config` is an opaque JSON
+ * object — the shape is validated by the admin UI (AudioLabPanel) before it
+ * reaches here.
+ */
+export async function setGlobalAudioConfig(
+  agencyId: number,
+  config: unknown,
+  userId: number,
+  username: string,
+): Promise<GlobalAudioConfigRow> {
+  const res = await requirePool().query<GlobalAudioConfigRow>(
+    `INSERT INTO global_audio_config (agency_id, config, updated_at, updated_by_user_id, updated_by_username)
+       VALUES ($1, $2::jsonb, now(), $3, $4)
+     ON CONFLICT (agency_id) DO UPDATE
+       SET config = EXCLUDED.config,
+           updated_at = EXCLUDED.updated_at,
+           updated_by_user_id = EXCLUDED.updated_by_user_id,
+           updated_by_username = EXCLUDED.updated_by_username
+     RETURNING config, updated_at, updated_by_username;`,
+    [agencyId, JSON.stringify(config), userId, username],
+  );
+  return res.rows[0]!;
+}

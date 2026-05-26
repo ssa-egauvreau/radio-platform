@@ -13,8 +13,10 @@ import {
 import { LAB_SAMPLE_RATE, MAX_CLIP_SECONDS, startLabRecorder, type LabRecorder } from "./audioLab/recorder";
 import { deleteUserPreset, listPresets, saveUserPreset, type PresetRecord } from "./audioLab/presets";
 import { pushClipToChannel } from "./audioLab/channelPush";
+import { SimpleControls } from "./audioLab/SimpleControls";
 
 type LabState = "idle" | "recording" | "processing" | "playing" | "pushing";
+type ViewMode = "simple" | "advanced";
 
 /** What the live production audio path is doing today. Pulled from the same constants
  *  the relay / voice client use so this stays a single source of truth — bump the values
@@ -117,6 +119,23 @@ export function AudioLabPanel() {
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
 
+  // Simple / advanced view toggle — persisted to localStorage.
+  const [viewMode, setViewMode] = useState<ViewMode>(() => {
+    try {
+      return (localStorage.getItem("audiolab-view-mode") as ViewMode | null) ?? "simple";
+    } catch {
+      return "simple";
+    }
+  });
+
+  // Global apply state.
+  const [globalConfig, setGlobalConfig] = useState<{ updatedAt: string | null; updatedBy: string | null }>({
+    updatedAt: null,
+    updatedBy: null,
+  });
+  const [applyingGlobal, setApplyingGlobal] = useState(false);
+  const [confirmingGlobal, setConfirmingGlobal] = useState(false);
+
   // Channel push state.
   const [channels, setChannels] = useState<UserChannel[]>([]);
   const [pushChannel, setPushChannel] = useState("");
@@ -159,6 +178,26 @@ export function AudioLabPanel() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Load the current global audio config metadata (who last applied, when).
+  useEffect(() => {
+    void api
+      .getGlobalAudioConfig()
+      .then((res) => {
+        setGlobalConfig({ updatedAt: res.updatedAt, updatedBy: res.updatedBy });
+      })
+      .catch(() => undefined);
+  }, []);
+
+  function handleViewModeChange(mode: ViewMode): void {
+    setViewMode(mode);
+    setConfirmingGlobal(false);
+    try {
+      localStorage.setItem("audiolab-view-mode", mode);
+    } catch {
+      /* storage unavailable */
+    }
+  }
 
   // Detect when the live config drifts from the named preset.
   const isDirty = useMemo(() => {
@@ -454,6 +493,30 @@ export function AudioLabPanel() {
     setConfig({ ...config, postDecode: { ...config.postDecode, [key]: value } });
   }
 
+  async function handleApplyGlobally(): Promise<void> {
+    if (!confirmingGlobal) {
+      setConfirmingGlobal(true);
+      return;
+    }
+    setConfirmingGlobal(false);
+    setApplyingGlobal(true);
+    setError_(null);
+    setInfo_(null);
+    try {
+      const res = await api.setGlobalAudioConfig(config);
+      setGlobalConfig({ updatedAt: res.updatedAt, updatedBy: res.updatedBy });
+      setInfo_(
+        "Settings applied globally. Web users pick up the full pipeline; Android handsets " +
+          "apply the boost (AGC + gain) and wind/noise toggles only — EQ, post-decode filters, " +
+          "and upsample mode are listen-only on the web console.",
+      );
+    } catch (err) {
+      setError_(`Could not apply globally: ${describeError(err)}`);
+    } finally {
+      setApplyingGlobal(false);
+    }
+  }
+
   const busy = state === "recording" || state === "processing" || state === "playing" || state === "pushing";
 
   return (
@@ -549,9 +612,57 @@ export function AudioLabPanel() {
         </button>
       </section>
 
+      {/* View mode toggle */}
+      <div className="audio-lab-view-toggle">
+        <button
+          className={"btn sm" + (viewMode === "simple" ? " primary" : "")}
+          onClick={() => handleViewModeChange("simple")}
+        >
+          Simple
+        </button>
+        <button
+          className={"btn sm" + (viewMode === "advanced" ? " primary" : "")}
+          onClick={() => handleViewModeChange("advanced")}
+        >
+          Advanced tuning
+        </button>
+      </div>
+
+      {/* Simple controls */}
+      {viewMode === "simple" && (
+        <SimpleControls config={config} setConfig={setConfig} />
+      )}
+
+      {/* Apply globally button — visible in both views */}
+      <div className="audio-lab-global-apply">
+        <button
+          className={"btn" + (confirmingGlobal ? " danger" : " primary")}
+          onClick={() => void handleApplyGlobally()}
+          disabled={applyingGlobal}
+        >
+          {applyingGlobal
+            ? "Applying…"
+            : confirmingGlobal
+              ? "Are you sure? This affects everyone — click again to confirm"
+              : "Apply live — push to all users & handsets"}
+        </button>
+        {confirmingGlobal && (
+          <button className="btn sm" onClick={() => setConfirmingGlobal(false)}>
+            Cancel
+          </button>
+        )}
+        {globalConfig.updatedAt && (
+          <span className="muted small audio-lab-global-stamp">
+            Last applied {new Date(globalConfig.updatedAt).toLocaleString()}
+            {globalConfig.updatedBy ? ` by ${globalConfig.updatedBy}` : ""}
+          </span>
+        )}
+      </div>
+
       <section className="audio-lab-pipeline">
+        {viewMode === "advanced" && (<>
         <fieldset>
-          <legend>Pre-IMBE conditioning</legend>
+          <legend>Before encoding — clean up the mic signal</legend>
           <Toggle
             label="Wind gate (adaptive)"
             value={config.preImbe.windGateEnabled}
@@ -662,7 +773,7 @@ export function AudioLabPanel() {
         </fieldset>
 
         <fieldset>
-          <legend>Vocoder</legend>
+          <legend>Vocoder (IMBE codec)</legend>
           <Toggle
             label="Bypass IMBE (clean PCM only)"
             value={config.vocoder.bypass}
@@ -672,7 +783,7 @@ export function AudioLabPanel() {
         </fieldset>
 
         <fieldset disabled={config.vocoder.bypass}>
-          <legend>Post-decode shaping</legend>
+          <legend>After decoding — shape the sound for playback</legend>
           <label>
             <span>Upsample mode</span>
             <select
@@ -774,6 +885,7 @@ export function AudioLabPanel() {
             onChange={(v) => updatePost("highShelfDb", v)}
           />
         </fieldset>
+        </>)}
       </section>
 
       <section className="audio-lab-latency">
