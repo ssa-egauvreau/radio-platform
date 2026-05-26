@@ -89,6 +89,75 @@ test("setCachedAuth: a lower token_generation cannot overwrite a fresher entry",
   assert.equal(got.agencyDisabled, false);
 });
 
+test("setCachedAuth: equal token_generation still overwrites (refreshes disabled flags)", () => {
+  // Background poll observed userDisabled=true in Postgres while gen was unchanged;
+  // the cache MUST absorb the new flags or admin-disabled propagation breaks until
+  // the next gen bump (i.e. forever for accounts that are never re-logged-in).
+  // If a future refactor tightens the guard to `>=`, this test catches it.
+  clearAuthCache();
+  setCachedAuth(7, { tokenGeneration: 4, userDisabled: false, agencyDisabled: false });
+  setCachedAuth(7, { tokenGeneration: 4, userDisabled: true, agencyDisabled: true });
+  const got = getCachedAuth(7);
+  assert.ok(got);
+  assert.equal(got.tokenGeneration, 4);
+  assert.equal(got.userDisabled, true, "equal-gen overwrite must propagate userDisabled");
+  assert.equal(got.agencyDisabled, true, "equal-gen overwrite must propagate agencyDisabled");
+});
+
+test("setCachedAuth: a rejected stale write must NOT refresh the entry's TTL", () => {
+  // The whole point of the generation guard is that a slow in-flight request cannot
+  // affect the cache after a fresh login. That includes not silently sliding the
+  // expiry window forward — otherwise the post-login entry would outlive its
+  // intended TTL whenever a stale request happened to arrive late.
+  clearAuthCache();
+  withFakeNow(1_000_000, (advance) => {
+    setCachedAuth(7, { tokenGeneration: 5, userDisabled: false, agencyDisabled: false });
+    advance(10_000); // 10s into the 15s TTL
+    // Stale write at gen=1 — must be a complete no-op.
+    setCachedAuth(7, { tokenGeneration: 1, userDisabled: true, agencyDisabled: true });
+    advance(5_001); // total 15_001ms since original write → original entry expired
+    assert.equal(
+      getCachedAuth(7),
+      null,
+      "stale write must not have extended the original TTL",
+    );
+  });
+});
+
+test("setCachedAuth: equal-gen overwrite refreshes the TTL window", () => {
+  // Mirror of the above — the legitimate refresh path SHOULD slide the expiry
+  // forward, otherwise the cache would prematurely thrash back to Postgres.
+  clearAuthCache();
+  withFakeNow(2_000_000, (advance) => {
+    setCachedAuth(8, { tokenGeneration: 3, userDisabled: false, agencyDisabled: false });
+    advance(10_000);
+    setCachedAuth(8, { tokenGeneration: 3, userDisabled: false, agencyDisabled: false });
+    advance(10_000); // 20s past the original write — but only 10s past the refresh
+    const got = getCachedAuth(8);
+    assert.ok(got, "equal-gen overwrite must reset expiresAt so the entry survives");
+    assert.equal(got.tokenGeneration, 3);
+  });
+});
+
+test("setCachedAuth: an expired higher-gen entry does NOT block a lower-gen write", () => {
+  // After TTL expires the cached entry no longer represents authoritative state,
+  // so the generation guard MUST stop applying — otherwise a user whose
+  // generation appears to "rewind" (e.g. process restart loses bumpTokenGeneration
+  // state in dev without a DB, or a downgrade rollback) would be permanently
+  // uncacheable. The implementation handles this by `cache.delete`-ing the
+  // expired entry before the generation check; this test pins that ordering.
+  clearAuthCache();
+  withFakeNow(3_000_000, (advance) => {
+    setCachedAuth(9, { tokenGeneration: 10, userDisabled: false, agencyDisabled: false });
+    advance(15_001); // past TTL
+    setCachedAuth(9, { tokenGeneration: 1, userDisabled: true, agencyDisabled: false });
+    const got = getCachedAuth(9);
+    assert.ok(got, "expired entry must not protect a lower-gen write from landing");
+    assert.equal(got.tokenGeneration, 1);
+    assert.equal(got.userDisabled, true);
+  });
+});
+
 test("getCachedAuth: an expired entry is evicted (TTL=15s)", () => {
   clearAuthCache();
   withFakeNow(1_000_000, (advance) => {
