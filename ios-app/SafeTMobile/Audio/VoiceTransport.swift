@@ -37,7 +37,10 @@ final class VoiceTransport {
     // Each PTT key-up/key-down pair gets a unique capture session id from
     // VoiceAudio. We only accept frames for the currently armed session so
     // late frames from a prior key-up cannot repopulate `pcmAcc`.
-    private var activeCaptureSessionId: UInt64?
+    // `internal` (default) visibility so `@testable import SafeTMobile` can
+    // assert the gate state directly — the property is read-only outside this
+    // file in practice.
+    var activeCaptureSessionId: UInt64?
 
     private let imbeMagic: [UInt8] = [0xF5, 0xAB]
     private let listenPcmMagic: [UInt8] = [0xF6, 0xAC]
