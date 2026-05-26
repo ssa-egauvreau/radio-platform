@@ -187,6 +187,12 @@ test("normalizeAiDispatchParse: keeps plate_request when only VIN is supplied", 
 });
 
 test("normalizeAiDispatchParse: only documented info_request types are accepted", () => {
+  // `unit_status` was added in commit 2ad66ee for "is X 10-8 / on the air"
+  // queries. If parse drops it as unknown, the LLM's classification falls
+  // through to a generic "negative" or no-reply path and the dispatcher
+  // never answers the question. Lock the full set in so future renames or
+  // accidental deletions show up as test failures rather than as a silent
+  // on-air "we don't answer that" line.
   for (const type of [
     "address",
     "external_address",
@@ -194,6 +200,7 @@ test("normalizeAiDispatchParse: only documented info_request types are accepted"
     "active_calls_for_unit",
     "call_details",
     "unit_location",
+    "unit_status",
     "phone",
     "contact",
     "legal_code",

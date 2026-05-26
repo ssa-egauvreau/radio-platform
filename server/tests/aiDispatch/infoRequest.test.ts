@@ -154,6 +154,7 @@ test("infoRequestNeedsAsync: local / DB-backed types return false (answered sync
     "active_calls_for_unit",
     "call_details",
     "unit_location", // local position store + reverse geocode but treated sync at this layer
+    "unit_status", // local CAD store + position store, no web search
     "unknown",
   ];
   for (const t of no) {
@@ -163,4 +164,17 @@ test("infoRequestNeedsAsync: local / DB-backed types return false (answered sync
       `${t} must NOT be async`,
     );
   }
+});
+
+test('infoRequestNeedsAsync: "unit_status" stays synchronous (don\'t double-speak "standby")', () => {
+  // unit_status was added in commit 2ad66ee. The handler runs only local
+  // queries (listTen8ActiveIncidents + listPositions) — no web search — so
+  // the engine must answer in a single transmission, NOT prepend a standby
+  // ack and then a follow-up. A regression that put unit_status into the
+  // async set would have the AI say "Copy. Standby." every time a unit
+  // asked "is X 10-8" — wasted air time on a fast lookup.
+  assert.equal(
+    infoRequestNeedsAsync({ type: "unit_status", account_code: null, subject: "27-020" }),
+    false,
+  );
 });
