@@ -6,6 +6,7 @@ import { consoleNavFromPath, consoleNavLabel } from "./consoleNav";
 import { ThemeToggle } from "./ThemeToggle";
 import {
   IconAi,
+  IconBarChart,
   IconDashboard,
   IconLogOut,
   IconMobile,
@@ -125,6 +126,12 @@ export function Topbar({
                   to="/console/dashboard"
                 >
                   <IconDashboard size={15} /> Dashboard
+                </Link>
+                <Link
+                  className={navTabClass(section === "console" && consoleNav === "analytics")}
+                  to="/console/analytics"
+                >
+                  <IconBarChart size={15} /> Analytics
                 </Link>
                 <Link
                   className={navTabClass(section === "console" && consoleNav === "ai-activity")}

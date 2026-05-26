@@ -490,6 +490,49 @@ export interface AudioConfigSummaryResponse {
   updatedAt: string | null;
 }
 
+export type AnalyticsRange = "24h" | "7d" | "30d";
+
+export interface AnalyticsSummary {
+  range: AnalyticsRange;
+  transmissions: number;
+  transmissionsPrev: number;
+  activeUnits: number;
+  activeUnitsPrev: number;
+  onAirMs: number;
+  onAirMsPrev: number;
+  alerts: number;
+  alertsPrev: number;
+  aiCalls: number;
+  aiCallsPrev: number;
+  aiEscalated: number;
+}
+
+export interface AnalyticsTimeSeriesPoint {
+  bucket: string;
+  transmissions: number;
+  onAirMs: number;
+  aiCalls: number;
+}
+
+export interface AnalyticsChannelRow {
+  channel: string;
+  transmissions: number;
+  onAirMs: number;
+  uniqueUnits: number;
+}
+
+export interface AnalyticsUnitRow {
+  unitId: string;
+  displayName: string | null;
+  transmissions: number;
+  onAirMs: number;
+}
+
+export interface AnalyticsAiOutcomeRow {
+  outcome: string;
+  count: number;
+}
+
 export interface GlobalAudioConfigPushResponse {
   ok: boolean;
   config: unknown;
@@ -879,6 +922,30 @@ export const api = {
   updateSimulcast: (id: number, patch: { name?: string; channelIds?: number[] }) =>
     request<{ ok: boolean }>("PUT", `/v1/simulcast/${id}`, patch),
   deleteSimulcast: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/simulcast/${id}`),
+
+  /** Analytics: agency-scoped operational aggregations. Any member. */
+  getAnalyticsSummary: (range: AnalyticsRange) =>
+    request<AnalyticsSummary>("GET", `/v1/analytics/summary?range=${range}`),
+  getAnalyticsTimeSeries: (range: AnalyticsRange) =>
+    request<{ range: AnalyticsRange; points: AnalyticsTimeSeriesPoint[] }>(
+      "GET",
+      `/v1/analytics/timeseries?range=${range}`,
+    ),
+  getAnalyticsChannels: (range: AnalyticsRange) =>
+    request<{ range: AnalyticsRange; channels: AnalyticsChannelRow[] }>(
+      "GET",
+      `/v1/analytics/channels?range=${range}`,
+    ),
+  getAnalyticsUnits: (range: AnalyticsRange) =>
+    request<{ range: AnalyticsRange; units: AnalyticsUnitRow[] }>(
+      "GET",
+      `/v1/analytics/units?range=${range}`,
+    ),
+  getAnalyticsAiOutcomes: (range: AnalyticsRange) =>
+    request<{ range: AnalyticsRange; outcomes: AnalyticsAiOutcomeRow[] }>(
+      "GET",
+      `/v1/analytics/ai-dispatch?range=${range}`,
+    ),
 
   /** Any logged-in member: read the device-oriented audio config summary
    *  (what handsets / the voice client need to mirror agency settings). */

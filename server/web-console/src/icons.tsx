@@ -261,6 +261,18 @@ export function IconDashboard(props: IconProps) {
   );
 }
 
+/** Bar-chart — analytics. */
+export function IconBarChart(props: IconProps) {
+  return (
+    <StrokeIcon {...props}>
+      <line x1="4" y1="20" x2="20" y2="20" />
+      <rect x="6" y="11" width="3" height="9" rx="0.5" />
+      <rect x="11" y="6" width="3" height="14" rx="0.5" />
+      <rect x="16" y="14" width="3" height="6" rx="0.5" />
+    </StrokeIcon>
+  );
+}
+
 /** Gear — settings / admin. */
 export function IconSettings(props: IconProps) {
   return (
