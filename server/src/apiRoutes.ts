@@ -133,7 +133,6 @@ import {
   parseAnalyticsRange,
 } from "./analytics.js";
 import { normalizeClientType } from "./clientType.js";
-import { deriveDeviceAudioConfig } from "./audioConfigDevice.js";
 import { deriveDeviceAudioConfig } from "./audioConfig.js";
 import { getPool } from "./db.js";
 import { getCachedAuth, invalidateCachedAuth, setCachedAuth } from "./sessionCache.js";
@@ -2806,21 +2805,14 @@ export function createApiRouter(): Router {
         res.json({ config: null, updatedAt: null });
         return;
       }
-      // Derive a simplified Android-compatible config from the full AudioLabConfig.
-      // The mapping itself lives in `audioConfigDevice.ts` so it can be unit-tested
-      // independently of the route.
-      const full = row.config as {
-        preImbe?: import("./audioConfigDevice.js").PreImbeConfigInput;
-      };
-      res.json({
-        config: deriveDeviceAudioConfig(full?.preImbe),
       // The full AudioLabConfig → device-facing summary mapping lives in
       // `audioConfig.ts` (and is unit-tested in `tests/audioConfig.test.ts`)
       // so a regression in the bypass/AGC/wind-noise derivation can't sneak
-      // through without a test failure.
-      const summary = deriveDeviceAudioConfig(row.config);
+      // through without a test failure. `deriveDeviceAudioConfig` accepts the
+      // full stored config and extracts `.preImbe` internally — do not unwrap
+      // here or you'll double-unwrap and produce an all-defaults summary.
       res.json({
-        config: summary,
+        config: deriveDeviceAudioConfig(row.config),
         updatedAt: row.updated_at,
       });
     } catch (error) {
