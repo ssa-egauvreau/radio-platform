@@ -130,11 +130,14 @@ import {
   getChannelUtilization,
   getTopUnits,
   getAiDispatchOutcomes,
-  isAnalyticsRange,
-  type AnalyticsRange,
+  parseAnalyticsRange,
 } from "./analytics.js";
 import { normalizeClientType } from "./clientType.js";
 import { deriveDeviceAudioConfig } from "./audioConfig.js";
+import {
+  deriveDeviceAudioConfig,
+  type GlobalAudioLabConfigPreImbe,
+} from "./audioConfigDerive.js";
 import { getPool } from "./db.js";
 import { getCachedAuth, invalidateCachedAuth, setCachedAuth } from "./sessionCache.js";
 import {
@@ -2805,6 +2808,13 @@ export function createApiRouter(): Router {
       // through without a test failure.
       res.json({
         config: deriveDeviceAudioConfig(row.config),
+      // Pure transform — see audioConfigDerive.ts for the mapping rules and
+      // the regression notes about bypass / gainMultiplier coupling.
+      const summary = deriveDeviceAudioConfig(
+        row.config as GlobalAudioLabConfigPreImbe,
+      );
+      res.json({
+        config: summary,
         updatedAt: row.updated_at,
       });
     } catch (error) {
@@ -2818,16 +2828,10 @@ export function createApiRouter(): Router {
   // logged-in agency member; aggregations never leak data across tenants.
   // ---------------------------------------------------------------------------
 
-  /** Coerce a free-form query string into a valid AnalyticsRange. Defaults to 7d. */
-  function parseRange(raw: unknown): AnalyticsRange {
-    const v = typeof raw === "string" ? raw.trim().toLowerCase() : "";
-    return isAnalyticsRange(v) ? v : "7d";
-  }
-
   /** GET /v1/analytics/summary?range=24h|7d|30d — KPI tiles with prior-window deltas. */
   router.get("/analytics/summary", requireAgencyMember, async (req, res) => {
     try {
-      const range = parseRange(req.query.range);
+      const range = parseAnalyticsRange(req.query.range);
       const data = await getKpiSummary(req.authUser!.agencyId!, range);
       res.json({ range, ...data });
     } catch (error) {
@@ -2838,7 +2842,7 @@ export function createApiRouter(): Router {
   /** GET /v1/analytics/timeseries?range=… — time-bucketed transmissions + AI counts. */
   router.get("/analytics/timeseries", requireAgencyMember, async (req, res) => {
     try {
-      const range = parseRange(req.query.range);
+      const range = parseAnalyticsRange(req.query.range);
       const points = await getTimeSeries(req.authUser!.agencyId!, range);
       res.json({ range, points });
     } catch (error) {
@@ -2849,7 +2853,7 @@ export function createApiRouter(): Router {
   /** GET /v1/analytics/channels?range=… — per-channel utilization (top 25). */
   router.get("/analytics/channels", requireAgencyMember, async (req, res) => {
     try {
-      const range = parseRange(req.query.range);
+      const range = parseAnalyticsRange(req.query.range);
       const rows = await getChannelUtilization(req.authUser!.agencyId!, range);
       res.json({ range, channels: rows });
     } catch (error) {
@@ -2860,7 +2864,7 @@ export function createApiRouter(): Router {
   /** GET /v1/analytics/units?range=… — top units by on-air time. */
   router.get("/analytics/units", requireAgencyMember, async (req, res) => {
     try {
-      const range = parseRange(req.query.range);
+      const range = parseAnalyticsRange(req.query.range);
       const rows = await getTopUnits(req.authUser!.agencyId!, range);
       res.json({ range, units: rows });
     } catch (error) {
@@ -2871,7 +2875,7 @@ export function createApiRouter(): Router {
   /** GET /v1/analytics/ai-dispatch?range=… — outcome breakdown for AI dispatcher calls. */
   router.get("/analytics/ai-dispatch", requireAgencyMember, async (req, res) => {
     try {
-      const range = parseRange(req.query.range);
+      const range = parseAnalyticsRange(req.query.range);
       const rows = await getAiDispatchOutcomes(req.authUser!.agencyId!, range);
       res.json({ range, outcomes: rows });
     } catch (error) {
