@@ -194,6 +194,7 @@ test("normalizeAiDispatchParse: only documented info_request types are accepted"
     "active_calls_for_unit",
     "call_details",
     "unit_location",
+    "unit_status",
     "phone",
     "contact",
     "legal_code",
