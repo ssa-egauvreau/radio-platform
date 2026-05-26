@@ -6,7 +6,7 @@ final class ImbeTxConditioner {
     private let hpf: Biquad
     private let lpf: Biquad
     private var env = 0.0
-    private var floor = Self.floorMin
+    private var floor = ImbeTxConditioner.floorMin
     private var gateGain = 0.0
     private var agcGain = 1.0
     private var agcTarget = 1.0
