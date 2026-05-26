@@ -3,11 +3,10 @@ import { api, ApiError, type ChannelMember } from "../api";
 import { useAuth } from "../auth";
 import { useUnitAliasResolver } from "../unitAliases";
 import { IconCar, IconClose, IconMobile, IconRadio, IconRecord } from "../icons";
-
-/** Names produced by the emergency-channel endpoint always start with EMERGENCY. */
-function isEmergencyChannelName(name: string): boolean {
-  return /^emergency(\b|$)/i.test(name.trim());
-}
+import {
+  decideEmergencyDelete,
+  isEmergencyChannelName,
+} from "../lib/emergencyChannel";
 
 function unitDeviceIcon(deviceType: string | null | undefined) {
   if (deviceType === "unit_radio") {
@@ -204,28 +203,27 @@ export function LiveControlPanel() {
   }
 
   async function deleteEmergencyChannel(channelName: string) {
-    const latest = await refreshChannels();
-    if (!latest) {
+    const decision = decideEmergencyDelete(channelName, await refreshChannels());
+    if (decision.kind === "refresh_failed") {
       setError("Could not verify channel list. Please try again.");
       return;
     }
-    const channel = latest.find((c) => c.name === channelName);
-    if (!channel) {
-      setError(`Channel "${channelName}" was renamed or already removed.`);
+    if (decision.kind === "channel_missing") {
+      setError(`Channel "${decision.name}" was renamed or already removed.`);
       return;
     }
-    if (!isEmergencyChannelName(channel.name)) {
-      setError(`"${channel.name}" is not currently an emergency channel.`);
+    if (decision.kind === "not_emergency") {
+      setError(`"${decision.name}" is not currently an emergency channel.`);
       return;
     }
-    if (!window.confirm(`Delete emergency channel "${channel.name}"? This cannot be undone.`)) {
+    if (!window.confirm(`Delete emergency channel "${decision.name}"? This cannot be undone.`)) {
       return;
     }
     setStatus(null);
     setError(null);
     try {
-      await api.deleteChannel(channel.id);
-      setStatus(`Deleted emergency channel "${channel.name}".`);
+      await api.deleteChannel(decision.id);
+      setStatus(`Deleted emergency channel "${decision.name}".`);
       await refreshChannels();
       const fresh = await api.channelRosters();
       setRosters(fresh.channels);
