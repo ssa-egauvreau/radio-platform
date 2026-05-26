@@ -13,7 +13,26 @@ export type Ten8MapIncident = {
   lon: number;
 };
 
-function callLabel(incidentType: string | null, callId: string): string {
+/**
+ * Render a short, dispatcher-readable label for a 10-8 map pin from the CAD
+ * `incident_type` string.
+ *
+ * The convention CAD vendors use is `"<short> - <long description>"`; the
+ * short prefix is what dispatchers expect to see on the pin (e.g. "961"
+ * rather than "961 - SUSPICIOUS VEHICLE - 23:14 CHP"). Three Unicode dash
+ * variants are accepted (hyphen-minus, en-dash, em-dash) because we receive
+ * payloads from multiple CADs.
+ *
+ * Fallback chain:
+ *   1. Text before the first `" - " | " – " | " — "` separator.
+ *   2. The whole `incident_type`, truncated at 40 chars with an ellipsis so
+ *      a long type can't blow out the map pin layout.
+ *   3. The raw `call_id` when no incident type is present at all.
+ *
+ * @internal Exported for unit tests; production code should call
+ *           {@link listTen8MapIncidents}.
+ */
+export function callLabel(incidentType: string | null, callId: string): string {
   const t = (incidentType ?? "").trim();
   const sep = t.match(/^(.+?)\s+[-–—]\s+/);
   if (sep?.[1]) {
@@ -25,7 +44,32 @@ function callLabel(incidentType: string | null, callId: string): string {
   return callId;
 }
 
-function coordsFromPayload(payload: unknown): { lat: number; lon: number } | null {
+/**
+ * Pull a `{lat, lon}` pair out of a raw CAD payload, tolerating multiple
+ * field-name conventions and a top-level vs. `.incident`-nested layout.
+ *
+ * Recognised field pairs (in priority order):
+ *
+ *  - `latitude`  / `longitude`
+ *  - `lat`       / `lng`
+ *  - `lat`       / `lon`
+ *  - `Latitude`  / `Longitude` (legacy PascalCase exports)
+ *  - `locationLat` / `locationLng`
+ *  - `location_lat` / `location_lng`
+ *
+ * Returns `null` when:
+ *  - the payload isn't an object,
+ *  - none of the field pairs are numeric / finite,
+ *  - or any pair is out of geographic bounds (|lat| > 90 or |lon| > 180).
+ *
+ * The bounds check is the SECURITY-RELEVANT guard: a malformed payload that
+ * leaked `lat = -999999` would otherwise push a pin to an invalid Mercator
+ * coordinate and crash the front-end map.
+ *
+ * @internal Exported for unit tests; production code should call
+ *           {@link listTen8MapIncidents}.
+ */
+export function coordsFromPayload(payload: unknown): { lat: number; lon: number } | null {
   if (!payload || typeof payload !== "object") {
     return null;
   }
