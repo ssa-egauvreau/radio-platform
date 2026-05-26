@@ -401,13 +401,6 @@ function countsAsDispatchConsoleSession(record: MoveLockRosterRecord): boolean {
 }
 
 /**
- * How many distinct voice channels each unit is currently dispatching on
- * (live control). A user's handset/phone channel should not count against this;
- * only console-style sessions do.
- */
-export function unitChannelCountsFromRecords(
-  agencyId: number,
-  records: Iterable<MoveLockRosterRecord>,
  * Subset of a {@link RosterRecord} that {@link computeUnitChannelCounts} cares
  * about. Broken out so the counting rule can be exercised in unit tests
  * without spinning up a WebSocket server to seed the live roster.
@@ -424,7 +417,9 @@ export interface UnitChannelCountRecord {
  * Pure helper backing {@link unitChannelCounts}. Counts distinct voice
  * channels each unit is currently dispatching on for the given agency.
  *
- * Only `account`-kind sessions with `device_type === "dispatch_console"`
+ * Only `account`-kind sessions that look like a dispatch console
+ * (`device_type === "dispatch_console"`, or a web/desktop client whose
+ * device_type lookup has not landed yet — see {@link countsAsDispatchConsoleSession})
  * count — a user who just has a handset/phone on one channel and the
  * dashboard open on another must still be drag-droppable. Multi-channel
  * scanning is a dispatch-console signal, not a "this person is everywhere"
@@ -440,7 +435,7 @@ export function computeUnitChannelCounts(
     if (!record.channelKey.startsWith(prefix)) {
       continue;
     }
-    if (!countsAsDispatchConsoleSession(record)) {
+    if (!countsAsDispatchConsoleSession(record as MoveLockRosterRecord)) {
       continue;
     }
     const unit = record.unitId.toUpperCase();
@@ -455,8 +450,18 @@ export function computeUnitChannelCounts(
   return counts;
 }
 
-export function unitChannelCounts(agencyId: number): Map<string, number> {
-  return unitChannelCountsFromRecords(agencyId, voiceRoster.values());
+/**
+ * Alternate-shape adapter used by callers that pass `(agencyId, records)`
+ * (e.g. the move-lock regression tests, the WebSocket dispatch site). Pure
+ * delegate to {@link computeUnitChannelCounts}.
+ */
+export function unitChannelCountsFromRecords(
+  agencyId: number,
+  records: Iterable<MoveLockRosterRecord>,
+): Map<string, number> {
+  return computeUnitChannelCounts(records as Iterable<UnitChannelCountRecord>, agencyId);
+}
+
 /**
  * How many distinct voice channels each unit is currently dispatching on
  * (live control). Only dispatch_console sessions count here — a user who just
