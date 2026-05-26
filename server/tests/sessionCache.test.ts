@@ -34,39 +34,21 @@
  *      the original (older) expiry. A fresh login must therefore start
  *      a new TTL window, not inherit a few hundred ms left over from
  *      the previous session.
+ *   7. A *lower* tokenGeneration never overwrites a fresher entry —
+ *      this is the race fix from PR #146: an in-flight request that
+ *      read `generation=1` from Postgres must not be able to clobber
+ *      the post-login `generation=2` snapshot the login route seeded.
+ *   8. `invalidateCachedAuth` immediately forces the next read to miss
+ *      even mid-TTL — the load-bearing semantic for the "newest
+ *      sign-in wins" supersede behaviour.
  *
- * Time is driven by `node:test`'s mock timers so the 15 s TTL boundary
- * is asserted deterministically — no `await new Promise(setTimeout, ...)`
- * sleeps that would make CI flaky or slow.
+ * Time is driven by `node:test`'s mock timers (or a tiny `withFakeNow`
+ * helper for the simpler cases) so the 15 s TTL boundary is asserted
+ * deterministically — no `await new Promise(setTimeout, ...)` sleeps
+ * that would make CI flaky or slow.
  */
 
 import { test, type TestContext } from "node:test";
- * Tests for `server/src/sessionCache.ts`.
- *
- * The session cache short-circuits the per-request "is this user / agency
- * still active?" Postgres lookup on every authenticated API call (Android
- * handsets poll AIR every 250 ms — without the cache this is the hottest
- * path in the database).
- *
- * Two correctness properties matter:
- *
- *  1. **Forced revocation must not be deferred by the TTL.**
- *     `invalidateCachedAuth` is called after a fresh login bumps
- *     token_generation so the OLD device's next request hits Postgres and
- *     gets superseded immediately, rather than continuing to authenticate
- *     under a stale (still-true) cache entry for up to TTL_MS.
- *
- *  2. **Expired entries don't stay readable.**
- *     The cache must not return an entry once its `expiresAt` is past,
- *     otherwise an admin disabling an agency would have no upper bound on
- *     when handsets actually lose access.
- *
- * `clearAuthCache` is the test-isolation handle the rest of the project
- * uses; we exercise it too so any future regression that drops the export
- * (or that mutates other state) is caught here.
- */
-
-import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
@@ -87,6 +69,15 @@ function payload(tokenGeneration: number): {
     userDisabled: false,
     agencyDisabled: false,
   };
+}
+
+/**
+ * Run `fn` with `Date.now()` pinned to `start`, returning to the real clock
+ * even if `fn` throws. The `advance(ms)` callback bumps the fake clock so a
+ * test can step over the 15s TTL boundary deterministically. Used by the
+ * simpler TTL-eviction cases; the longer multi-step cases use node:test's
+ * built-in mock timers instead.
+ */
 function withFakeNow<T>(start: number, fn: (advance: (ms: number) => void) => T): T {
   const realNow = Date.now;
   let now = start;
@@ -226,21 +217,10 @@ test("clearAuthCache evicts every cached user", () => {
   setCachedAuth(1, payload(1));
   setCachedAuth(2, payload(2));
   setCachedAuth(3, payload(3));
-  assert.equal(getCachedAuth(123), null);
-});
-
-test("setCachedAuth + getCachedAuth: round-trip carries the same auth state", () => {
   clearAuthCache();
-  setCachedAuth(42, {
-    tokenGeneration: 7,
-    userDisabled: false,
-    agencyDisabled: false,
-  });
-  const got = getCachedAuth(42);
-  assert.ok(got, "value just set should be readable");
-  assert.equal(got.tokenGeneration, 7);
-  assert.equal(got.userDisabled, false);
-  assert.equal(got.agencyDisabled, false);
+  assert.equal(getCachedAuth(1), null);
+  assert.equal(getCachedAuth(2), null);
+  assert.equal(getCachedAuth(3), null);
 });
 
 test("setCachedAuth: overwrites a prior entry for the same userId (last write wins)", () => {
@@ -254,8 +234,12 @@ test("setCachedAuth: overwrites a prior entry for the same userId (last write wi
 });
 
 test("setCachedAuth: a lower token_generation cannot overwrite a fresher entry", () => {
-  // Reproduces the login race: request A read generation=1, login bumps to 2,
-  // then request A tries to write its stale auth snapshot into the cache.
+  // Reproduces the login race fix from PR #146: request A read
+  // generation=1, login bumped to 2 and seeded the cache, then request A
+  // tries to write its stale auth snapshot into the cache. The stale write
+  // must be silently dropped — otherwise the OLD device would continue
+  // authenticating against a "still-valid generation=1" cache entry for up
+  // to TTL after the new device logged in.
   clearAuthCache();
   setCachedAuth(7, { tokenGeneration: 2, userDisabled: false, agencyDisabled: false });
   setCachedAuth(7, { tokenGeneration: 1, userDisabled: true, agencyDisabled: true });
@@ -264,6 +248,51 @@ test("setCachedAuth: a lower token_generation cannot overwrite a fresher entry",
   assert.equal(got.tokenGeneration, 2, "stale generation must not replace a newer login generation");
   assert.equal(got.userDisabled, false);
   assert.equal(got.agencyDisabled, false);
+});
+
+test("setCachedAuth: an equal token_generation MAY overwrite (refresh in place)", () => {
+  // Same-generation writes are how a request that already has the current
+  // generation refreshes the disabled flags after a Postgres re-read.
+  // They must NOT be dropped (only strictly-lower writes are dropped).
+  clearAuthCache();
+  setCachedAuth(8, { tokenGeneration: 5, userDisabled: false, agencyDisabled: false });
+  setCachedAuth(8, { tokenGeneration: 5, userDisabled: true, agencyDisabled: false });
+  const got = getCachedAuth(8);
+  assert.ok(got);
+  assert.equal(got.tokenGeneration, 5);
+  assert.equal(got.userDisabled, true, "same-generation write must refresh the disabled flags");
+});
+
+test("setCachedAuth: a strictly higher token_generation always wins, even mid-TTL", (t: TestContext) => {
+  // The normal "user just logged in on a new device" path. The route
+  // explicitly seeds the cache with the bumped generation right after
+  // invalidating; that fresher write must take effect immediately even
+  // though the prior entry was still well within its TTL window.
+  clearAuthCache();
+  t.mock.timers.enable({ apis: ["Date"] });
+  setCachedAuth(9, { tokenGeneration: 3, userDisabled: false, agencyDisabled: false });
+  t.mock.timers.tick(1_000); // 1 s in
+  setCachedAuth(9, { tokenGeneration: 4, userDisabled: false, agencyDisabled: false });
+  const got = getCachedAuth(9);
+  assert.ok(got);
+  assert.equal(got.tokenGeneration, 4);
+});
+
+test("setCachedAuth: a stale write past TTL replaces the entry rather than no-ops", (t: TestContext) => {
+  // The "stale write" guard must only fire while the existing entry is
+  // still live. If the previous entry has already expired the stale-write
+  // guard would otherwise lock out future writes — concretely, an
+  // in-flight request that read generation=2 from Postgres at t=0 could
+  // arrive at t=20s, by which point the cache has long since expired.
+  // That write must succeed and seed the entry.
+  clearAuthCache();
+  t.mock.timers.enable({ apis: ["Date"] });
+  setCachedAuth(10, { tokenGeneration: 9, userDisabled: false, agencyDisabled: false });
+  t.mock.timers.tick(20_000); // well past TTL
+  setCachedAuth(10, { tokenGeneration: 8, userDisabled: false, agencyDisabled: false });
+  const got = getCachedAuth(10);
+  assert.ok(got, "past-TTL writes must always seed a new entry, even with a lower generation");
+  assert.equal(got.tokenGeneration, 8);
 });
 
 test("getCachedAuth: an expired entry is evicted (TTL=15s)", () => {
