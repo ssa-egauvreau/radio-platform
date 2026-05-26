@@ -162,6 +162,16 @@ final class RadioViewModel: ObservableObject {
         voiceTransport.onReceivingChange = { [weak self] receiving in
             self?.uiState.isReceivingAudio = receiving
         }
+        voiceTransport.onBusy = { [weak self] holder in
+            guard let self, self.uiState.isPttPressed else { return }
+            let peer = holder?.uppercased()
+            if peer == nil || peer != self.unitId {
+                let msg = peer.map { "CHANNEL BUSY — \($0)" } ?? "CHANNEL BUSY"
+                self.enterBusy(msg)
+                self.voiceAudio.stopCapture()
+                self.uiState.isTransmitting = false
+            }
+        }
     }
 
     private func startVoiceIfNeeded() async {
@@ -212,7 +222,7 @@ final class RadioViewModel: ObservableObject {
             // overlaps the first ~250 ms of mic capture; that's how Android does
             // it too, and the listener side hasn't started decoding yet anyway.
             sounds.play(.pttPermit)
-            uiState.statusMessage = "ON AIR"
+            uiState.statusMessage = P25ImbeNative.isAvailable ? "ON AIR · IMBE" : "ON AIR · CLEAR PCM"
             uiState.isTransmitting = true
             voiceAudio.startCapture()
         } catch {
@@ -241,6 +251,7 @@ final class RadioViewModel: ObservableObject {
         sounds.stop(.busy)
         if uiState.isTransmitting {
             voiceAudio.stopCapture()
+            voiceTransport.resetUplinkState()
             uiState.isTransmitting = false
         }
         uiState.statusMessage = "RX IDLE"
