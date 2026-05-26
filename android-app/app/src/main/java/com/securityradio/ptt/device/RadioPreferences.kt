@@ -165,7 +165,7 @@ class RadioPreferences(context: Context) {
         agcEnabled: Boolean,
         noiseSuppression: Boolean,
         gainMultiplier: Float,
-        bypassMicProcessing: Boolean = false,
+        bypassMicProcessing: Boolean,
     ) {
         prefs.edit()
             .putBoolean(KEY_SERVER_AGC_ENABLED, agcEnabled)

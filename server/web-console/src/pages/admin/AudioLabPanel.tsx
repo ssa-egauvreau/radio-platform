@@ -128,10 +128,19 @@ export function AudioLabPanel() {
     }
   });
 
-  // Global apply state.
-  const [globalConfig, setGlobalConfig] = useState<{ updatedAt: string | null; updatedBy: string | null }>({
+  // Global apply state. `liveBypassMicProcessing` mirrors the bypass flag of
+  // the currently-deployed agency config so "Play with live server settings"
+  // honors it — without that, an admin who pushed Bridge-style minimal sees
+  // the production-path A/B run the full expander/AGC chain, which doesn't
+  // match what handsets are actually doing.
+  const [globalConfig, setGlobalConfig] = useState<{
+    updatedAt: string | null;
+    updatedBy: string | null;
+    liveBypassMicProcessing: boolean;
+  }>({
     updatedAt: null,
     updatedBy: null,
+    liveBypassMicProcessing: false,
   });
   const [applyingGlobal, setApplyingGlobal] = useState(false);
   const [confirmingGlobal, setConfirmingGlobal] = useState(false);
@@ -184,7 +193,12 @@ export function AudioLabPanel() {
     void api
       .getGlobalAudioConfig()
       .then((res) => {
-        setGlobalConfig({ updatedAt: res.updatedAt, updatedBy: res.updatedBy });
+        const cfg = res.config as { preImbe?: { bypassMicProcessing?: boolean } } | null;
+        setGlobalConfig({
+          updatedAt: res.updatedAt,
+          updatedBy: res.updatedBy,
+          liveBypassMicProcessing: Boolean(cfg?.preImbe?.bypassMicProcessing ?? false),
+        });
       })
       .catch(() => undefined);
   }, []);
@@ -333,7 +347,7 @@ export function AudioLabPanel() {
     setState("processing");
     let processed: Int16Array;
     try {
-      processed = await processClipProduction(recordedClip);
+      processed = await processClipProduction(recordedClip, globalConfig.liveBypassMicProcessing);
     } catch (err) {
       setError_(describeError(err));
       setState("idle");
@@ -504,7 +518,11 @@ export function AudioLabPanel() {
     setInfo_(null);
     try {
       const res = await api.setGlobalAudioConfig(config);
-      setGlobalConfig({ updatedAt: res.updatedAt, updatedBy: res.updatedBy });
+      setGlobalConfig({
+        updatedAt: res.updatedAt,
+        updatedBy: res.updatedBy,
+        liveBypassMicProcessing: Boolean(config.preImbe.bypassMicProcessing ?? false),
+      });
       setInfo_(
         "Settings applied globally. Web users pick up the full pipeline; Android handsets " +
           "apply the boost (AGC + gain) and wind/noise toggles only — EQ, post-decode filters, " +

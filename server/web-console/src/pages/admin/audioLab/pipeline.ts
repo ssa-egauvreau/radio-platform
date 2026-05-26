@@ -542,8 +542,15 @@ export async function processClip(input: Int16Array, cfg: AudioLabConfig): Promi
 /** Runs a recorded clip through the EXACT production audio path — the real
  *  ImbeTxConditioner (adaptive AGC / gate / soft-limit), real IMBE encode/decode, and
  *  the live sample-duplicate upsample with no post-decode shaping. Use this for an
- *  honest A/B against any custom AudioLabConfig the user is trying. */
-export async function processClipProduction(input: Int16Array): Promise<Int16Array> {
+ *  honest A/B against any custom AudioLabConfig the user is trying.
+ *
+ *  `bypassMicProcessing` should reflect what the live agency setting currently
+ *  is on the server — when true, handsets skip the expander/AGC, and this
+ *  preview path does the same so the A/B stays honest. */
+export async function processClipProduction(
+  input: Int16Array,
+  bypassMicProcessing = false,
+): Promise<Int16Array> {
   if (!imbeReady()) {
     const ok = await initImbe();
     if (!ok) {
@@ -556,7 +563,7 @@ export async function processClipProduction(input: Int16Array): Promise<Int16Arr
   const cond = new ImbeTxConditioner();
   for (let off = 0; off < conditioned.length; off += PRODUCTION_FRAME_16K) {
     const end = Math.min(off + PRODUCTION_FRAME_16K, conditioned.length);
-    cond.process(conditioned.subarray(off, end));
+    cond.process(conditioned.subarray(off, end), bypassMicProcessing);
   }
 
   // Stage 2: 16 → 8 kHz, IMBE encode + decode.
