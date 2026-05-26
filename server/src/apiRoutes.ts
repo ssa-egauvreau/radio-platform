@@ -134,6 +134,7 @@ import {
   type AnalyticsRange,
 } from "./analytics.js";
 import { normalizeClientType } from "./clientType.js";
+import { deriveDeviceAudioConfig } from "./audioConfig.js";
 import { getPool } from "./db.js";
 import { getCachedAuth, invalidateCachedAuth, setCachedAuth } from "./sessionCache.js";
 import {
@@ -2798,42 +2799,12 @@ export function createApiRouter(): Router {
         res.json({ config: null, updatedAt: null });
         return;
       }
-      // Derive a simplified Android-compatible config from the full AudioLabConfig.
-      const full = row.config as {
-        preImbe?: {
-          agcEnabled?: boolean;
-          agcMaxGain?: number;
-          windGateEnabled?: boolean;
-          windHpfEnabled?: boolean;
-          bypassMicProcessing?: boolean;
-        };
-      };
-      const agcEnabled = Boolean(full.preImbe?.agcEnabled ?? false);
-      const agcMaxGain = Number(full.preImbe?.agcMaxGain ?? 6);
-      const bypassMicProcessing = Boolean(full.preImbe?.bypassMicProcessing ?? false);
-      // Wind reduction is "on" on Android if EITHER the adaptive gate OR the
-      // steep HPF is enabled — both contribute to noise rejection upstream of
-      // IMBE, and Android only exposes a single NoiseSuppressor toggle.
-      const windReduce =
-        Boolean(full.preImbe?.windGateEnabled ?? false) ||
-        Boolean(full.preImbe?.windHpfEnabled ?? false);
-      // Map agcMaxGain (1–12) → gainMultiplier (1.0–3.0). The range starts at
-      // 1.0 so the lowest simple-UI preset ("A little", agcMaxGain=4) still
-      // delivers an audible boost — a linear (gain/12)*3 map collapses to 1.0×
-      // at gain=4, making the preset indistinguishable from "off" on device.
-      // When bypass is on, also force gainMultiplier=1.0: the whole point of
-      // "Bridge-style minimal" is no post-capture gain, so even a stale
-      // agcEnabled=true from a previous preset shouldn't sneak gain in.
-      const gainMultiplier = agcEnabled && !bypassMicProcessing
-        ? Math.max(1.0, Math.min(3.0, 1.0 + (agcMaxGain / 12.0) * 2.0))
-        : 1.0;
+      // The full AudioLabConfig → device-facing summary mapping lives in
+      // `audioConfig.ts` (and is unit-tested in `tests/audioConfig.test.ts`)
+      // so a regression in the bypass/AGC/wind-noise derivation can't sneak
+      // through without a test failure.
       res.json({
-        config: {
-          agcEnabled,
-          noiseSuppression: windReduce,
-          gainMultiplier: Math.round(gainMultiplier * 100) / 100,
-          bypassMicProcessing,
-        },
+        config: deriveDeviceAudioConfig(row.config),
         updatedAt: row.updated_at,
       });
     } catch (error) {
