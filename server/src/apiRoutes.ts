@@ -133,6 +133,8 @@ import {
   parseAnalyticsRange,
 } from "./analytics.js";
 import { normalizeClientType } from "./clientType.js";
+import { deriveDeviceAudioConfig } from "./audioConfigDevice.js";
+import { deriveDeviceAudioConfig } from "./audioConfig.js";
 import {
   deriveDeviceAudioConfig,
   type GlobalAudioLabConfigPreImbe,
@@ -2801,6 +2803,20 @@ export function createApiRouter(): Router {
         res.json({ config: null, updatedAt: null });
         return;
       }
+      // Derive a simplified Android-compatible config from the full AudioLabConfig.
+      // The mapping itself lives in `audioConfigDevice.ts` so it can be unit-tested
+      // independently of the route.
+      const full = row.config as {
+        preImbe?: import("./audioConfigDevice.js").PreImbeConfigInput;
+      };
+      res.json({
+        config: deriveDeviceAudioConfig(full?.preImbe),
+      // The full AudioLabConfig → device-facing summary mapping lives in
+      // `audioConfig.ts` (and is unit-tested in `tests/audioConfig.test.ts`)
+      // so a regression in the bypass/AGC/wind-noise derivation can't sneak
+      // through without a test failure.
+      res.json({
+        config: deriveDeviceAudioConfig(row.config),
       // Pure transform — see audioConfigDerive.ts for the mapping rules and
       // the regression notes about bypass / gainMultiplier coupling.
       const summary = deriveDeviceAudioConfig(
