@@ -227,6 +227,128 @@ describe("unitChannelCounts", () => {
     assert.equal(counts.get("DISP1"), 2);
     assert.equal(counts.get("disp1"), undefined);
   });
+
+  // --- The PR #151 + dd76ac9 follow-up: web/desktop client + null deviceType
+  //
+  // A console session that joins before its `users.device_type` has been
+  // resolved (or for an older account row that never had one) shows up in
+  // the live roster with `deviceType=null` and `client="web"` / `"desktop"`.
+  // The live-control move-lock contract says these still count as
+  // dispatch-console sessions for the multi-channel rule — otherwise a
+  // dispatcher scanning two channels from the web/desktop console would
+  // silently get drag-droppable, defeating the lock entirely.
+  //
+  // These tests exercise the production reader (`unitChannelCounts(agencyId)`,
+  // which iterates `voiceRoster.values()`) so the behavior is pinned end-to-
+  // end, not just in the records-iterable test alias used by the unit tests.
+
+  test("counts a multi-channel web account session even when deviceType is null", () => {
+    __setVoiceRosterRecordForTest({
+      agencyId: AGENCY,
+      channelName: "Green 1",
+      unitId: "DISP1",
+      kind: "account",
+      client: "web",
+      deviceType: null,
+    });
+    __setVoiceRosterRecordForTest({
+      agencyId: AGENCY,
+      channelName: "Green 2",
+      unitId: "DISP1",
+      kind: "account",
+      client: "web",
+      deviceType: null,
+    });
+    assert.equal(unitChannelCounts(AGENCY).get("DISP1"), 2);
+  });
+
+  test("counts a multi-channel desktop account session even when deviceType is null", () => {
+    // The Electron desktop console authenticates with a user JWT and reports
+    // client="desktop" (see KNOWN_CLIENTS). Same fallback rule as web.
+    __setVoiceRosterRecordForTest({
+      agencyId: AGENCY,
+      channelName: "Green 1",
+      unitId: "DISP1",
+      kind: "account",
+      client: "desktop",
+      deviceType: null,
+    });
+    __setVoiceRosterRecordForTest({
+      agencyId: AGENCY,
+      channelName: "Green 2",
+      unitId: "DISP1",
+      kind: "account",
+      client: "desktop",
+      deviceType: null,
+    });
+    assert.equal(unitChannelCounts(AGENCY).get("DISP1"), 2);
+  });
+
+  test("does NOT count an iOS/Android account on multiple channels with null deviceType", () => {
+    // Mobile clients are not consoles — the null-deviceType fallback must
+    // be web/desktop only, otherwise every iOS user with the dispatch
+    // dashboard tab and the iOS app on the same account would be locked.
+    __setVoiceRosterRecordForTest({
+      agencyId: AGENCY,
+      channelName: "Green 1",
+      unitId: "USER42",
+      kind: "account",
+      client: "ios",
+      deviceType: null,
+    });
+    __setVoiceRosterRecordForTest({
+      agencyId: AGENCY,
+      channelName: "Green 2",
+      unitId: "USER42",
+      kind: "account",
+      client: "android",
+      deviceType: null,
+    });
+    const counts = unitChannelCounts(AGENCY);
+    assert.equal(counts.size, 0, "ios/android account fallback must NOT count as console");
+  });
+
+  test("a legacy/bridge socket with client=web is still skipped (kind filter wins)", () => {
+    // The relay always reports kind="legacy" for radio-key sockets and
+    // kind="bridge" for the in-process bridge worker. A defense-in-depth
+    // check: even if some odd path managed to set client="web" on one of
+    // them, the kind filter at the top of `countsAsDispatchConsoleSession`
+    // must reject it — otherwise a bridge run from a desktop console could
+    // appear as a multi-channel dispatcher and lock its associated unit.
+    __setVoiceRosterRecordForTest({
+      agencyId: AGENCY,
+      channelName: "Green 1",
+      unitId: "BR1",
+      kind: "legacy",
+      client: "web",
+      deviceType: null,
+    });
+    __setVoiceRosterRecordForTest({
+      agencyId: AGENCY,
+      channelName: "Green 2",
+      unitId: "BR1",
+      kind: "bridge",
+      client: "desktop",
+      deviceType: null,
+    });
+    assert.equal(unitChannelCounts(AGENCY).size, 0);
+  });
+
+  test("a single web/desktop session is counted as 1 (not 0) so single-channel dispatchers don't disappear", () => {
+    // Sanity: the rule that lets multi-channel web sessions count must also
+    // produce a non-empty entry for a single-channel one — otherwise the
+    // /v1/admin/live-control roster would silently drop the session from
+    // the count map, masking the dispatcher's own activity from itself.
+    __setVoiceRosterRecordForTest({
+      agencyId: AGENCY,
+      channelName: "Green 1",
+      unitId: "DISP1",
+      kind: "account",
+      client: "web",
+      deviceType: null,
+    });
+    assert.equal(unitChannelCounts(AGENCY).get("DISP1"), 1);
+  });
 });
 
 describe("withRosterMoveLock", () => {
@@ -366,5 +488,70 @@ describe("isUnitMoveLocked", () => {
     });
     assert.equal(isUnitMoveLocked(AGENCY, "DISP1"), false);
     assert.equal(isUnitMoveLocked(OTHER_AGENCY, "DISP1"), true);
+  });
+
+  test("locks a web account on multiple channels with null deviceType (PR #151 fallback)", () => {
+    // When a console authenticates before its `users.device_type` row is
+    // resolved, the roster entry has client="web" / deviceType=null. The
+    // multi-channel rule must still fire — otherwise this exact race would
+    // briefly let a dispatcher be drag-dropped during their first second on
+    // the console, which is when the cache miss is most likely.
+    __setVoiceRosterRecordForTest({
+      agencyId: AGENCY,
+      channelName: "Green 1",
+      unitId: "DISP1",
+      kind: "account",
+      client: "web",
+      deviceType: null,
+    });
+    __setVoiceRosterRecordForTest({
+      agencyId: AGENCY,
+      channelName: "Green 2",
+      unitId: "DISP1",
+      kind: "account",
+      client: "web",
+      deviceType: null,
+    });
+    assert.equal(isUnitMoveLocked(AGENCY, "DISP1"), true);
+  });
+
+  test("does NOT lock a single-channel web account with null deviceType", () => {
+    // The web/desktop fallback only contributes to the multi-channel count
+    // — a one-channel dispatcher must remain movable, otherwise every fresh
+    // login would get locked the moment they joined any channel.
+    __setVoiceRosterRecordForTest({
+      agencyId: AGENCY,
+      channelName: "Green 1",
+      unitId: "DISP1",
+      kind: "account",
+      client: "web",
+      deviceType: null,
+    });
+    assert.equal(isUnitMoveLocked(AGENCY, "DISP1"), false);
+  });
+
+  test("does NOT lock a multi-channel iOS/Android account with null deviceType", () => {
+    // Symmetric guard for the negative side of the fallback: only "web" and
+    // "desktop" are console-shaped clients, so a confused mobile that joined
+    // two channels under the same account must not be locked. The previous
+    // behavior was that ANY multi-channel account locked, which was the PR
+    // #136 bug; the fix narrowed it to console-shaped clients.
+    __setVoiceRosterRecordForTest({
+      agencyId: AGENCY,
+      channelName: "Green 1",
+      unitId: "USER42",
+      kind: "account",
+      client: "ios",
+      deviceType: null,
+    });
+    __setVoiceRosterRecordForTest({
+      agencyId: AGENCY,
+      channelName: "Green 2",
+      unitId: "USER42",
+      kind: "account",
+      client: "android",
+      deviceType: null,
+    });
+    assert.equal(isUnitMoveLocked(AGENCY, "USER42"), false);
   });
 });
