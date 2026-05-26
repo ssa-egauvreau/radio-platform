@@ -199,6 +199,11 @@ export class VoiceChannelClient {
   private readonly levelBytes = new Uint8Array(WAVEFORM_FFT_SIZE);
 
   private micStream: MediaStream | null = null;
+  /** Browser DSP mode (EC/NS/AGC enabled?) the cached micStream was acquired
+   *  with. When the agency `bypassMicProcessing` flag changes we have to
+   *  release the stream and re-acquire — `applyConstraints` can't toggle
+   *  these post-acquisition in all browsers. */
+  private micStreamBrowserDsp: boolean | null = null;
   private capCtx: AudioContext | null = null;
   private capSource: MediaStreamAudioSourceNode | null = null;
   private capNode: AudioWorkletNode | null = null;
@@ -217,6 +222,11 @@ export class VoiceChannelClient {
    *  TX conditioner runs HPF + LPF only (no expander, no makeup AGC). Matches
    *  the radio-bridge mic chain so handset audio sounds like bridge audio. */
   private bypassMicProcessing = false;
+  /** Promise resolved once refreshAudioConfig() has settled (success or fail)
+   *  for the most recent connect(). startTransmit awaits this so the very
+   *  first PTT after connect uses the right getUserMedia constraints instead
+   *  of racing the HTTP response and locking in the wrong cached stream. */
+  private audioConfigReady: Promise<void> = Promise.resolve();
   private gestureUnbind: (() => void) | null = null;
 
   private lastInboundMs = 0;
@@ -270,13 +280,18 @@ export class VoiceChannelClient {
 
   /** Pulls the agency-wide audio config so getUserMedia and the TX conditioner
    *  honor the admin's "bypass mic processing" choice on the next key-up.
-   *  Silent on error — keeps whatever state we have. */
+   *  Failures are logged at warn so a transient 5xx during deploy is visible
+   *  in console; the cached flag is left intact. */
   private async refreshAudioConfig(): Promise<void> {
     try {
       const res = await api.getAudioConfigSummary();
       this.bypassMicProcessing = Boolean(res.config?.bypassMicProcessing ?? false);
-    } catch {
-      /* leave the current value; defaults are safe */
+    } catch (err) {
+      console.warn(
+        `[voice] failed to refresh audio config — keeping cached value ` +
+          `(bypassMicProcessing=${this.bypassMicProcessing}):`,
+        err,
+      );
     }
   }
 
@@ -387,11 +402,14 @@ export class VoiceChannelClient {
   connect(): void {
     this.setState("connecting");
     void initImbe(); // load the IMBE vocoder in the background for digital RX
-    // Pull the agency-wide mic-processing flag so getUserMedia uses the
-    // correct constraints on the next key-up. Best-effort: if this fails the
-    // client defaults to the standard processed-mic chain. Re-fires on every
-    // reconnect so admin changes are picked up without a page reload.
-    void this.refreshAudioConfig();
+    // Reset client-side audio policy to defaults at the start of every
+    // connect so a stale value from a previous session can't leak into the
+    // first PTT before refreshAudioConfig settles.
+    this.bypassMicProcessing = false;
+    // Pull the agency-wide mic-processing flag and store the in-flight promise
+    // so startTransmit can await it. Re-fires on every reconnect so admin
+    // changes are picked up without a page reload.
+    this.audioConfigReady = this.refreshAudioConfig();
     // Created inside the triggering click so the browser lets audio play.
     this.playCtx = new AudioContext({ sampleRate: TARGET_RATE });
     this.playGain = this.playCtx.createGain();
@@ -599,11 +617,32 @@ export class VoiceChannelClient {
       throw new Error("channel_busy");
     }
 
+    // Wait for the in-flight audio-config fetch so getUserMedia gets the right
+    // constraints on the very first PTT. Cap at 1.5s so a slow/failed server
+    // doesn't deadlock the operator — the cached value (default false) will
+    // be used on timeout, which is the same behaviour the field had before
+    // this change.
+    await Promise.race([
+      this.audioConfigReady,
+      new Promise<void>((resolve) => setTimeout(resolve, 1500)),
+    ]);
+
+    // When the admin pushed "bypass mic processing", match the bridge:
+    // browser DSP off, raw PCM into our chain. Otherwise keep the legacy
+    // VoIP-tuned defaults (EC/NS/AGC on) for noisy environments.
+    const browserDsp = !this.bypassMicProcessing;
+    // If the cached stream was acquired with the wrong DSP mode (admin
+    // toggled the agency flag mid-session), release and re-acquire —
+    // `applyConstraints` can't toggle echoCancellation/noiseSuppression
+    // post-acquisition in Safari and some Chromium builds.
+    if (this.micStream && this.micStreamBrowserDsp !== browserDsp) {
+      for (const track of this.micStream.getTracks()) {
+        track.stop();
+      }
+      this.micStream = null;
+      this.micStreamBrowserDsp = null;
+    }
     if (!this.micStream) {
-      // When the admin pushed "bypass mic processing", match the bridge:
-      // browser DSP off, raw PCM into our chain. Otherwise keep the legacy
-      // VoIP-tuned defaults (EC/NS/AGC on) for noisy environments.
-      const browserDsp = !this.bypassMicProcessing;
       this.micStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           channelCount: 1,
@@ -612,6 +651,7 @@ export class VoiceChannelClient {
           autoGainControl: browserDsp,
         },
       });
+      this.micStreamBrowserDsp = browserDsp;
     }
     if (!this.capCtx) {
       this.capCtx = new AudioContext({ sampleRate: TARGET_RATE });
@@ -814,6 +854,7 @@ export class VoiceChannelClient {
     if (this.micStream) {
       this.micStream.getTracks().forEach((track) => track.stop());
       this.micStream = null;
+      this.micStreamBrowserDsp = null;
     }
     if (this.capCtx) {
       void this.capCtx.close();

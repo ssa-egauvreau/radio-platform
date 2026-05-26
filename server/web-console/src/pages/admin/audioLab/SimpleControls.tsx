@@ -98,9 +98,35 @@ export function readMicProcessing(cfg: AudioLabConfig): MicProcessing {
 }
 
 export function applyMicProcessing(cfg: AudioLabConfig, level: MicProcessing): AudioLabConfig {
+  if (level === "minimal") {
+    // Match the bridge mic chain: no expander/AGC anywhere. Force agcEnabled
+    // off so the server's gain mapping also lands at 1.0× — otherwise a
+    // leftover agcEnabled=true from an earlier preset would silently apply
+    // software gain on Android in "bypass" mode.
+    return {
+      ...cfg,
+      preImbe: {
+        ...cfg.preImbe,
+        bypassMicProcessing: true,
+        agcEnabled: false,
+        windGateEnabled: false,
+        windHpfEnabled: false,
+      },
+    };
+  }
+  // "Standard" — re-establish the processed-mic chain the button description
+  // promises. Only the AGC defaults are restored if the user had everything
+  // off; wind-gate stays at whatever the user picked separately.
+  const agcAlreadyOn = cfg.preImbe.agcEnabled;
   return {
     ...cfg,
-    preImbe: { ...cfg.preImbe, bypassMicProcessing: level === "minimal" },
+    preImbe: {
+      ...cfg.preImbe,
+      bypassMicProcessing: false,
+      agcEnabled: true,
+      agcTargetRms: agcAlreadyOn ? cfg.preImbe.agcTargetRms : 6000,
+      agcMaxGain: agcAlreadyOn ? cfg.preImbe.agcMaxGain : 6,
+    },
   };
 }
 

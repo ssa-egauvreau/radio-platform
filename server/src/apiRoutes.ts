@@ -2785,7 +2785,7 @@ export function createApiRouter(): Router {
       const agencyId = req.authUser!.agencyId!;
       const row = await getGlobalAudioConfig(agencyId);
       if (!row) {
-        res.json({ config: null });
+        res.json({ config: null, updatedAt: null });
         return;
       }
       // Derive a simplified Android-compatible config from the full AudioLabConfig.
@@ -2811,7 +2811,10 @@ export function createApiRouter(): Router {
       // 1.0 so the lowest simple-UI preset ("A little", agcMaxGain=4) still
       // delivers an audible boost — a linear (gain/12)*3 map collapses to 1.0×
       // at gain=4, making the preset indistinguishable from "off" on device.
-      const gainMultiplier = agcEnabled
+      // When bypass is on, also force gainMultiplier=1.0: the whole point of
+      // "Bridge-style minimal" is no post-capture gain, so even a stale
+      // agcEnabled=true from a previous preset shouldn't sneak gain in.
+      const gainMultiplier = agcEnabled && !bypassMicProcessing
         ? Math.max(1.0, Math.min(3.0, 1.0 + (agcMaxGain / 12.0) * 2.0))
         : 1.0;
       res.json({
