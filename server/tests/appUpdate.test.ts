@@ -39,9 +39,12 @@ const updatesDir = mkdtempSync(join(tmpdir(), "appupdate-test-"));
 process.env.APP_UPDATES_DIR = updatesDir;
 process.env.APP_UPDATE_PUBLISH_TOKEN = "test-publish-token";
 
-const { handleAndroidUpdateManifest, handleAndroidUpdatePublish, handleAndroidUpdateApk } = await import(
-  "../src/appUpdate.js"
-);
+const {
+  androidUpdatePublishAuthError,
+  handleAndroidUpdateManifest,
+  handleAndroidUpdatePublish,
+  handleAndroidUpdateApk,
+} = await import("../src/appUpdate.js");
 
 // Mock Express Response that captures whatever the handler does.
 interface CapturedRes {
@@ -259,6 +262,45 @@ test("handleAndroidUpdateApk: streams the APK and sets package-archive content t
 });
 
 // ===== handleAndroidUpdatePublish =====================================
+
+test("androidUpdatePublishAuthError: returns publish_disabled / unauthorized / null as expected", () => {
+  const saved = process.env.APP_UPDATE_PUBLISH_TOKEN;
+  try {
+    delete process.env.APP_UPDATE_PUBLISH_TOKEN;
+    assert.deepEqual(
+      androidUpdatePublishAuthError({} as import("express").Request["headers"]),
+      { status: 503, error: "publish_disabled" },
+    );
+
+    process.env.APP_UPDATE_PUBLISH_TOKEN = "test-publish-token";
+    assert.deepEqual(
+      androidUpdatePublishAuthError({} as import("express").Request["headers"]),
+      { status: 401, error: "unauthorized" },
+    );
+    assert.deepEqual(
+      androidUpdatePublishAuthError({ authorization: "Bearer wrong" } as import("express").Request["headers"]),
+      { status: 401, error: "unauthorized" },
+    );
+    assert.equal(
+      androidUpdatePublishAuthError({
+        authorization: "bearer test-publish-token",
+      } as import("express").Request["headers"]),
+      null,
+    );
+    assert.equal(
+      androidUpdatePublishAuthError({
+        authorization: ["Bearer test-publish-token"],
+      } as import("express").Request["headers"]),
+      null,
+    );
+  } finally {
+    if (saved === undefined) {
+      delete process.env.APP_UPDATE_PUBLISH_TOKEN;
+    } else {
+      process.env.APP_UPDATE_PUBLISH_TOKEN = saved;
+    }
+  }
+});
 
 test("handleAndroidUpdatePublish: 401 when bearer token is missing or wrong", () => {
   clearUpdatesDir();

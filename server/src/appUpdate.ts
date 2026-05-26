@@ -43,6 +43,11 @@ interface ResolvedManifest {
   notes: string;
 }
 
+interface AndroidPublishAuthError {
+  status: 401 | 503;
+  error: "unauthorized" | "publish_disabled";
+}
+
 // Cache the APK hash by size+mtime so polling handsets don't re-hash on every check.
 let shaCache: { key: string; sha256: string } | null = null;
 
@@ -57,6 +62,23 @@ function apkSha256(apkPath: string): string {
   const sha256 = createHash("sha256").update(readFileSync(apkPath)).digest("hex");
   shaCache = { key, sha256 };
   return sha256;
+}
+
+/** Shared auth check used by route pre-check + publish handler. */
+export function androidUpdatePublishAuthError(
+  headers: Request["headers"],
+): AndroidPublishAuthError | null {
+  const token = process.env.APP_UPDATE_PUBLISH_TOKEN?.trim();
+  if (!token) {
+    return { status: 503, error: "publish_disabled" };
+  }
+  const auth = headers.authorization;
+  const authHeader = Array.isArray(auth) ? auth[0] ?? "" : auth ?? "";
+  const provided = authHeader.replace(/^Bearer\s+/i, "").trim();
+  if (provided.length === 0 || provided !== token) {
+    return { status: 401, error: "unauthorized" };
+  }
+  return null;
 }
 
 /** Reads and validates version.json + the referenced APK, or null if unpublished/invalid. */
@@ -116,14 +138,9 @@ export function handleAndroidUpdateManifest(_req: Request, res: Response): void 
  * headers so the body stays a clean binary stream.
  */
 export function handleAndroidUpdatePublish(req: Request, res: Response): void {
-  const token = process.env.APP_UPDATE_PUBLISH_TOKEN?.trim();
-  if (!token) {
-    res.status(503).json({ error: "publish_disabled" });
-    return;
-  }
-  const provided = (req.headers.authorization ?? "").replace(/^Bearer\s+/i, "").trim();
-  if (provided.length === 0 || provided !== token) {
-    res.status(401).json({ error: "unauthorized" });
+  const authError = androidUpdatePublishAuthError(req.headers);
+  if (authError) {
+    res.status(authError.status).json({ error: authError.error });
     return;
   }
 
