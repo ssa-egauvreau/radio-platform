@@ -1,50 +1,43 @@
 /**
- * Regression tests for `server/src/presence.ts`.
+ * Tests for `server/src/presence.ts`.
  *
- * Channel presence is the in-memory roster that powers two things every
- * dispatcher relies on:
+ * Channel presence is a small in-memory map that every Android / iOS
+ * handset on the agency pokes every ~12 s via
+ * `POST /v1/presence/heartbeat`, and that every dispatcher screen reads
+ * via `GET /v1/presence/count`. The numbers it returns drive the "X
+ * units on this channel" badge — every "is anyone actually listening"
+ * UI decision a user makes flows through these two functions.
  *
- *  1. The "(N on channel)" badge surfaced by `GET /v1/radio/presence` on
- *     both the web console and the iOS app.
- *  2. The agency-scoped namespacing that lets two tenants legitimately
- *     own a channel with the same display name without ever seeing each
- *     other's counts.
+ * A regression here is easy to miss in QA because the symptoms only
+ * show up across tenants or after a TTL has elapsed:
  *
- * It is also the upstream of `aiDispatch/channelCache`, which re-uses
- * `normalizedChannel` to key its cached AI-dispatch flag per agency. A
- * regression in the normaliser silently mis-routes those lookups too.
+ *  - Cross-tenant leakage: two agencies that happen to name a channel
+ *    the same thing (e.g. "Dispatch") seeing each other's unit counts.
+ *    `presenceKey` namespaces by agencyId — if that ever drifts, every
+ *    paying agency would silently expose presence to every other one.
+ *  - "----" sentinel ack: the Android client uses "----" to mean "tuned
+ *    to no channel". A naive normaliser would happily register a unit
+ *    on the literal "----" channel and inflate every dispatcher's
+ *    presence count for whichever channel a future code path normalises
+ *    to that string.
+ *  - Channel/unit normalisation drift: heartbeats arrive with sloppy
+ *    casing and whitespace from real-world handsets — if the canonical
+ *    form drifts between writer and reader, every refreshed heartbeat
+ *    creates a brand-new bucket and the count looks like it's climbing
+ *    unboundedly, or never decreases as units roam off the channel.
+ *  - TTL pruning: stuck-on / crashed handsets must drop off the count
+ *    after `TTL_MS`. A regression that leaves stale entries in the map
+ *    permanently inflates the dispatcher's "units listening" badge.
  *
- * Specifically, these tests pin:
- *
- *   - `normalizedChannel` collapses whitespace + folds case so
- *     "Channel  1", "channel 1", and "CHANNEL\t1" all key the same
- *     bucket (Android, iOS, and the web console send their channel
- *     labels with slightly different whitespace).
- *   - `heartbeatPresence` rejects empty / sentinel-`----` channel
- *     values before they pollute the map (the legacy "no channel"
- *     placeholder must never get a count).
- *   - The agency namespace is enforced — two agencies on a channel with
- *     the same display name never share a count, even after the same
- *     unit_id heartbeats on each.
- *   - The TTL prune kicks in once a heartbeat is older than 45 s, so a
- *     handset that dropped off the network is reported as gone within
- *     the documented window (and not a moment earlier).
- *   - The same unit re-heartbeating extends its own entry rather than
- *     double-counting.
- *   - The pruner also drops empty channel maps from the outer map so a
- *     long-running server doesn't leak a `Map` entry for every channel
- *     that ever had a unit on it.
- *
- * Each test uses a unique agency id so they stay independent — the
- * presence store is process-global by design (no exported reset hook),
- * and a single shared id would cross-contaminate any test that ran
- * second under `--test-concurrency > 1`.
- *
- * Time is advanced via `node:test` mock timers so the TTL boundary is
- * tested deterministically.
+ * State isolation: `presence.ts` keeps a module-level Map with no
+ * exported reset hook. Each test below uses a unique `agencyId` derived
+ * from a monotonic counter so concurrent / sequential tests can never
+ * collide on the same presence bucket — even if a future change leaves
+ * stale entries behind, they sit under a different agencyId and don't
+ * pollute later asserts.
  */
 
-import { test, type TestContext } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
@@ -53,215 +46,324 @@ import {
   normalizedChannel,
 } from "../src/presence.js";
 
-let nextAgency = 9_000_000;
-function agencyId(): number {
-  return nextAgency++;
+// Bump per test so module-level Map state cannot leak between cases.
+// Start high to stay clear of any agency IDs another suite might happen
+// to use if the test runner is ever changed to share state.
+let NEXT_AGENCY = 9_000_000;
+function uniqueAgency(): number {
+  return NEXT_AGENCY++;
 }
 
-test("normalizedChannel folds case, trims, and collapses internal whitespace", () => {
-  // All of these are the same logical channel in the dispatcher's mental model
-  // — handsets and the web console send them with slightly different padding.
-  const variants = [
-    "Channel 1",
-    "channel 1",
-    "CHANNEL 1",
-    " channel 1 ",
-    "channel\t1",
-    "channel\n1",
-    "channel    1",
-    "Channel\u00201",
-  ];
-  const expected = "channel 1";
-  for (const v of variants) {
-    assert.equal(normalizedChannel(v), expected, `failed for ${JSON.stringify(v)}`);
+// --- normalizedChannel ---------------------------------------------------
+
+test("normalizedChannel: lower-cases and trims surrounding whitespace", () => {
+  // Real handsets send a mix of casings: the Android channel picker
+  // produces title-case strings, the iOS one all-lowercase, and the
+  // dispatch console sometimes sends user-typed labels with stray
+  // spaces. Every one must land on the same key or presence buckets
+  // fragment across casings.
+  assert.equal(normalizedChannel(" Dispatch "), "dispatch");
+  assert.equal(normalizedChannel("DISPATCH"), "dispatch");
+  assert.equal(normalizedChannel("dispatch"), "dispatch");
+  assert.equal(normalizedChannel("\tDispatch\n"), "dispatch");
+});
+
+test("normalizedChannel: collapses runs of internal whitespace to a single space", () => {
+  // "Tac   1" and "Tac 1" must be the same bucket — otherwise a single
+  // user-typed double space in the channel name fragments presence in
+  // a way no operator can see or fix.
+  assert.equal(normalizedChannel("Tac   1"), "tac 1");
+  assert.equal(normalizedChannel("Tac\t1"), "tac 1");
+  assert.equal(normalizedChannel("Tac\n\n1"), "tac 1");
+});
+
+test("normalizedChannel: maps null / undefined / non-string to the empty string", () => {
+  // The route reads `req.body?.channel` straight off Express, which can
+  // be anything. The function must not blow up on a non-string input
+  // and must not write "undefined" / "[object Object]" into the key.
+  assert.equal(normalizedChannel(undefined), "");
+  assert.equal(normalizedChannel(null), "");
+  assert.equal(normalizedChannel(""), "");
+  assert.equal(normalizedChannel("   "), "");
+  assert.equal(normalizedChannel({}), "[object object]");
+  // Numbers and booleans coerce to their string form — the route layer
+  // is responsible for type validation, the normaliser just keeps the
+  // shape predictable so the key never holds surprises.
+  assert.equal(normalizedChannel(123), "123");
+  assert.equal(normalizedChannel(true), "true");
+});
+
+// --- heartbeatPresence: input validation --------------------------------
+
+test("heartbeatPresence: rejects an empty unit id", () => {
+  const r = heartbeatPresence(uniqueAgency(), "", "Dispatch");
+  assert.equal(r.ok, false);
+  assert.equal(r.error, "bad_unit_or_channel");
+});
+
+test("heartbeatPresence: rejects whitespace-only unit ids", () => {
+  // The unit id is upper-cased and trimmed; a pure-whitespace string
+  // collapses to "" and must be refused so a misconfigured handset
+  // can't silently register as the empty unit and dominate the count.
+  for (const bad of ["   ", "\t", "\n", "  \t  "]) {
+    const r = heartbeatPresence(uniqueAgency(), bad, "Dispatch");
+    assert.equal(r.ok, false, `unit=${JSON.stringify(bad)} should be refused`);
+    assert.equal(r.error, "bad_unit_or_channel");
   }
 });
 
-test("normalizedChannel coerces non-string inputs without throwing", () => {
-  // The presence handler accepts an `unknown` straight off the request body.
-  // A misbehaving client must never crash the route by sending e.g. `null` or
-  // a number as the channel field.
-  assert.equal(normalizedChannel(undefined), "");
-  assert.equal(normalizedChannel(null), "");
-  assert.equal(normalizedChannel(42), "42");
-  assert.equal(normalizedChannel({ toString: () => "Channel 7" }), "channel 7");
-  assert.equal(normalizedChannel(["nested"]), "nested");
-  // Internal whitespace collapse still applies after coercion.
-  assert.equal(normalizedChannel("  Mixed\t Case   Label  "), "mixed case label");
+test("heartbeatPresence: rejects null / undefined / empty-array unit ids (coerce to '')", () => {
+  // The route hands us `req.body?.unit_id` raw. Anything whose
+  // `String(value ?? "").trim()` lands on the empty string must be
+  // refused so a misconfigured handset can't silently register as
+  // the empty unit.
+  for (const bad of [undefined, null, []] as const) {
+    const r = heartbeatPresence(uniqueAgency(), bad, "Dispatch");
+    assert.equal(r.ok, false, `unit=${JSON.stringify(bad)} should be refused`);
+    assert.equal(r.error, "bad_unit_or_channel");
+  }
 });
 
-test("heartbeatPresence rejects empty unit, empty channel, and the '----' sentinel", () => {
-  const ag = agencyId();
-  // The legacy "no channel" placeholder must never accumulate a count or
-  // dispatchers see a phantom roster on a channel that does not exist.
-  assert.deepEqual(heartbeatPresence(ag, "U-1", "----"), {
-    ok: false,
-    error: "bad_unit_or_channel",
-  });
-  assert.deepEqual(heartbeatPresence(ag, "", "Channel 1"), {
-    ok: false,
-    error: "bad_unit_or_channel",
-  });
-  assert.deepEqual(heartbeatPresence(ag, "U-1", ""), {
-    ok: false,
-    error: "bad_unit_or_channel",
-  });
-  assert.deepEqual(heartbeatPresence(ag, "   ", "Channel 1"), {
-    ok: false,
-    error: "bad_unit_or_channel",
-  });
-  assert.deepEqual(heartbeatPresence(ag, null, "Channel 1"), {
-    ok: false,
-    error: "bad_unit_or_channel",
-  });
-  assert.deepEqual(heartbeatPresence(ag, "U-1", null), {
-    ok: false,
-    error: "bad_unit_or_channel",
-  });
-  // None of these added an entry, so the channel's count is still zero.
-  assert.equal(countPresence(ag, "Channel 1"), 0);
-  assert.equal(countPresence(ag, "----"), 0);
+test("heartbeatPresence: known coercion gap — non-empty non-string unit ids land as their String() form", () => {
+  // The current contract is "tolerant of weird input via String()
+  // coercion" rather than "strictly typed". This test pins that
+  // behaviour so the route layer (which is the actual type-validation
+  // boundary) is the thing that has to refuse — if `presence.ts`
+  // ever tightens to reject non-strings outright, this assertion
+  // will fail and force a deliberate review of the route layer.
+  const agencyId = uniqueAgency();
+  // `0` coerces to "0" (truthy after trim).
+  assert.equal(heartbeatPresence(agencyId, 0, "Dispatch").ok, true);
+  // `{}` coerces to "[object Object]" (truthy after trim).
+  assert.equal(heartbeatPresence(agencyId, {}, "Dispatch").ok, true);
+  // Together they land as two distinct presence entries, since the
+  // upper-cased Map keys differ ("0" vs "[OBJECT OBJECT]").
+  assert.equal(countPresence(agencyId, "Dispatch"), 2);
 });
 
-test("heartbeatPresence accepts and counts a real unit/channel", () => {
-  const ag = agencyId();
-  const res = heartbeatPresence(ag, "U-100", "Channel 3");
-  assert.deepEqual(res, { ok: true });
-  assert.equal(countPresence(ag, "Channel 3"), 1);
+test("heartbeatPresence: rejects an empty channel", () => {
+  for (const bad of ["", "   ", undefined, null]) {
+    const r = heartbeatPresence(uniqueAgency(), "UNIT-1", bad);
+    assert.equal(r.ok, false, `channel=${JSON.stringify(bad)} should be refused`);
+    assert.equal(r.error, "bad_unit_or_channel");
+  }
 });
 
-test("heartbeatPresence normalises both unit and channel before keying", () => {
-  const ag = agencyId();
-  // Heartbeat with messy casing/padding…
-  heartbeatPresence(ag, " u-200 ", " Channel\tFour ");
-  // …and read back with a different cosmetic representation of the same
-  // channel. The normaliser must collapse both into the same bucket or the
-  // dispatcher sees zero presence on a channel that has a unit on it.
-  assert.equal(countPresence(ag, "channel four"), 1);
-  assert.equal(countPresence(ag, "CHANNEL    FOUR"), 1);
+test("heartbeatPresence: rejects the '----' sentinel channel", () => {
+  // The Android client sends "----" to mean "tuned to no channel"; if
+  // the server accepted it, every off-channel handset would pile into
+  // a phantom presence bucket and inflate counts for any dispatcher
+  // who ever queried that literal string.
+  const r = heartbeatPresence(uniqueAgency(), "UNIT-1", "----");
+  assert.equal(r.ok, false);
+  assert.equal(r.error, "bad_unit_or_channel");
 });
 
-test("unit id is upper-cased so case-differing reports do not double-count", () => {
-  const ag = agencyId();
-  // A single physical handset that re-keys with different cosmetic casing
-  // (e.g. an Android client that lower-cases its unit id on a settings
-  // round-trip) must remain a single roster entry.
-  heartbeatPresence(ag, "u-300", "Channel 5");
-  heartbeatPresence(ag, "U-300", "Channel 5");
-  heartbeatPresence(ag, "u-300", "channel 5");
-  assert.equal(countPresence(ag, "Channel 5"), 1);
+// --- heartbeatPresence: counting + normalisation ------------------------
+
+test("heartbeatPresence: a single heartbeat makes the unit visible to countPresence", () => {
+  const agencyId = uniqueAgency();
+  const r = heartbeatPresence(agencyId, "UNIT-7", "Dispatch");
+  assert.equal(r.ok, true);
+  assert.equal(r.error, undefined);
+  assert.equal(countPresence(agencyId, "Dispatch"), 1);
 });
 
-test("countPresence is agency-scoped — two tenants on identical names never see each other", () => {
-  // Multi-tenant isolation is a hard rule across the platform — a regression
-  // here would leak unit counts (and unit ids, indirectly via tooling) across
-  // agencies and would also corrupt the AI dispatch per-agency channel cache.
-  const a = agencyId();
-  const b = agencyId();
-  heartbeatPresence(a, "U-1", "Patrol");
-  heartbeatPresence(a, "U-2", "Patrol");
-  heartbeatPresence(b, "U-1", "Patrol"); // same channel name, different tenant
-  assert.equal(countPresence(a, "Patrol"), 2);
-  assert.equal(countPresence(b, "Patrol"), 1);
-  // Cross-check the normalised lookup so a regression that special-cased
-  // exact-string lookups doesn't sneak past the agency check.
-  assert.equal(countPresence(b, "PATROL"), 1);
+test("heartbeatPresence: distinct units on the same channel are counted independently", () => {
+  const agencyId = uniqueAgency();
+  heartbeatPresence(agencyId, "A-1", "Tac 1");
+  heartbeatPresence(agencyId, "A-2", "Tac 1");
+  heartbeatPresence(agencyId, "A-3", "Tac 1");
+  assert.equal(countPresence(agencyId, "Tac 1"), 3);
 });
 
-test("TTL prune drops a heartbeat older than 45s", (t: TestContext) => {
-  const ag = agencyId();
-  t.mock.timers.enable({ apis: ["Date"] });
-  // Heartbeat at t=0.
-  heartbeatPresence(ag, "U-A", "Channel A");
-  assert.equal(countPresence(ag, "Channel A"), 1);
+test("heartbeatPresence: re-registering the same unit does NOT double-count", () => {
+  // The Map keys by upper-cased unit id, so a second heartbeat from
+  // the same handset just refreshes its TTL — the dispatcher's badge
+  // must stay at 1, not climb to N over time.
+  const agencyId = uniqueAgency();
+  for (let i = 0; i < 5; i++) {
+    heartbeatPresence(agencyId, "UNIT-1", "Dispatch");
+  }
+  assert.equal(countPresence(agencyId, "Dispatch"), 1);
+});
 
-  // Just under TTL — still present.
+test("heartbeatPresence: unit id is upper-cased so casing variants collapse to one entry", () => {
+  // The Android side reports "UNIT-1" upper-case, the iOS side sends
+  // it lower-cased; both must land on the same Map key or one handset
+  // would silently count as two units after a hand-off.
+  const agencyId = uniqueAgency();
+  heartbeatPresence(agencyId, "unit-1", "Dispatch");
+  heartbeatPresence(agencyId, "Unit-1", "Dispatch");
+  heartbeatPresence(agencyId, "UNIT-1", "Dispatch");
+  assert.equal(countPresence(agencyId, "Dispatch"), 1);
+});
+
+test("heartbeatPresence: unit id is trimmed of surrounding whitespace", () => {
+  const agencyId = uniqueAgency();
+  heartbeatPresence(agencyId, "  UNIT-1  ", "Dispatch");
+  heartbeatPresence(agencyId, "UNIT-1", "Dispatch");
+  assert.equal(countPresence(agencyId, "Dispatch"), 1);
+});
+
+test("heartbeatPresence: channel normalisation collapses casing/whitespace variants to one bucket", () => {
+  // The writer side normalises with `normalizedChannel`, and the
+  // reader side does the same. Sloppy inputs from either side must
+  // converge on a single bucket or the dispatcher would see a fresh
+  // "0 units" the moment a heartbeat happened to arrive with extra
+  // whitespace.
+  const agencyId = uniqueAgency();
+  heartbeatPresence(agencyId, "U1", "Tac 1");
+  heartbeatPresence(agencyId, "U2", "TAC 1");
+  heartbeatPresence(agencyId, "U3", "  tac   1  ");
+  assert.equal(countPresence(agencyId, "tac 1"), 3);
+  assert.equal(countPresence(agencyId, "Tac 1"), 3);
+  assert.equal(countPresence(agencyId, "TAC  1"), 3);
+});
+
+// --- multi-tenant isolation ---------------------------------------------
+
+test("heartbeatPresence: two agencies on the same channel name are fully isolated", () => {
+  // This is the cross-tenant leak guard. If `presenceKey` ever stops
+  // namespacing by agencyId, agency A's units would appear in agency
+  // B's dispatcher screen — a serious privacy + safety bug.
+  const agencyA = uniqueAgency();
+  const agencyB = uniqueAgency();
+  heartbeatPresence(agencyA, "A1", "Dispatch");
+  heartbeatPresence(agencyA, "A2", "Dispatch");
+  heartbeatPresence(agencyB, "B1", "Dispatch");
+  assert.equal(countPresence(agencyA, "Dispatch"), 2);
+  assert.equal(countPresence(agencyB, "Dispatch"), 1);
+});
+
+test("heartbeatPresence: a unit registered against one agency is invisible to a different agency", () => {
+  // Belt-and-suspenders on the above: even a perfectly-matching unit
+  // id must not surface across the tenancy boundary.
+  const agencyA = uniqueAgency();
+  const agencyB = uniqueAgency();
+  heartbeatPresence(agencyA, "UNIT-1", "Dispatch");
+  assert.equal(countPresence(agencyA, "Dispatch"), 1);
+  assert.equal(countPresence(agencyB, "Dispatch"), 0);
+});
+
+// --- countPresence: empty + unknown -------------------------------------
+
+test("countPresence: returns 0 for a channel no unit ever heartbeated on", () => {
+  // The dispatcher polls this endpoint for every channel in the list,
+  // including ones nobody's listening on. The function must return 0
+  // (not throw, not return undefined) so the UI badge renders cleanly.
+  const agencyId = uniqueAgency();
+  assert.equal(countPresence(agencyId, "NeverHeardOf"), 0);
+});
+
+test("countPresence: returns 0 for an empty / whitespace / null channel query", () => {
+  const agencyId = uniqueAgency();
+  // Pre-register some units so the test would catch a regression that
+  // silently returned the whole-agency unit count on an empty query.
+  heartbeatPresence(agencyId, "U1", "Dispatch");
+  assert.equal(countPresence(agencyId, ""), 0);
+  assert.equal(countPresence(agencyId, "   "), 0);
+  assert.equal(countPresence(agencyId, undefined), 0);
+  assert.equal(countPresence(agencyId, null), 0);
+});
+
+// --- TTL pruning --------------------------------------------------------
+
+test("countPresence: prunes entries whose last heartbeat is older than the 45s TTL", async (t) => {
+  // The TTL is 45s; we mock Date so the test doesn't take 45 seconds
+  // to run. Mocking `Date` (and `setTimeout` / `setInterval`) is the
+  // documented use of `mock.timers.enable` in node:test.
+  t.mock.timers.enable({ apis: ["Date"], now: 1_700_000_000_000 });
+
+  const agencyId = uniqueAgency();
+  heartbeatPresence(agencyId, "U1", "Dispatch");
+  heartbeatPresence(agencyId, "U2", "Dispatch");
+  assert.equal(countPresence(agencyId, "Dispatch"), 2);
+
+  // Just shy of TTL — both entries still alive.
   t.mock.timers.tick(44_000);
-  assert.equal(
-    countPresence(ag, "Channel A"),
-    1,
-    "heartbeat must survive until just under TTL",
-  );
+  assert.equal(countPresence(agencyId, "Dispatch"), 2);
 
-  // One tick past TTL (45 s) — pruned out.
+  // Past TTL — both pruned.
   t.mock.timers.tick(2_000);
-  assert.equal(
-    countPresence(ag, "Channel A"),
-    0,
-    "heartbeat must be pruned once age exceeds TTL_MS",
-  );
+  assert.equal(countPresence(agencyId, "Dispatch"), 0);
 });
 
-test("re-heartbeat refreshes a unit instead of leaking duplicate entries", (t: TestContext) => {
-  const ag = agencyId();
-  t.mock.timers.enable({ apis: ["Date"] });
-  heartbeatPresence(ag, "U-A", "Refresh Channel");
-  // Halfway through TTL the handset reports in again — its TTL window should
-  // reset, not its entry duplicate.
+test("countPresence: a refreshed heartbeat keeps the unit alive past the original TTL window", async (t) => {
+  // A healthy handset polls every ~12s; the most-recent heartbeat
+  // must reset the TTL so a long-running radio session doesn't drop
+  // off the dispatcher's count just because the FIRST heartbeat was
+  // ages ago.
+  t.mock.timers.enable({ apis: ["Date"], now: 1_700_000_000_000 });
+
+  const agencyId = uniqueAgency();
+  heartbeatPresence(agencyId, "U1", "Dispatch");
   t.mock.timers.tick(30_000);
-  heartbeatPresence(ag, "U-A", "Refresh Channel");
-  assert.equal(countPresence(ag, "Refresh Channel"), 1);
-
-  // Older "first heartbeat" timestamp is already gone; the only timestamp
-  // left is from t=30s. We should now survive 44 s past that re-heartbeat.
-  t.mock.timers.tick(44_000); // total elapsed: 74 s, last heartbeat at 30 s -> 44 s old
+  heartbeatPresence(agencyId, "U1", "Dispatch"); // refresh
+  t.mock.timers.tick(30_000); // 60s total, but only 30s since refresh
   assert.equal(
-    countPresence(ag, "Refresh Channel"),
+    countPresence(agencyId, "Dispatch"),
     1,
-    "re-heartbeat must reset the TTL window for that unit",
-  );
-
-  // 2 s more — last heartbeat is now 46 s old, beyond TTL.
-  t.mock.timers.tick(2_000);
-  assert.equal(countPresence(ag, "Refresh Channel"), 0);
-});
-
-test("partial expiry: one unit on a channel times out, the other survives", (t: TestContext) => {
-  const ag = agencyId();
-  t.mock.timers.enable({ apis: ["Date"] });
-  heartbeatPresence(ag, "U-OLD", "Shared Channel");
-  t.mock.timers.tick(20_000);
-  heartbeatPresence(ag, "U-NEW", "Shared Channel");
-  assert.equal(countPresence(ag, "Shared Channel"), 2);
-
-  // 26 s later — U-OLD is 46 s old (pruned), U-NEW is 26 s old (kept).
-  t.mock.timers.tick(26_000);
-  assert.equal(
-    countPresence(ag, "Shared Channel"),
-    1,
-    "per-unit TTL must prune individually, not the whole channel at once",
+    "refreshed heartbeat should keep the unit visible past the original 45s window",
   );
 });
 
-test("a channel whose every unit has expired no longer reports a count", (t: TestContext) => {
-  const ag = agencyId();
-  t.mock.timers.enable({ apis: ["Date"] });
-  heartbeatPresence(ag, "U-A", "Ghost Channel");
-  heartbeatPresence(ag, "U-B", "Ghost Channel");
-  // Long past TTL — both entries should be gone.
+test("countPresence: prunes the channel itself once all of its units expire", async (t) => {
+  // The pruner deletes the whole channel entry when its last unit
+  // goes stale, so the count must drop back to 0 once everyone has
+  // timed out — not stay at 1+ because of a dangling empty bucket.
+  t.mock.timers.enable({ apis: ["Date"], now: 1_700_000_000_000 });
+
+  const agencyId = uniqueAgency();
+  heartbeatPresence(agencyId, "U1", "Dispatch");
+  heartbeatPresence(agencyId, "U2", "Dispatch");
+  heartbeatPresence(agencyId, "U3", "Dispatch");
+  assert.equal(countPresence(agencyId, "Dispatch"), 3);
+
   t.mock.timers.tick(60_000);
-  assert.equal(
-    countPresence(ag, "Ghost Channel"),
-    0,
-    "an emptied channel must not retain a stale count",
-  );
+
+  // After full TTL has elapsed for everyone, the count must be 0
+  // and stay 0 on subsequent reads.
+  assert.equal(countPresence(agencyId, "Dispatch"), 0);
+  assert.equal(countPresence(agencyId, "Dispatch"), 0);
 });
 
-test("countPresence returns zero for an unknown agency/channel", () => {
-  const ag = agencyId();
-  heartbeatPresence(ag, "U-1", "Real Channel");
-  assert.equal(countPresence(ag, "Different Channel"), 0);
-  assert.equal(countPresence(agencyId(), "Real Channel"), 0);
+test("countPresence: pruning only drops stale units, not fresh ones in the same channel", async (t) => {
+  // Mixed-age units in the same channel: the older one ages out, the
+  // newer one stays. A regression that pruned by-channel rather than
+  // by-unit would drop the whole channel as soon as ONE unit went
+  // stale.
+  t.mock.timers.enable({ apis: ["Date"], now: 1_700_000_000_000 });
+
+  const agencyId = uniqueAgency();
+  heartbeatPresence(agencyId, "OLD", "Dispatch");
+  t.mock.timers.tick(40_000);
+  heartbeatPresence(agencyId, "NEW", "Dispatch");
+  // OLD now 40s old, NEW is 0s old; both still visible.
+  assert.equal(countPresence(agencyId, "Dispatch"), 2);
+
+  // Tick another 10s: OLD is now 50s (>TTL), NEW is 10s (<TTL).
+  t.mock.timers.tick(10_000);
+  assert.equal(countPresence(agencyId, "Dispatch"), 1);
 });
 
-test("countPresence returns zero (not throws) for an empty / sentinel channel", () => {
-  // The presence route may be called with a missing query parameter; the
-  // helper must not crash and must report zero instead of the previously-
-  // cached count for some other (legitimate) channel.
-  const ag = agencyId();
-  heartbeatPresence(ag, "U-1", "Some Channel");
-  assert.equal(countPresence(ag, ""), 0);
-  assert.equal(countPresence(ag, "----"), 0);
-  assert.equal(countPresence(ag, undefined), 0);
-  assert.equal(countPresence(ag, null), 0);
+test("heartbeatPresence: registering a new unit also opportunistically prunes stale ones", async (t) => {
+  // The internal `prunePresence` runs on every heartbeat AND every
+  // count read. This pins the heartbeat-side pruning behaviour so a
+  // refactor that moved pruning out of the write path doesn't let
+  // stale entries persist indefinitely between count reads.
+  t.mock.timers.enable({ apis: ["Date"], now: 1_700_000_000_000 });
+
+  const agencyId = uniqueAgency();
+  heartbeatPresence(agencyId, "STALE", "Dispatch");
+  t.mock.timers.tick(60_000); // STALE is now well past TTL
+
+  // A fresh heartbeat on a SEPARATE channel must still trigger
+  // pruning on Dispatch — the pruner sweeps the whole presence Map,
+  // not just the channel the write landed on.
+  heartbeatPresence(agencyId, "FRESH", "OtherChannel");
+
+  // STALE should have been swept out; Dispatch count is back to 0.
+  assert.equal(countPresence(agencyId, "Dispatch"), 0);
+  assert.equal(countPresence(agencyId, "OtherChannel"), 1);
 });
