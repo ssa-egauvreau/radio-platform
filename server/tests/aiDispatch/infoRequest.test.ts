@@ -148,12 +148,18 @@ test("infoRequestNeedsAsync: web-lookup types return true (engine speaks 'standb
 });
 
 test("infoRequestNeedsAsync: local / DB-backed types return false (answered synchronously)", () => {
+  // `unit_status` (PR 2ad66ee) is documented as a "local DB read, answered
+  // inline (same fast path as unit_location)" — if a regression added it to
+  // the async list, every "is X 10-8?" question would gain a spoken
+  // "standby" lead-in and then a second utterance, doubling channel time
+  // for no benefit.
   const no: InfoRequestFields["type"][] = [
     "address", // local SSA property lookup
     "pending_calls", // local CAD store
     "active_calls_for_unit",
     "call_details",
     "unit_location", // local position store + reverse geocode but treated sync at this layer
+    "unit_status", // local incident-store + position-store join, no web call
     "unknown",
   ];
   for (const t of no) {

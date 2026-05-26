@@ -187,6 +187,15 @@ test("normalizeAiDispatchParse: keeps plate_request when only VIN is supplied", 
 });
 
 test("normalizeAiDispatchParse: only documented info_request types are accepted", () => {
+  // This list MUST stay in lock-step with `validTypes` in normalizeAiDispatchParse
+  // and the InfoRequestFields["type"] union in parse.ts — drift in either
+  // direction is a silent regression:
+  //   - dropping a type here lets bogus LLM output land as a real info request
+  //     and run a downstream lookup the dispatcher can't actually answer;
+  //   - missing a type FROM the production set (e.g. `unit_status`, added in PR
+  //     2ad66ee for "is X 10-8 / on the air") makes the LLM's correctly-tagged
+  //     output silently fall through to `info_request=null`, which the engine
+  //     then ignores entirely.
   for (const type of [
     "address",
     "external_address",
@@ -194,6 +203,7 @@ test("normalizeAiDispatchParse: only documented info_request types are accepted"
     "active_calls_for_unit",
     "call_details",
     "unit_location",
+    "unit_status",
     "phone",
     "contact",
     "legal_code",
