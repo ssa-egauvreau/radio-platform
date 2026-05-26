@@ -339,8 +339,20 @@ export async function getUserByUsername(username: string): Promise<UserWithHash 
  */
 export async function bumpTokenGeneration(userId: number): Promise<number> {
   const res = await requirePool().query<{ token_generation: number }>(
-    `UPDATE users SET token_generation = token_generation + 1
-       WHERE id = $1 RETURNING token_generation;`,
+    `UPDATE users u
+        SET token_generation = u.token_generation + 1
+      WHERE u.id = $1
+        AND u.disabled = FALSE
+        AND (
+          u.agency_id IS NULL
+          OR EXISTS (
+            SELECT 1
+              FROM agencies a
+             WHERE a.id = u.agency_id
+               AND a.disabled = FALSE
+          )
+        )
+      RETURNING u.token_generation;`,
     [userId],
   );
   return res.rows[0]?.token_generation ?? 0;

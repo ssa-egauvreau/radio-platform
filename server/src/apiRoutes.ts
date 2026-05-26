@@ -471,6 +471,19 @@ export function createApiRouter(): Router {
       // Mint a fresh session generation so any token still floating around for
       // this account immediately fails the freshness check on its next call.
       const newGen = getPool() ? await bumpTokenGeneration(user!.id) : 0;
+      if (getPool() && newGen <= 0) {
+        // The account (or its agency) changed state between password verification
+        // and generation bump; treat this as a failed login and never seed cache.
+        await writeAudit({
+          agencyId: user?.agency_id ?? null,
+          actorUserId: user?.id ?? null,
+          actorName: username,
+          action: "login_failed",
+          ip: clientIp(req),
+        });
+        res.status(401).json({ error: "invalid_login" });
+        return;
+      }
       // Drop the cached "auth is fine" entry for this user so the next request from any prior
       // device sees the new token_generation and gets a 401 immediately, instead of waiting
       // up to TTL for the cache to expire.
