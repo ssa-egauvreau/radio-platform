@@ -133,11 +133,15 @@ import {
   parseAnalyticsRange,
 } from "./analytics.js";
 import { normalizeClientType } from "./clientType.js";
+// Single source of truth for the AudioLabConfig → device-summary mapping.
+// Two parallel PRs (#141 and #142) both extracted this helper; the merge of
+// the two left `apiRoutes.ts` with a duplicate import and a broken handler
+// body. We keep the `audioConfig.js` path (it accepts `unknown` and handles
+// null/array/non-object input without an explicit cast at the call site)
+// and the `audioConfigDerive.ts` test file continues to cover the other
+// copy of the helper directly. See `tests/apiRoutes.import.test.ts` for the
+// smoke import that pins this file against a future merge-break regression.
 import { deriveDeviceAudioConfig } from "./audioConfig.js";
-import {
-  deriveDeviceAudioConfig,
-  type GlobalAudioLabConfigPreImbe,
-} from "./audioConfigDerive.js";
 import { getPool } from "./db.js";
 import { getCachedAuth, invalidateCachedAuth, setCachedAuth } from "./sessionCache.js";
 import {
@@ -2803,18 +2807,12 @@ export function createApiRouter(): Router {
         return;
       }
       // The full AudioLabConfig → device-facing summary mapping lives in
-      // `audioConfig.ts` (and is unit-tested in `tests/audioConfig.test.ts`)
-      // so a regression in the bypass/AGC/wind-noise derivation can't sneak
-      // through without a test failure.
+      // `audioConfig.ts` (and is unit-tested in `tests/audioConfig.test.ts`
+      // + `tests/audioConfigDerive.test.ts`) so a regression in the
+      // bypass/AGC/wind-noise derivation can't sneak through without a
+      // test failure. Pure transform — no I/O, no `now()`.
       res.json({
         config: deriveDeviceAudioConfig(row.config),
-      // Pure transform — see audioConfigDerive.ts for the mapping rules and
-      // the regression notes about bypass / gainMultiplier coupling.
-      const summary = deriveDeviceAudioConfig(
-        row.config as GlobalAudioLabConfigPreImbe,
-      );
-      res.json({
-        config: summary,
         updatedAt: row.updated_at,
       });
     } catch (error) {
