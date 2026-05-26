@@ -387,7 +387,11 @@ type MoveLockRosterRecord = Pick<
   "channelKey" | "channelName" | "unitId" | "kind" | "client" | "deviceType"
 >;
 
-function countsAsDispatchConsoleSession(record: MoveLockRosterRecord): boolean {
+function countsAsDispatchConsoleSession(record: {
+  kind: "account" | "legacy" | "bridge";
+  deviceType: string | null;
+  client?: string;
+}): boolean {
   if (record.kind !== "account") {
     return false;
   }
@@ -408,6 +412,29 @@ function countsAsDispatchConsoleSession(record: MoveLockRosterRecord): boolean {
 export function unitChannelCountsFromRecords(
   agencyId: number,
   records: Iterable<MoveLockRosterRecord>,
+): Map<string, number> {
+  const prefix = `${agencyId} `;
+  const byUnit = new Map<string, Set<string>>();
+  for (const record of records) {
+    if (!record.channelKey.startsWith(prefix)) {
+      continue;
+    }
+    if (!countsAsDispatchConsoleSession(record)) {
+      continue;
+    }
+    const unit = record.unitId.toUpperCase();
+    const set = byUnit.get(unit) ?? new Set<string>();
+    set.add(record.channelName);
+    byUnit.set(unit, set);
+  }
+  const counts = new Map<string, number>();
+  for (const [unit, channels] of byUnit) {
+    counts.set(unit, channels.size);
+  }
+  return counts;
+}
+
+/**
  * Subset of a {@link RosterRecord} that {@link computeUnitChannelCounts} cares
  * about. Broken out so the counting rule can be exercised in unit tests
  * without spinning up a WebSocket server to seed the live roster.
@@ -455,16 +482,19 @@ export function computeUnitChannelCounts(
   return counts;
 }
 
-export function unitChannelCounts(agencyId: number): Map<string, number> {
-  return unitChannelCountsFromRecords(agencyId, voiceRoster.values());
 /**
  * How many distinct voice channels each unit is currently dispatching on
  * (live control). Only dispatch_console sessions count here — a user who just
  * has their handset/phone on one channel and the dashboard open on another
  * should still be movable. Multi-channel scanning is a dispatch-console signal.
+ *
+ * This is the live-roster entry point used by {@link buildRoster} and
+ * {@link isUnitMoveLocked}; the pure helpers above ({@link computeUnitChannelCounts}
+ * and {@link unitChannelCountsFromRecords}) exist so the counting rule can
+ * be exercised in tests without spinning up a WebSocket server.
  */
 export function unitChannelCounts(agencyId: number): Map<string, number> {
-  return computeUnitChannelCounts(voiceRoster.values(), agencyId);
+  return unitChannelCountsFromRecords(agencyId, voiceRoster.values());
 }
 
 /** Marks console operators who must not be live-moved (multi-channel dispatch). */
