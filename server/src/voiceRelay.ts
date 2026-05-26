@@ -401,38 +401,21 @@ function countsAsDispatchConsoleSession(record: MoveLockRosterRecord): boolean {
 }
 
 /**
- * How many distinct voice channels each unit is currently dispatching on
- * (live control). A user's handset/phone channel should not count against this;
- * only console-style sessions do.
+ * Pure helper backing {@link unitChannelCounts}. Counts distinct voice
+ * channels each unit is currently dispatching on for the given agency.
+ *
+ * Only sessions that {@link countsAsDispatchConsoleSession} marks as a
+ * dispatch console — explicit `device_type === "dispatch_console"`, or an
+ * account session from a `web` / `desktop` client where `device_type`
+ * defaulted to null — get counted. A user with a handset/phone on one
+ * channel and the dashboard open on another must still be drag-droppable.
+ *
+ * Broken out so the counting rule can be exercised in unit tests without
+ * spinning up a WebSocket server to seed the live roster.
  */
 export function unitChannelCountsFromRecords(
   agencyId: number,
   records: Iterable<MoveLockRosterRecord>,
- * Subset of a {@link RosterRecord} that {@link computeUnitChannelCounts} cares
- * about. Broken out so the counting rule can be exercised in unit tests
- * without spinning up a WebSocket server to seed the live roster.
- */
-export interface UnitChannelCountRecord {
-  channelKey: string;
-  channelName: string;
-  unitId: string;
-  kind: "account" | "legacy" | "bridge";
-  deviceType: string | null;
-}
-
-/**
- * Pure helper backing {@link unitChannelCounts}. Counts distinct voice
- * channels each unit is currently dispatching on for the given agency.
- *
- * Only `account`-kind sessions with `device_type === "dispatch_console"`
- * count — a user who just has a handset/phone on one channel and the
- * dashboard open on another must still be drag-droppable. Multi-channel
- * scanning is a dispatch-console signal, not a "this person is everywhere"
- * signal.
- */
-export function computeUnitChannelCounts(
-  records: Iterable<UnitChannelCountRecord>,
-  agencyId: number,
 ): Map<string, number> {
   const prefix = `${agencyId} `;
   const byUnit = new Map<string, Set<string>>();
@@ -455,16 +438,57 @@ export function computeUnitChannelCounts(
   return counts;
 }
 
-export function unitChannelCounts(agencyId: number): Map<string, number> {
-  return unitChannelCountsFromRecords(agencyId, voiceRoster.values());
 /**
  * How many distinct voice channels each unit is currently dispatching on
- * (live control). Only dispatch_console sessions count here — a user who just
- * has their handset/phone on one channel and the dashboard open on another
- * should still be movable. Multi-channel scanning is a dispatch-console signal.
+ * (live control). Only dispatch-console-style sessions count — see
+ * {@link unitChannelCountsFromRecords} and {@link countsAsDispatchConsoleSession}.
  */
 export function unitChannelCounts(agencyId: number): Map<string, number> {
-  return computeUnitChannelCounts(voiceRoster.values(), agencyId);
+  return unitChannelCountsFromRecords(agencyId, voiceRoster.values());
+}
+
+/**
+ * Subset of a {@link RosterRecord} that {@link computeUnitChannelCounts}
+ * cares about. Kept as a structurally narrow shape so tests can construct
+ * inputs without simulating a live WebSocket join. `client` is optional
+ * because older test fixtures (pre-PR #149) predate the `web` / `desktop`
+ * null-deviceType fallback; when absent it behaves like an "unknown" client.
+ */
+export interface UnitChannelCountRecord {
+  channelKey: string;
+  channelName: string;
+  unitId: string;
+  kind: "account" | "legacy" | "bridge";
+  deviceType: string | null;
+  client?: string;
+}
+
+/**
+ * Alias / alternate parameter order for {@link unitChannelCountsFromRecords},
+ * preserved for backward compatibility with tests written before the two
+ * variants were consolidated. Prefer {@link unitChannelCountsFromRecords}
+ * in new code.
+ */
+export function computeUnitChannelCounts(
+  records: Iterable<UnitChannelCountRecord>,
+  agencyId: number,
+): Map<string, number> {
+  // `MoveLockRosterRecord` requires `client: string`; map the optional
+  // `client` field to "unknown" so the canonical helper's `web` / `desktop`
+  // fallback only triggers when callers explicitly opted in to that signal.
+  function* withClient(): Iterable<MoveLockRosterRecord> {
+    for (const r of records) {
+      yield {
+        channelKey: r.channelKey,
+        channelName: r.channelName,
+        unitId: r.unitId,
+        kind: r.kind,
+        client: r.client ?? "unknown",
+        deviceType: r.deviceType,
+      };
+    }
+  }
+  return unitChannelCountsFromRecords(agencyId, withClient());
 }
 
 /** Marks console operators who must not be live-moved (multi-channel dispatch). */
