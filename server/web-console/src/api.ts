@@ -790,6 +790,10 @@ export const api = {
       unit_ids: input.unitIds,
     }),
 
+  /** Live Channel Control: delete an emergency channel only if it is still emergency-named. */
+  deleteEmergencyChannel: (id: number) =>
+    request<{ ok: boolean }>("DELETE", `/v1/channels/emergency/${id}`),
+
   /** Fires the same /radio/emergency endpoint the Android handsets use; surfaces as an alert. */
   radioEmergency: (input: {
     unitId: string;

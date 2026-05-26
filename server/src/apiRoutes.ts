@@ -35,6 +35,7 @@ import {
   createUser,
   deleteAgency,
   deleteChannel,
+  deleteEmergencyChannel,
   deleteUnitAlias,
   deleteUser,
   generateRadioKey,
@@ -2606,6 +2607,38 @@ export function createApiRouter(): Router {
         ip: clientIp(req),
       });
       res.json({ ok: true, channel: channel.name, reached });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // Live Channel Control: delete an emergency channel by id.
+  // The store layer enforces that the channel is still emergency-named at
+  // delete-time to prevent stale UI confirmations from deleting renamed
+  // operational channels.
+  router.delete("/channels/emergency/:id", requireAdmin, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const id = Number(req.params.id);
+      const result = await deleteEmergencyChannel(id, agencyId);
+      if (result.status === "not_found") {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      if (result.status === "not_emergency") {
+        res.status(409).json({ error: "not_emergency_channel" });
+        return;
+      }
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "channel_delete",
+        target: String(id),
+        detail: { emergency: true, channel: result.name },
+        ip: clientIp(req),
+      });
+      res.json({ ok: true });
     } catch (error) {
       fail(res, error);
     }

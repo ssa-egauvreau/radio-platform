@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import type { PoolClient } from "pg";
 import { getPool, requirePool, DEFAULT_AGENCY_SLUG } from "./db.js";
 import { hashPassword, type Role } from "./auth.js";
+import { EMERGENCY_CHANNEL_NAME_SQL_REGEX } from "./emergencyChannels.js";
 
 export type Permission = "talk_priority" | "talk" | "listen_only";
 
@@ -469,6 +470,41 @@ export async function deleteChannel(id: number, agencyId: number): Promise<boole
     agencyId,
   ]);
   return (res.rowCount ?? 0) > 0;
+}
+
+/**
+ * Deletes a channel only when its current name is still an emergency channel.
+ * This prevents a stale UI action from deleting a channel that has since been
+ * renamed to a normal operational channel.
+ */
+export async function deleteEmergencyChannel(
+  id: number,
+  agencyId: number,
+): Promise<
+  | { status: "deleted"; name: string }
+  | { status: "not_found" }
+  | { status: "not_emergency"; name: string }
+> {
+  const p = requirePool();
+  const deleted = await p.query<{ name: string }>(
+    `DELETE FROM radio_channels
+     WHERE id = $1
+       AND agency_id = $2
+       AND name ~* $3
+     RETURNING name;`,
+    [id, agencyId, EMERGENCY_CHANNEL_NAME_SQL_REGEX],
+  );
+  if ((deleted.rowCount ?? 0) > 0) {
+    return { status: "deleted", name: deleted.rows[0]!.name };
+  }
+  const existing = await p.query<{ name: string }>(
+    `SELECT name FROM radio_channels WHERE id = $1 AND agency_id = $2;`,
+    [id, agencyId],
+  );
+  if ((existing.rowCount ?? 0) === 0) {
+    return { status: "not_found" };
+  }
+  return { status: "not_emergency", name: existing.rows[0]!.name };
 }
 
 export async function getChannelById(id: number, agencyId: number): Promise<ChannelRow | null> {
