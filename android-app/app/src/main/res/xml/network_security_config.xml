@@ -14,6 +14,7 @@
         still validate via "system".
     -->
     <domain-config>
+        <domain includeSubdomains="true">safet-ptt.com</domain>
         <domain includeSubdomains="true">safet.up.railway.app</domain>
         <trust-anchors>
             <certificates src="system" />

@@ -59,7 +59,7 @@ targets:
         CFBundleShortVersionString: "$(MARKETING_VERSION)"
         CFBundleVersion: "$(CURRENT_PROJECT_VERSION)"
         # Server connection — set these for your deployment.
-        APIBaseURL: "https://safet.up.railway.app"
+        APIBaseURL: "https://safet-ptt.com"
         RadioAPIKey: ""
         NSLocationWhenInUseUsageDescription: "Your location is shared with dispatch so your unit appears on the live map."
         NSMicrophoneUsageDescription: "Microphone access is required to transmit voice on the radio channel."
