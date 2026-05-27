@@ -483,6 +483,30 @@ export interface AudioConfigSummary {
   noiseSuppression: boolean;
   gainMultiplier: number;
   bypassMicProcessing: boolean;
+  /** RX-side post-decode chain, or `null` when no shaping is in effect.
+   *  Shape mirrors the `PostDecodeConfig` the voice client's
+   *  `postDecodeChain.ts` consumes. */
+  postDecode: AudioConfigPostDecode | null;
+}
+
+/** Subset of `AudioLabConfig.postDecode` that the voice client applies on RX. */
+export interface AudioConfigPostDecode {
+  upsampleMode: "duplicate" | "linear" | "polyphase" | "polyphase24";
+  hpfEnabled?: boolean;
+  hpfHz?: number;
+  lpfEnabled?: boolean;
+  lpfHz?: number;
+  lowShelfEnabled?: boolean;
+  lowShelfHz?: number;
+  lowShelfDb?: number;
+  highShelfEnabled?: boolean;
+  highShelfHz?: number;
+  highShelfDb?: number;
+  presenceEnabled?: boolean;
+  presenceHz?: number;
+  presenceDb?: number;
+  presenceQ?: number;
+  saturationAmount?: number;
 }
 
 export interface AudioConfigSummaryResponse {

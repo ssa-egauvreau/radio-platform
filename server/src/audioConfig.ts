@@ -37,6 +37,38 @@ export interface DeviceAudioConfig {
    * EC/NS/AGC and the TX conditioner runs HPF+LPF only.
    */
   bypassMicProcessing: boolean;
+  /**
+   * RX-side post-decode chain (presence bell / saturation / shelves /
+   * upsample mode). `null` when no admin has pushed shaping — clients
+   * skip the chain entirely and play decoded IMBE at the legacy 16 kHz
+   * sample-duplicate path. Otherwise the field is the verbatim
+   * `AudioLabConfig.postDecode` block stored by the admin push, so any
+   * tuning done in the Audio Lab matches what live listeners hear.
+   */
+  postDecode: DevicePostDecodeConfig | null;
+}
+
+/** Subset of `AudioLabConfig.postDecode` clients need at runtime. Lab-only
+ *  fields (e.g. the diagnostic `"linear"` upsample mode is preserved here
+ *  so the field shape matches the stored config verbatim — the client just
+ *  picks a sane fallback if it doesn't implement that mode). */
+export interface DevicePostDecodeConfig {
+  upsampleMode: "duplicate" | "linear" | "polyphase" | "polyphase24";
+  hpfEnabled?: boolean;
+  hpfHz?: number;
+  lpfEnabled?: boolean;
+  lpfHz?: number;
+  lowShelfEnabled?: boolean;
+  lowShelfHz?: number;
+  lowShelfDb?: number;
+  highShelfEnabled?: boolean;
+  highShelfHz?: number;
+  highShelfDb?: number;
+  presenceEnabled?: boolean;
+  presenceHz?: number;
+  presenceDb?: number;
+  presenceQ?: number;
+  saturationAmount?: number;
 }
 
 /**
@@ -54,6 +86,7 @@ interface AudioLabPreImbe {
 
 interface AudioLabConfigLike {
   preImbe?: AudioLabPreImbe;
+  postDecode?: Record<string, unknown>;
 }
 
 /**
@@ -68,10 +101,11 @@ interface AudioLabConfigLike {
  * `agcEnabled` is left on from a previous preset (PR-131 follow-up fix).
  */
 export function deriveDeviceAudioConfig(input: unknown): DeviceAudioConfig {
-  const pre =
+  const cfg =
     input && typeof input === "object" && !Array.isArray(input)
-      ? ((input as AudioLabConfigLike).preImbe ?? {})
+      ? (input as AudioLabConfigLike)
       : {};
+  const pre = cfg.preImbe ?? {};
 
   const agcEnabled = Boolean(pre.agcEnabled ?? false);
   const agcMaxGain = Number(pre.agcMaxGain ?? 6);
@@ -100,5 +134,81 @@ export function deriveDeviceAudioConfig(input: unknown): DeviceAudioConfig {
     noiseSuppression,
     gainMultiplier: Math.round(rawMultiplier * 100) / 100,
     bypassMicProcessing,
+    postDecode: derivePostDecodeBlock(cfg.postDecode),
   };
+}
+
+/** Mirror of {@link DevicePostDecodeConfig} on the admin-pushed config. */
+const VALID_UPSAMPLE_MODES: ReadonlySet<DevicePostDecodeConfig["upsampleMode"]> = new Set([
+  "duplicate",
+  "linear",
+  "polyphase",
+  "polyphase24",
+]);
+
+/**
+ * Sanitize the stored `postDecode` block before handing it to clients. Only
+ * known fields are forwarded so a malformed admin push (or a future schema
+ * addition the client doesn't understand yet) can't surprise live RX. Returns
+ * `null` when shaping would be a no-op so the client takes the legacy
+ * sample-duplicate fast path with no branching cost.
+ */
+function derivePostDecodeBlock(
+  raw: Record<string, unknown> | undefined,
+): DevicePostDecodeConfig | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const upsampleRaw = String(raw.upsampleMode ?? "");
+  const upsampleMode = (
+    VALID_UPSAMPLE_MODES.has(upsampleRaw as DevicePostDecodeConfig["upsampleMode"])
+      ? upsampleRaw
+      : "duplicate"
+  ) as DevicePostDecodeConfig["upsampleMode"];
+
+  const out: DevicePostDecodeConfig = { upsampleMode };
+
+  const target = out as unknown as Record<string, unknown>;
+  const optBool = (k: keyof DevicePostDecodeConfig): void => {
+    if (raw[k] !== undefined) {
+      target[k] = Boolean(raw[k]);
+    }
+  };
+  const optNum = (k: keyof DevicePostDecodeConfig): void => {
+    const v = raw[k];
+    if (typeof v === "number" && Number.isFinite(v)) {
+      target[k] = v;
+    }
+  };
+
+  optBool("hpfEnabled");
+  optNum("hpfHz");
+  optBool("lpfEnabled");
+  optNum("lpfHz");
+  optBool("lowShelfEnabled");
+  optNum("lowShelfHz");
+  optNum("lowShelfDb");
+  optBool("highShelfEnabled");
+  optNum("highShelfHz");
+  optNum("highShelfDb");
+  optBool("presenceEnabled");
+  optNum("presenceHz");
+  optNum("presenceDb");
+  optNum("presenceQ");
+  optNum("saturationAmount");
+
+  // Short-circuit: if nothing is actually enabled / engaged AND the upsample
+  // is the legacy default, return null so the client takes the no-op fast
+  // path. The voice client checks `postDecode === null` exactly for this.
+  const anyShapingEnabled =
+    out.hpfEnabled === true ||
+    out.lpfEnabled === true ||
+    out.lowShelfEnabled === true ||
+    out.highShelfEnabled === true ||
+    out.presenceEnabled === true ||
+    (typeof out.saturationAmount === "number" && out.saturationAmount > 0);
+  if (!anyShapingEnabled && upsampleMode === "duplicate") {
+    return null;
+  }
+  return out;
 }
