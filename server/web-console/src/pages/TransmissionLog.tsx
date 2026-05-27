@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, describeError, fetchTransmissionAudio, type Transmission, type UserChannel } from "../api";
 import { useUnitAliasResolver } from "../unitAliases";
+import { imbeRoundtripPcm16k, pcm16ToWavBlob } from "../voice/imbeRoundtrip";
 
 export function formatDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.round(ms / 1000));
@@ -136,12 +137,20 @@ async function wavToMp3(wav: Blob): Promise<Blob> {
   return new Blob(chunks as BlobPart[], { type: "audio/mpeg" });
 }
 
+/** "pcm" = original clear PCM from the recorder. "vocoder" = in-browser
+ *  IMBE encode/decode roundtrip of that same PCM (what listeners heard). */
+type PlayMode = "pcm" | "vocoder";
+
 export function TransmissionLog() {
   const [items, setItems] = useState<Transmission[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [playingId, setPlayingId] = useState<number | null>(null);
-  const [busyId, setBusyId] = useState<number | null>(null);
+  // Each transmission has two playable forms — the clean PCM the speaker's
+  // mic captured (always stored), and what listeners actually heard over the
+  // air (IMBE roundtrip, rendered on demand). Track which combination is
+  // active so the buttons can show "Pause" vs "Play" correctly.
+  const [playing, setPlaying] = useState<{ id: number; mode: PlayMode } | null>(null);
+  const [busy, setBusy] = useState<{ id: number; mode: PlayMode } | null>(null);
   const [search, setSearch] = useState("");
   const [channelFilter, setChannelFilter] = useState("");
   const [user, setUser] = useState("");
@@ -156,7 +165,10 @@ export function TransmissionLog() {
   const aliasFor = useUnitAliasResolver();
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  // One cache per playback mode — vocoder URLs are derived from the PCM blob
+  // via an in-browser IMBE roundtrip, so the two are independent.
   const urlCache = useRef<Map<number, string>>(new Map());
+  const vocodedUrlCache = useRef<Map<number, string>>(new Map());
 
   // Latest filters reachable from the polling timer without re-arming it.
   const filtersRef = useRef({ search, channelFilter, user, fromDate, toDate, sort, cap });
@@ -194,11 +206,14 @@ export function TransmissionLog() {
     void refresh();
     const timer = window.setInterval(() => void refresh(), 5000);
     const cache = urlCache.current;
+    const vocodedCache = vocodedUrlCache.current;
     return () => {
       window.clearInterval(timer);
       audioRef.current?.pause();
       cache.forEach((url) => URL.revokeObjectURL(url));
       cache.clear();
+      vocodedCache.forEach((url) => URL.revokeObjectURL(url));
+      vocodedCache.clear();
     };
   }, [refresh]);
 
@@ -248,33 +263,85 @@ export function TransmissionLog() {
     return url;
   }, []);
 
-  async function play(id: number) {
-    if (playingId === id && audioRef.current) {
+  /**
+   * Returns an object URL for the IMBE-roundtripped (vocoded) version of the
+   * recording. Generated on first request by decoding the stored WAV, feeding
+   * the PCM through {@link imbeRoundtripPcm16k}, and wrapping the result as
+   * a fresh WAV blob. Cached so repeated playback doesn't re-encode.
+   */
+  const vocodedUrlFor = useCallback(async (id: number): Promise<string> => {
+    const cached = vocodedUrlCache.current.get(id);
+    if (cached) {
+      return cached;
+    }
+    const blob = await fetchTransmissionAudio(id);
+    // Reuse the browser's WAV parser (handles header + unknown chunks) so we
+    // don't ship a second decoder. AudioContext gives floats; clamp + scale
+    // back to Int16 for the codec input.
+    const ctx = new AudioContext();
+    let pcm16: Int16Array;
+    let sampleRate: number;
+    try {
+      const audioBuffer = await ctx.decodeAudioData(await blob.arrayBuffer());
+      sampleRate = audioBuffer.sampleRate;
+      const channel = audioBuffer.getChannelData(0);
+      pcm16 = new Int16Array(channel.length);
+      for (let i = 0; i < channel.length; i++) {
+        const s = Math.max(-1, Math.min(1, channel[i]));
+        pcm16[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
+      }
+    } finally {
+      void ctx.close();
+    }
+    // The recorder writes 16 kHz mono PCM. If we ever get a different rate
+    // (older test recording, custom upload), bail rather than producing
+    // wrong-pitched output.
+    if (sampleRate !== 16000) {
+      throw new Error(`Vocoder preview only supports 16 kHz audio (got ${sampleRate} Hz).`);
+    }
+    const vocoded = await imbeRoundtripPcm16k(pcm16);
+    const wav = pcm16ToWavBlob(vocoded, 16000);
+    const url = URL.createObjectURL(wav);
+    vocodedUrlCache.current.set(id, url);
+    return url;
+  }, []);
+
+  /** Plays the requested mode for the given transmission. Clicking the active
+   *  mode again pauses; clicking the other mode swaps. */
+  async function play(id: number, mode: PlayMode) {
+    if (playing && playing.id === id && playing.mode === mode && audioRef.current) {
       audioRef.current.pause();
-      setPlayingId(null);
+      setPlaying(null);
       return;
     }
-    setBusyId(id);
+    setBusy({ id, mode });
     try {
-      const url = await objectUrlFor(id);
+      const url = mode === "vocoder" ? await vocodedUrlFor(id) : await objectUrlFor(id);
       let audio = audioRef.current;
       if (!audio) {
         audio = new Audio();
-        audio.onended = () => setPlayingId(null);
+        audio.onended = () => setPlaying(null);
         audioRef.current = audio;
       }
       audio.src = url;
       await audio.play();
-      setPlayingId(id);
-    } catch {
-      setError("Could not play that recording.");
+      setPlaying({ id, mode });
+    } catch (err) {
+      setError(
+        mode === "vocoder"
+          ? `Could not render vocoder preview: ${describeError(err)}`
+          : "Could not play that recording.",
+      );
     } finally {
-      setBusyId(null);
+      setBusy(null);
     }
   }
 
   async function download(id: number) {
-    setBusyId(id);
+    // Download is always the original PCM (matches the previous behaviour and
+    // the on-disk format the recorder writes). The vocoder preview is a
+    // playback-only A/B convenience, not an artifact users would archive.
+    setBusy({ id, mode: "pcm" });
     try {
       const url = await objectUrlFor(id);
       const link = document.createElement("a");
@@ -286,7 +353,7 @@ export function TransmissionLog() {
     } catch {
       setError("Could not download that recording.");
     } finally {
-      setBusyId(null);
+      setBusy(null);
     }
   }
 
@@ -495,10 +562,29 @@ export function TransmissionLog() {
                 {transcript.text}
               </div>
               <div className="tx-card-actions">
-                <button className="btn sm" disabled={busyId === tx.id} onClick={() => play(tx.id)}>
-                  {playingId === tx.id ? "Pause" : busyId === tx.id ? "…" : "Play"}
-                </button>
-                <button className="btn sm" disabled={busyId === tx.id} onClick={() => download(tx.id)}>
+                <PlayButton
+                  id={tx.id}
+                  mode="pcm"
+                  label="Play PCM"
+                  title="Clean PCM the speaker's mic captured (what the recorder stores)."
+                  playing={playing}
+                  busy={busy}
+                  onClick={play}
+                />
+                <PlayButton
+                  id={tx.id}
+                  mode="vocoder"
+                  label="Play vocoder"
+                  title="What listeners heard over the air — IMBE encode/decode roundtrip of the same audio."
+                  playing={playing}
+                  busy={busy}
+                  onClick={play}
+                />
+                <button
+                  className="btn sm"
+                  disabled={busy?.id === tx.id}
+                  onClick={() => download(tx.id)}
+                >
                   Download
                 </button>
               </div>
@@ -550,5 +636,42 @@ export function TransmissionLog() {
         ))}
       </div>
     </div>
+  );
+}
+
+/** Single per-row playback button used for both PCM and vocoder modes.
+ *  Shows the right Pause / Play / … state given the current playing/busy
+ *  selection so the user can see at a glance which version is active. */
+function PlayButton({
+  id,
+  mode,
+  label,
+  title,
+  playing,
+  busy,
+  onClick,
+}: {
+  id: number;
+  mode: PlayMode;
+  label: string;
+  title: string;
+  playing: { id: number; mode: PlayMode } | null;
+  busy: { id: number; mode: PlayMode } | null;
+  onClick: (id: number, mode: PlayMode) => void;
+}) {
+  const isPlaying = playing?.id === id && playing?.mode === mode;
+  const isBusy = busy?.id === id && busy?.mode === mode;
+  // Disable while a request for *this row* is in flight, no matter which mode
+  // it's for — prevents the two buttons fighting over a shared <audio> element.
+  const isRowBusy = busy?.id === id;
+  return (
+    <button
+      className="btn sm"
+      title={title}
+      disabled={isRowBusy && !isBusy}
+      onClick={() => onClick(id, mode)}
+    >
+      {isPlaying ? `Pause ${mode === "vocoder" ? "vocoder" : "PCM"}` : isBusy ? "…" : label}
+    </button>
   );
 }
