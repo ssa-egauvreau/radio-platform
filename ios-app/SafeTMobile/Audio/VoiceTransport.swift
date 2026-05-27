@@ -45,6 +45,21 @@ final class VoiceTransport {
     private let imbeMagic: [UInt8] = [0xF5, 0xAB]
     private let listenPcmMagic: [UInt8] = [0xF6, 0xAC]
 
+    /// Agency-pushed RX shaping (presence bell, soft saturation, shelves,
+    /// upsample mode). `nil` when no admin has pushed shaping or when the
+    /// `/v1/audio/config` fetch hasn't landed yet — RX takes the legacy
+    /// duplicate 8 → 16 kHz upsample with no biquads. Rebuilt by
+    /// `refreshAudioConfig()` on every connect / reconnect so admin
+    /// changes pick up without restarting the app.
+    private var postDecodeProcessor: PostDecodeChain.Processor?
+    /// Last inbound voice frame timestamp (seconds, monotonic clock). Used
+    /// only to detect a talk-spurt boundary on RX so the post-decode chain
+    /// can reset its biquad state before the next talker's first frame.
+    private var lastInboundVoiceAt: TimeInterval = 0
+    /// Treat > 300 ms gap between inbound voice frames as a new talk-spurt.
+    /// Matches the Android `scanTalkSpurtGapNs` for the same reason.
+    private let talkSpurtGapSeconds: TimeInterval = 0.3
+
     init(baseURL: URL, token: String, unitId: String, audio: VoiceAudio, session: URLSession = .shared) {
         self.baseURL = baseURL
         self.token = token
@@ -157,6 +172,57 @@ final class VoiceTransport {
         task.resume()
         listen()
         startReceivingHeartbeat()
+        // Fetch agency audio config in parallel. RX falls back to the legacy
+        // duplicate-upsample path until this lands; once the processor is
+        // built, the next inbound IMBE frame picks it up automatically.
+        Task { [weak self] in await self?.refreshAudioConfig() }
+    }
+
+    /// Fetches the agency-pushed audio config and rebuilds
+    /// `postDecodeProcessor` from its `postDecode` block. Best-effort: a
+    /// failed request leaves whatever was previously cached intact (or nil
+    /// on first connect), so a transient server hiccup just keeps RX on the
+    /// legacy fast path instead of crashing the listener.
+    private func refreshAudioConfig() async {
+        let apiBase = baseURL
+        let client = RadioApiClient(baseURL: apiBase, token: token)
+        do {
+            let response = try await client.audioConfig()
+            let next: PostDecodeChain.Processor?
+            if let pd = response.config?.postDecode {
+                let cfg = pd.toConfig()
+                next = cfg.isNoOp ? nil : PostDecodeChain.Processor(config: cfg)
+            } else {
+                next = nil
+            }
+            await MainActor.run {
+                self.postDecodeProcessor = next
+                // Reset the talk-spurt timestamp so the next inbound frame
+                // is treated as a new spurt boundary — the new processor's
+                // biquad state starts from rest, but we also want to log
+                // that boundary cleanly in case logging is added later.
+                self.lastInboundVoiceAt = 0
+            }
+        } catch {
+            logger.warning("audio config refresh failed: \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    /// Run an IMBE-decoded 8 kHz frame through the agency post-decode chain
+    /// when configured; otherwise fall back to the legacy duplicate-upsample
+    /// path. Resets the processor's biquad state at every talk-spurt boundary
+    /// so a previous talker's filter ring can't bleed into the next talker's
+    /// first frame.
+    private func applyPostDecodeOrDup(_ pcm8k: [Int16]) -> Data {
+        guard let processor = postDecodeProcessor else {
+            return P25ImbeNative.Frames.upsampleDup8kToLe16Mono(pcm8k160: pcm8k)
+        }
+        let now = ProcessInfo.processInfo.systemUptime
+        if lastInboundVoiceAt == 0 || (now - lastInboundVoiceAt) > talkSpurtGapSeconds {
+            processor.reset()
+        }
+        lastInboundVoiceAt = now
+        return processor.process(pcm8k160: pcm8k)
     }
 
     private func sendJoinFrame() {
@@ -239,7 +305,7 @@ final class VoiceTransport {
             }
             let codeword = payload.subdata(in: 2..<13)
             guard let pcm8k = P25ImbeNative.decodeCodeword11(codeword) else { return }
-            let pcm16 = P25ImbeNative.Frames.upsampleDup8kToLe16Mono(pcm8k160: pcm8k)
+            let pcm16 = applyPostDecodeOrDup(pcm8k)
             lastReceivedAt = Date()
             onReceivingChange?(true)
             audio.enqueueIncoming(pcm16)
