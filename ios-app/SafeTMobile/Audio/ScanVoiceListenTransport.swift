@@ -74,7 +74,11 @@ final class ScanVoiceListenTransport {
             ) { [weak self] ch in
                 self?.onScanRx?(ch)
             } isAliveCheck: { [weak self] key in
-                self?.connections[key] != nil
+                // `dict[key]` already returns `ScanConnection?`; the outer `?.`
+                // produces `ScanConnection??` and a `!= nil` on that is `true`
+                // whenever `self` is alive — even after the entry was removed.
+                // Flatten with `??` so a missing key correctly reads as dead.
+                (self?.connections[key] ?? nil) != nil
             }
             connections[key] = conn
             conn.open()
@@ -89,6 +93,7 @@ final class ScanVoiceListenTransport {
 
     // MARK: - per-channel connection
 
+    @MainActor
     fileprivate final class ScanConnection {
         let channelLabel: String
         private let channelKey: String
