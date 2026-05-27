@@ -224,7 +224,7 @@ export function LiveControlPanel() {
     setStatus(null);
     setError(null);
     try {
-      await api.deleteChannel(channel.id);
+      await api.deleteEmergencyChannel(channel.id);
       setStatus(`Deleted emergency channel "${channel.name}".`);
       await refreshChannels();
       const fresh = await api.channelRosters();
@@ -232,6 +232,8 @@ export function LiveControlPanel() {
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 403) {
         setError("Only admins can delete channels.");
+      } else if (err instanceof ApiError && err.message === "not_emergency_channel") {
+        setError(`"${channel.name}" is no longer an emergency channel.`);
       } else {
         setError(`Could not delete "${channelName}".`);
       }
