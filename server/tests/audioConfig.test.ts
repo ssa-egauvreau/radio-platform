@@ -43,7 +43,7 @@ test("deriveDeviceAudioConfig: null input → safe all-off defaults (gain=1.0)",
     noiseSuppression: false,
     gainMultiplier: 1.0,
     bypassMicProcessing: false,
-  });
+    postDecode: null,  });
 });
 
 test("deriveDeviceAudioConfig: empty object → same safe defaults", () => {
@@ -55,7 +55,7 @@ test("deriveDeviceAudioConfig: empty object → same safe defaults", () => {
     noiseSuppression: false,
     gainMultiplier: 1.0,
     bypassMicProcessing: false,
-  });
+    postDecode: null,  });
 });
 
 test("deriveDeviceAudioConfig: array input is rejected → defaults", () => {
@@ -66,7 +66,7 @@ test("deriveDeviceAudioConfig: array input is rejected → defaults", () => {
     noiseSuppression: false,
     gainMultiplier: 1.0,
     bypassMicProcessing: false,
-  });
+    postDecode: null,  });
 });
 
 test("deriveDeviceAudioConfig: agcEnabled=false forces gainMultiplier=1.0 regardless of agcMaxGain", () => {
@@ -128,7 +128,7 @@ test("deriveDeviceAudioConfig: bypassMicProcessing=true forces gainMultiplier=1.
       agcEnabled: true,
       agcMaxGain: 12,
       bypassMicProcessing: true,
-    },
+      postDecode: null,    },
   });
   assert.equal(out.bypassMicProcessing, true);
   assert.equal(out.agcEnabled, true, "agcEnabled passes through unchanged");
@@ -214,7 +214,7 @@ test("deriveDeviceAudioConfig: ignores top-level keys outside preImbe (postDecod
     noiseSuppression: false,
     gainMultiplier: 2.0,
     bypassMicProcessing: false,
-  });
+    postDecode: null,  });
 });
 
 test("deriveDeviceAudioConfig: every field type matches the device-side contract", () => {
@@ -227,7 +227,7 @@ test("deriveDeviceAudioConfig: every field type matches the device-side contract
       agcMaxGain: 8,
       windGateEnabled: true,
       bypassMicProcessing: false,
-    },
+      postDecode: null,    },
   });
   assert.equal(typeof out.agcEnabled, "boolean");
   assert.equal(typeof out.noiseSuppression, "boolean");

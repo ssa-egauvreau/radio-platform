@@ -4,6 +4,7 @@
 import { api, getToken, type Permission } from "../api";
 import { ImbeTxConditioner } from "./imbeTxConditioner";
 import { imbeDecode, imbeEncode, imbeReady, initImbe } from "./imbeVocoder";
+import { PostDecodeProcessor, type PostDecodeConfig } from "./postDecodeChain";
 import { loadMarker1033Pcm } from "./marker1033";
 
 export type VoiceState = "idle" | "connecting" | "listening" | "transmitting" | "error" | "closed";
@@ -222,6 +223,13 @@ export class VoiceChannelClient {
    *  TX conditioner runs HPF + LPF only (no expander, no makeup AGC). Matches
    *  the radio-bridge mic chain so handset audio sounds like bridge audio. */
   private bypassMicProcessing = false;
+  /** Agency-pushed RX shaping (presence bell, saturation, shelves, upsample
+   *  mode). `null` when no shaping is configured — RX falls through to the
+   *  legacy sample-duplicate path. The processor holds per-channel filter
+   *  state across frames within a talk-spurt and is reset() on each new
+   *  inbound talk-spurt boundary so a previous talker's biquad ring can't
+   *  bleed into the next talker's first frame. */
+  private postDecodeProcessor: PostDecodeProcessor | null = null;
   /** Promise resolved once refreshAudioConfig() has settled (success or fail)
    *  for the most recent connect(). startTransmit awaits this so the very
    *  first PTT after connect uses the right getUserMedia constraints instead
@@ -286,10 +294,19 @@ export class VoiceChannelClient {
     try {
       const res = await api.getAudioConfigSummary();
       this.bypassMicProcessing = Boolean(res.config?.bypassMicProcessing ?? false);
+      // Build a fresh processor if the agency pushed post-decode shaping.
+      // The server already strips the field to `null` when shaping would be
+      // a no-op (see `derivePostDecodeBlock`), so any non-null value here
+      // is worth running through the chain. Construction is cheap (just
+      // computes biquad coefficients once); the per-frame `process()` is
+      // the hot path.
+      const pd = (res.config?.postDecode ?? null) as PostDecodeConfig | null;
+      this.postDecodeProcessor = pd ? new PostDecodeProcessor(pd) : null;
     } catch (err) {
       console.warn(
-        `[voice] failed to refresh audio config — keeping cached value ` +
-          `(bypassMicProcessing=${this.bypassMicProcessing}):`,
+        `[voice] failed to refresh audio config — keeping cached values ` +
+          `(bypassMicProcessing=${this.bypassMicProcessing}, ` +
+          `postDecode=${this.postDecodeProcessor ? "active" : "off"}):`,
         err,
       );
     }
@@ -521,6 +538,10 @@ export class VoiceChannelClient {
     this.lastInboundMs = Date.now();
     if (!this.receiving) {
       this.receiving = true;
+      // Reset the post-decode chain at every talk-spurt boundary so a prior
+      // talker's biquad state (especially shelves and the presence bell)
+      // can't ring into the first few ms of the new talker's audio.
+      this.postDecodeProcessor?.reset();
       this.callbacks.onReceiving(true);
     }
   }
@@ -535,7 +556,17 @@ export class VoiceChannelClient {
     if (bytes.byteLength === 13 && bytes[0] === IMBE_MAGIC_0 && bytes[1] === IMBE_MAGIC_1) {
       const pcm8k = imbeDecode(bytes.subarray(2));
       if (pcm8k) {
-        this.schedulePcm(upsample8kTo16k(pcm8k));
+        // When the agency pushed post-decode shaping (presence / saturation
+        // / shelves / polyphase24 upsample) every IMBE frame runs through
+        // the chain at the configured output rate. Otherwise fall back to
+        // the legacy 8 → 16 kHz sample-duplicate path so the no-shaping
+        // case stays as cheap as it was before this PR.
+        if (this.postDecodeProcessor) {
+          const shaped = this.postDecodeProcessor.process(pcm8k);
+          this.schedulePcm(shaped, { sampleRate: this.postDecodeProcessor.rate() });
+        } else {
+          this.schedulePcm(upsample8kTo16k(pcm8k));
+        }
       }
       return;
     }
@@ -562,7 +593,10 @@ export class VoiceChannelClient {
   }
 
   /** Queues one PCM-16 chunk for gapless playback on the listen context. */
-  private schedulePcm(pcm: Int16Array, track = false): void {
+  private schedulePcm(
+    pcm: Int16Array,
+    opts: { sampleRate?: number; track?: boolean } = {},
+  ): void {
     const ctx = this.playCtx;
     if (!ctx || pcm.length === 0) {
       return;
@@ -570,7 +604,13 @@ export class VoiceChannelClient {
     if (ctx.state === "suspended") {
       void ctx.resume();
     }
-    const frame = ctx.createBuffer(1, pcm.length, TARGET_RATE);
+    // AudioBuffer carries its own sampleRate independent of the AudioContext;
+    // the browser handles any resample to the context rate transparently. So
+    // a 24 kHz buffer scheduled into a 16 kHz context plays correctly — just
+    // slightly more expensive than rate-matched playback. The voice-client
+    // AudioContext stays at TARGET_RATE so legacy tone-out / marker buffers
+    // keep playing rate-matched.
+    const frame = ctx.createBuffer(1, pcm.length, opts.sampleRate ?? TARGET_RATE);
     const out = frame.getChannelData(0);
     for (let i = 0; i < pcm.length; i++) {
       out[i] = pcm[i] / 0x8000;
@@ -590,7 +630,7 @@ export class VoiceChannelClient {
     source.start(this.playHead);
     this.playHead += frame.duration;
 
-    if (track) {
+    if (opts.track) {
       this.localTones.add(source);
       source.onended = () => this.localTones.delete(source);
     }
@@ -598,7 +638,7 @@ export class VoiceChannelClient {
 
   /** Plays a locally-generated tone (marker / tone-out) that Stop All Sounds can cut. */
   private playLocalTone(pcm: Int16Array): void {
-    this.schedulePcm(pcm, true);
+    this.schedulePcm(pcm, { track: true });
   }
 
   /** Begins microphone capture and transmission. Throws on permission/mic failure. */
