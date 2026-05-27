@@ -104,7 +104,7 @@ class LoginViewModel(
                         401 -> "Sign-in failed. Check agency code, username, and password."
                         403 -> "This account cannot use the radio app."
                         404 -> "Wrong server address (404). In android-app/local.properties set " +
-                            "radio.api.base.url=https://safet.up.railway.app/ then Sync Gradle and rebuild."
+                            "radio.api.base.url=https://safet-ptt.com/ then Sync Gradle and rebuild."
                         else -> "Sign-in failed (${http.code()})."
                     }
                 }
@@ -117,7 +117,7 @@ class LoginViewModel(
                 _uiState.update {
                     it.copy(
                         busy = false,
-                        errorMessage = "Cannot reach server: $errorType. $hint Set radio.api.base.url=https://safet.up.railway.app/ in local.properties and rebuild.",
+                        errorMessage = "Cannot reach server: $errorType. $hint Set radio.api.base.url=https://safet-ptt.com/ in local.properties and rebuild.",
                     )
                 }
             }

@@ -37,7 +37,7 @@ Repo → Settings → Secrets and variables → Actions:
 | `RELEASE_KEYSTORE_PASSWORD` | the store password |
 | `RELEASE_KEY_ALIAS` | `safet` (or your alias) |
 | `RELEASE_KEY_PASSWORD` | the key password |
-| `APP_UPDATE_PUBLISH_URL` | base server URL, e.g. `https://safet.up.railway.app` |
+| `APP_UPDATE_PUBLISH_URL` | base server URL, e.g. `https://safet-ptt.com` |
 | `APP_UPDATE_PUBLISH_TOKEN` | a long random string (shared with the server below) |
 
 ### 3. Configure the server (Railway)

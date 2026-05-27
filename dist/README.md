@@ -48,7 +48,7 @@ Every push to **`main`** runs the **Android APK** workflow. On GitHub:
 4. Tap **Install**.
 5. Open **safeT PTT** and sign in with your agency account.
 
-**Note:** This debug APK is preconfigured to use **`https://safet.up.railway.app/`** unless you built with a custom `radio.api.base.url` in `local.properties`.
+**Note:** This debug APK is preconfigured to use **`https://safet-ptt.com/`** unless you built with a custom `radio.api.base.url` in `local.properties`.
 
 ## MP22 (dual display, Android 8.1, no touch screen)
 

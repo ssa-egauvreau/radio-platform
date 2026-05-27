@@ -15,7 +15,7 @@ On channels with **AI dispatch ON**, radios must send **clear PCM** (not P25 IMB
 
 Open in a browser:
 
-`https://safet.up.railway.app/health`
+`https://safet-ptt.com/health`
 
 Look at the JSON:
 
