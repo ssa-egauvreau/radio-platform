@@ -13,8 +13,12 @@ final class RadioViewModel: ObservableObject {
     private let user: AuthenticatedUser
     private let voiceAudio: VoiceAudio
     private let voiceTransport: VoiceTransport
+    private let scanTransport: ScanVoiceListenTransport
     private let sounds = RadioSounds()
     private let unitId: String
+    /// Cancels the "SCAN: <ch>" banner after voice activity on the scan
+    /// channel goes quiet.
+    private var scanBannerClearTask: Task<Void, Never>?
     /// `os.Logger` for radio-state events. Visible in Console.app on a Mac
     /// (filter on subsystem == com.safetptt.mobile) and in the Xcode debug
     /// console. Use this rather than print() so log lines survive Release
@@ -45,6 +49,12 @@ final class RadioViewModel: ObservableObject {
             unitId: unitId,
             audio: voiceAudio
         )
+        scanTransport = ScanVoiceListenTransport(
+            baseURL: RadioConfig.apiBaseURL,
+            token: token,
+            unitId: unitId,
+            audio: voiceAudio
+        )
         locationReporter = LocationReporter(api: api)
         locationReporter.configure(unitId: unitId)
 
@@ -55,10 +65,11 @@ final class RadioViewModel: ObservableObject {
         locationReporter.onAuthorizationChange = { [weak self] authorized in
             Task { @MainActor in self?.handleLocationAuth(authorized) }
         }
-        if uiState.gpsActive {
-            locationReporter.start()
-        }
+        locationReporter.start()
         wireVoiceCallbacks()
+        scanTransport.onScanRx = { [weak self] channel in
+            self?.handleScanRx(channel: channel)
+        }
         startClock()
         startPresencePolling()
         startInboxPolling()
@@ -66,8 +77,9 @@ final class RadioViewModel: ObservableObject {
     }
 
     deinit {
-        Task { @MainActor [voiceTransport, voiceAudio] in
+        Task { @MainActor [voiceTransport, voiceAudio, scanTransport] in
             voiceTransport.disconnect()
+            scanTransport.disconnect()
             voiceAudio.stop()
         }
     }
@@ -80,7 +92,8 @@ final class RadioViewModel: ObservableObject {
         case .pttPressed: Task { await onPttPressed() }
         case .pttReleased: onPttReleased()
         case .emergencyToggle: toggleEmergency()
-        case .toggleGps: toggleGps()
+        case .toggleScan: toggleScan()
+        case .setScanChannels(let channels): setScanChannels(channels)
         }
     }
 
@@ -101,6 +114,11 @@ final class RadioViewModel: ObservableObject {
             uiState.channelsLoading = false
             uiState.channelSyncError = nil
             uiState.networkLabel = "ONLINE"
+            uiState.channelCatalog = channelNames
+            // Drop any scan entries that no longer exist in the catalog so the
+            // picker / transport never tries to listen to a removed channel.
+            let validKeys = Set(channelNames.map { $0.lowercased() })
+            uiState.scanIncludedChannels = uiState.scanIncludedChannels.intersection(validKeys)
             applyTuning()
             uiState.statusMessage = "READY"
             locationReporter.setChannel(currentChannel)
@@ -108,12 +126,14 @@ final class RadioViewModel: ObservableObject {
             if let channel = currentChannel {
                 voiceTransport.join(channel: channel)
             }
+            refreshScanTransport()
             await pulsePresence()
         } catch {
             uiState.channelsLoading = false
             uiState.networkLabel = "OFFLINE"
             uiState.channelSyncError = "Channel sync failed"
             uiState.statusMessage = "SYNC FAILED"
+            refreshScanTransport()
         }
     }
 
@@ -142,6 +162,10 @@ final class RadioViewModel: ObservableObject {
         if let channel = currentChannel {
             voiceTransport.join(channel: channel)
         }
+        // The home channel is excluded from the scan listen set, so a tune
+        // change has to refresh the transport even if the scan list itself
+        // didn't change.
+        refreshScanTransport()
         Task { await pulsePresence() }
     }
 
@@ -337,22 +361,66 @@ final class RadioViewModel: ObservableObject {
         return "ERR"
     }
 
-    private func toggleGps() {
-        let next = !uiState.gpsActive
-        uiState.gpsActive = next
-        if next {
-            locationReporter.start()
-            uiState.statusMessage = uiState.locationAuthorized ? "GPS ON" : "GPS — REQUESTING ACCESS…"
-        } else {
-            locationReporter.stop()
-            uiState.statusMessage = "GPS OFF"
+    private func handleLocationAuth(_ authorized: Bool) {
+        uiState.locationAuthorized = authorized
+        if !authorized {
+            uiState.statusMessage = "GPS — NO LOCATION ACCESS"
         }
     }
 
-    private func handleLocationAuth(_ authorized: Bool) {
-        uiState.locationAuthorized = authorized
-        guard uiState.gpsActive else { return }
-        uiState.statusMessage = authorized ? "GPS ON" : "GPS — NO LOCATION ACCESS"
+    // MARK: - scan
+
+    private func toggleScan() {
+        uiState.scanActive.toggle()
+        if !uiState.scanActive {
+            uiState.scanRxChannel = nil
+            scanBannerClearTask?.cancel()
+            scanBannerClearTask = nil
+        }
+        uiState.statusMessage = uiState.scanActive ? scanStatusMessage() : "SCAN OFF"
+        refreshScanTransport()
+    }
+
+    private func setScanChannels(_ channels: Set<String>) {
+        let valid = Set(channelNames.map { $0.lowercased() })
+        uiState.scanIncludedChannels = channels.intersection(valid)
+        if uiState.scanActive {
+            uiState.statusMessage = scanStatusMessage()
+        }
+        refreshScanTransport()
+    }
+
+    private func refreshScanTransport() {
+        let labels = Set(channelNames.filter {
+            uiState.scanIncludedChannels.contains($0.lowercased())
+        })
+        scanTransport.updateScanListen(
+            homeChannel: currentChannel,
+            scanChannels: labels,
+            networkOnline: uiState.networkLabel == "ONLINE",
+            scanActive: uiState.scanActive
+        )
+    }
+
+    /// `SCAN ON` with the count of channels actually being listened to
+    /// (excluding the home channel, which is already on the primary socket).
+    private func scanStatusMessage() -> String {
+        let home = currentChannel?.lowercased()
+        let listening = uiState.scanIncludedChannels.filter { $0 != home }.count
+        return listening > 0 ? "SCAN ON · \(listening) CH" : "SCAN ON · PICK CHANNELS"
+    }
+
+    private func handleScanRx(channel: String) {
+        guard uiState.scanActive else { return }
+        uiState.scanRxChannel = channel
+        scanBannerClearTask?.cancel()
+        scanBannerClearTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .milliseconds(800))
+            guard let self, !Task.isCancelled else { return }
+            if self.uiState.scanRxChannel == channel {
+                self.uiState.scanRxChannel = nil
+            }
+        }
     }
 
     // MARK: - polling loops

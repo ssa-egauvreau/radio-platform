@@ -8,5 +8,6 @@ enum RadioUiEvent {
     case pttPressed
     case pttReleased
     case emergencyToggle
-    case toggleGps
+    case toggleScan
+    case setScanChannels(Set<String>)
 }
