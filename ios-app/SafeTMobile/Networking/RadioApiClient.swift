@@ -109,6 +109,76 @@ struct LocationReport: Encodable {
     }
 }
 
+/// Response shape for `GET /v1/audio/config`. `config` is `nil` when no admin
+/// has pushed agency audio settings yet — the handset just keeps its defaults.
+/// `updatedAt` is server-stamped ISO-8601; the iOS client doesn't consult it,
+/// but it's surfaced for parity with the web's `AudioConfigSummaryResponse`.
+struct AudioConfigSummaryResponse: Decodable {
+    let config: AudioConfigSummary?
+    let updatedAt: String?
+}
+
+/// Device-friendly summary of the agency-wide audio config. Mirrors the
+/// server-side `DeviceAudioConfig` (`server/src/audioConfig.ts`) and the
+/// Android `AudioConfigDto`. iOS currently consumes only the `postDecode`
+/// block (PR-postdecode-ios-rx); the AGC / gain / bypassMicProcessing fields
+/// are surfaced so a future PR mirroring PR-129's Android scope can wire the
+/// TX side without changing this struct.
+struct AudioConfigSummary: Decodable {
+    let agcEnabled: Bool?
+    let noiseSuppression: Bool?
+    let gainMultiplier: Double?
+    let bypassMicProcessing: Bool?
+    let postDecode: PostDecodeSummary?
+}
+
+/// Verbatim subset of `AudioLabConfig.postDecode` the handset consumes on
+/// RX. Optional fields fall back to safe "feature off" defaults inside
+/// `PostDecodeChain.Config` so a partial config from any vintage of admin
+/// push produces a coherent processor.
+struct PostDecodeSummary: Decodable {
+    let upsampleMode: String?
+    let hpfEnabled: Bool?
+    let hpfHz: Double?
+    let lpfEnabled: Bool?
+    let lpfHz: Double?
+    let lowShelfEnabled: Bool?
+    let lowShelfHz: Double?
+    let lowShelfDb: Double?
+    let highShelfEnabled: Bool?
+    let highShelfHz: Double?
+    let highShelfDb: Double?
+    let presenceEnabled: Bool?
+    let presenceHz: Double?
+    let presenceDb: Double?
+    let presenceQ: Double?
+    let saturationAmount: Double?
+
+    /// Build the typed `PostDecodeChain.Config` the processor consumes.
+    /// Optional fields default to the documented "feature off" values so an
+    /// older server (or a partial push) produces a coherent chain.
+    func toConfig() -> PostDecodeChain.Config {
+        return PostDecodeChain.Config(
+            upsampleMode: PostDecodeChain.UpsampleMode(upsampleMode),
+            hpfEnabled: hpfEnabled ?? false,
+            hpfHz: hpfHz ?? 250,
+            lpfEnabled: lpfEnabled ?? false,
+            lpfHz: lpfHz ?? 3300,
+            lowShelfEnabled: lowShelfEnabled ?? false,
+            lowShelfHz: lowShelfHz ?? 200,
+            lowShelfDb: lowShelfDb ?? 0,
+            highShelfEnabled: highShelfEnabled ?? false,
+            highShelfHz: highShelfHz ?? 2500,
+            highShelfDb: highShelfDb ?? 0,
+            presenceEnabled: presenceEnabled ?? false,
+            presenceHz: presenceHz ?? 2200,
+            presenceDb: presenceDb ?? 0,
+            presenceQ: presenceQ ?? 1.0,
+            saturationAmount: saturationAmount ?? 0
+        )
+    }
+}
+
 enum RadioApiError: Error {
     case invalidURL
     case badStatus(Int)
@@ -277,6 +347,14 @@ final class RadioApiClient {
         var request = URLRequest(url: baseURL.appendingPathComponent("v1/transmissions/\(id)/audio"))
         applyAuth(&request)
         return try await sendDiscardingBody(request)
+    }
+
+    /// Agency-wide audio config a logged-in member fetches on connect /
+    /// reconnect. Mirrors the Android `RadioApi.audioConfig()` and the web
+    /// console's `getAudioConfigSummary()` — the same server route powers
+    /// all three clients so admin presets land identically everywhere.
+    func audioConfig() async throws -> AudioConfigSummaryResponse {
+        return try await get("v1/audio/config", as: AudioConfigSummaryResponse.self)
     }
 
     // MARK: - transport
