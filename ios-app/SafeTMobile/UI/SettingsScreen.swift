@@ -131,7 +131,7 @@ struct SettingsScreen: View {
         Section("About") {
             row("App", "safeT Mobile")
             row("Version", appVersion)
-            row("Server", RadioConfig.apiBaseURL.host() ?? "—")
+            row("Server", RadioConfig.apiBaseURL.host(percentEncoded: false) ?? "—")
         }
         .listRowBackground(Color.safetSurface)
     }
