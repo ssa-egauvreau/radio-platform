@@ -154,6 +154,7 @@ import { enqueueKbIngest } from "./aiDispatch/knowledgeBase/ingest.js";
 import { getEmbeddingModelName } from "./aiDispatch/knowledgeBase/embeddings.js";
 import { handleTen8Webhook, handleTen8WebhookGet } from "./ten8/webhook.js";
 import {
+  androidUpdatePublishAuthError,
   handleAndroidUpdateApk,
   handleAndroidUpdateManifest,
   handleAndroidUpdatePublish,
@@ -346,9 +347,19 @@ export function createApiRouter(): Router {
   // Public, unauthenticated: the sideloaded Android fleet polls these to self-update.
   router.get("/app/android/version", handleAndroidUpdateManifest);
   router.get("/app/android/apk", handleAndroidUpdateApk);
+  // Reject unauthorized uploads before raw body parsing to avoid large-buffer DoS.
+  function androidUpdatePublishPreAuth(req: Request, res: Response, next: NextFunction): void {
+    const authError = androidUpdatePublishAuthError(req.headers);
+    if (authError) {
+      res.status(authError.status).json({ error: authError.error });
+      return;
+    }
+    next();
+  }
   // CI publishes new builds here (bearer-token auth inside the handler); raw APK body.
   router.post(
     "/app/android/publish",
+    androidUpdatePublishPreAuth,
     raw({ type: () => true, limit: "200mb" }),
     handleAndroidUpdatePublish,
   );
