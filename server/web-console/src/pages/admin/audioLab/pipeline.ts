@@ -1022,10 +1022,71 @@ export const AMBE_CHARACTER_PRESET: AudioLabConfig = {
   },
 };
 
+/** Higher-quality variant of the AMBE+2 character preset. Same approach,
+ *  but pushes every dial toward more clarity at the listener's expense in
+ *  HF roll-off conservatism:
+ *
+ *    - polyphase 8 → 24 kHz upsample (vs polyphase 16 kHz). The listener's
+ *      DAC almost certainly runs at 48 kHz, so going to 24 kHz before
+ *      handing off cuts the browser's own resample distance in half — same
+ *      reasoning as the "Higher quality (listen-only)" simple-UI choice.
+ *    - Low-shelf cut slightly relaxed (−3 dB vs −3.5) — less "tinny".
+ *    - Presence bell broader and a touch stronger (+2.5 dB @ Q 0.9 vs
+ *      +2 dB @ Q 1.0) — restores consonant clarity AMBE+2 spends bits on
+ *      without sharpening sibilants.
+ *    - High-shelf rolloff softer (−1.5 dB vs −2) — keeps more sparkle that
+ *      pure AMBE+2 would cut, trading a hair of "authenticity" for less
+ *      muffle.
+ *    - Saturation drive eased to 0.30 — the broader presence + softer HF
+ *      cut already lift perceived loudness, so the extra warmth would tip
+ *      into harshness here.
+ *
+ *  Same bridge-style mic chain on the encode side as the standard preset. */
+export const AMBE_CHARACTER_HQ_PRESET: AudioLabConfig = {
+  preImbe: {
+    windGateEnabled: false,
+    windGateThresholdDb: 6,
+    windGateAttenuationDb: -18,
+    windHpfEnabled: false,
+    windHpfHz: 200,
+    windHpfOrder: 4,
+    hpfEnabled: true,
+    hpfHz: 180,
+    lpfEnabled: true,
+    lpfHz: 3400,
+    agcEnabled: false,
+    agcTargetRms: 6000,
+    agcMaxGain: 6,
+    bypassMicProcessing: true,
+  },
+  vocoder: {
+    bypass: false,
+  },
+  postDecode: {
+    upsampleMode: "polyphase24",
+    hpfEnabled: false,
+    hpfHz: 250,
+    lpfEnabled: false,
+    lpfHz: 3300,
+    lowShelfEnabled: true,
+    lowShelfHz: 150,
+    lowShelfDb: -3,
+    highShelfEnabled: true,
+    highShelfHz: 3400,
+    highShelfDb: -1.5,
+    presenceEnabled: true,
+    presenceHz: 2200,
+    presenceDb: 2.5,
+    presenceQ: 0.9,
+    saturationAmount: 0.3,
+  },
+};
+
 export const BUILTIN_PRESETS: Record<string, AudioLabConfig> = {
   "Default IMBE": DEFAULT_PRESET,
   "Bridge-style minimal": BRIDGE_MINIMAL_PRESET,
   "AMBE+2 character": AMBE_CHARACTER_PRESET,
+  "AMBE+2 character (HQ)": AMBE_CHARACTER_HQ_PRESET,
   "Phase 2 voice": PHASE2_PRESET,
   Bypass: BYPASS_PRESET,
   "Deep P25 mobile": DEEP_MOBILE_PRESET,
