@@ -146,7 +146,8 @@ final class ScanVoiceListenTransport {
                 url: baseURL.appendingPathComponent("v1/voice/stream"),
                 resolvingAgainstBaseURL: false
             )
-            components?.scheme = (components?.scheme == "http") ? "ws" : "wss"
+            let currentScheme = components?.scheme
+            components?.scheme = (currentScheme == "http") ? "ws" : "wss"
             components?.queryItems = [URLQueryItem(name: "token", value: token)]
             guard let url = components?.url else { return }
             let ws = session.webSocketTask(with: URLRequest(url: url))
