@@ -4,6 +4,7 @@
 import { api, getToken, type Permission } from "../api";
 import { ImbeTxConditioner } from "./imbeTxConditioner";
 import { imbeDecode, imbeEncode, imbeReady, initImbe } from "./imbeVocoder";
+import { OpusWebDecoder } from "./opusDecoder";
 import { PostDecodeProcessor, type PostDecodeConfig } from "./postDecodeChain";
 import { loadMarker1033Pcm } from "./marker1033";
 import {
@@ -263,6 +264,12 @@ export class VoiceChannelClient {
   private warnedClearRx = false;
   /** Codecs we have already warned about being unsupported in this client. */
   private warnedUnsupportedCodecs: Set<VoiceCodec> = new Set();
+
+  /** Lazy Opus decoder (WebCodecs AudioDecoder). Constructed on the first
+   *  inbound Opus frame so a browser that never receives Opus never spends
+   *  the AudioDecoder configuration cost. Closed on disconnect to release
+   *  the WebCodecs context. */
+  private opusDecoder: OpusWebDecoder | null = null;
   /** Timestamps of recent raw PCM frames received — used to distinguish a sustained
    *  voice talk-spurt (many frames in quick succession) from a one-shot marker tone or
    *  tone-out (a single big PCM message). Only the warn-burst window of samples is kept. */
@@ -273,8 +280,25 @@ export class VoiceChannelClient {
     this.warnedUnsupportedCodecs.add(codec);
     console.warn(
       `[voice] received ${codec} frame on "${this.channelName}" — web client cannot decode this codec yet. ` +
-        `Audio from this channel will be silent until the ${codec} WASM module ships.`,
+        `Audio from this channel will be silent until the ${codec} decoder ships.`,
     );
+  }
+
+  /** Lazily constructs the Opus decoder on the first inbound Opus frame.
+   *  WebCodecs construction is cheap on supported browsers and a no-op
+   *  fallback (isReady=false) on unsupported ones, so the cost is paid
+   *  once per channel session that actually receives Opus. */
+  private ensureOpusDecoder(): OpusWebDecoder | null {
+    if (this.opusDecoder) return this.opusDecoder;
+    const dec = new OpusWebDecoder((pcm) => this.schedulePcm(pcm));
+    if (!dec.isReady()) {
+      // Construction failed (no WebCodecs / no Opus support). Cache the
+      // failed decoder anyway so we don't reconstruct on every frame.
+      this.opusDecoder = dec;
+      return null;
+    }
+    this.opusDecoder = dec;
+    return dec;
   }
 
   constructor(channelName: string, callbacks: VoiceCallbacks) {
@@ -634,7 +658,20 @@ export class VoiceChannelClient {
       }
       return;
     }
-    if (codec === "codec2_3200" || codec === "opus") {
+    if (codec === "opus") {
+      // WebCodecs decode is async; the decoder's output callback feeds
+      // schedulePcm directly. If the browser lacks WebCodecs Opus support,
+      // OpusWebDecoder reports isReady=false and we fall through to the
+      // one-shot "unsupported codec" warning.
+      const dec = this.ensureOpusDecoder();
+      if (dec && dec.isReady()) {
+        dec.decodeFrame(bytes.subarray(2));
+      } else {
+        this.warnUnsupportedCodecOnce(codec);
+      }
+      return;
+    }
+    if (codec === "codec2_3200") {
       // Recognised vocoded frame for a codec the web client doesn't decode
       // yet. Drop the frame (don't feed the speaker the encoded bytes as
       // PCM) and log once per codec per channel session so the
@@ -978,6 +1015,10 @@ export class VoiceChannelClient {
     }
     this.playGain = null;
     this.playAnalyser = null;
+    if (this.opusDecoder) {
+      this.opusDecoder.close();
+      this.opusDecoder = null;
+    }
     const ws = this.ws;
     this.ws = null;
     if (ws) {

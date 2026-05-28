@@ -59,10 +59,14 @@ export function isVoiceCodec(value: unknown): value is VoiceCodec {
 }
 
 /** Codecs the web console can currently encode (TX). IMBE only today;
- *  add to this list when Codec2 / Opus WASM are wired up. */
+ *  the existing TX path is synchronous and the WebCodecs AudioEncoder is
+ *  async, so adding Opus TX requires reshaping the worklet message
+ *  handler — deliberate follow-up. */
 export const WEB_ENCODE_CAPS: readonly VoiceCodec[] = ["imbe"];
 
-/** Codecs the web console can currently decode (RX). IMBE only today;
- *  Codec2 / Opus frames are recognised but dropped until their decoders
- *  ship. */
-export const WEB_DECODE_CAPS: readonly VoiceCodec[] = ["imbe"];
+/** Codecs the web console can currently decode (RX). IMBE always; Opus
+ *  via WebCodecs AudioDecoder when the browser supports it. The Opus
+ *  capability is advertised optimistically because the decoder degrades
+ *  gracefully (isReady=false → frames drop with a one-shot log) on
+ *  browsers that don't ship WebCodecs Opus, rather than crashing. */
+export const WEB_DECODE_CAPS: readonly VoiceCodec[] = ["imbe", "opus"];
