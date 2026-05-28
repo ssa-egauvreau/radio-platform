@@ -24,8 +24,18 @@ final class ScanVoiceListenTransport {
     private var wantListen = false
     private var homeChannelKey = ""
 
-    private let imbeMagic: [UInt8] = [0xF5, 0xAB]
     private let listenPcmMagic: [UInt8] = [0xF6, 0xAC]
+
+    /// RX-only codec dispatch. Scan listeners pick the right decoder per
+    /// inbound frame's magic bytes so a channel on Codec2 or Opus stays
+    /// audible while scanning, not just the IMBE channels.
+    private let codecRegistry: VoiceCodecRegistry = {
+        let registry = VoiceCodecRegistry()
+        registry.registerDecoder(ImbeDecoder())
+        registry.registerDecoder(Codec2Decoder())
+        registry.registerDecoder(OpusDecoder())
+        return registry
+    }()
 
     init(baseURL: URL, token: String, unitId: String, audio: VoiceAudio, session: URLSession = .shared) {
         self.baseURL = baseURL
@@ -69,8 +79,8 @@ final class ScanVoiceListenTransport {
                 audio: audio,
                 session: session,
                 logger: logger,
-                imbeMagic: imbeMagic,
-                listenPcmMagic: listenPcmMagic
+                listenPcmMagic: listenPcmMagic,
+                codecRegistry: codecRegistry
             ) { [weak self] ch in
                 self?.onScanRx?(ch)
             } isAliveCheck: { [weak self] key in
@@ -103,8 +113,8 @@ final class ScanVoiceListenTransport {
         private let audio: VoiceAudio
         private let session: URLSession
         private let logger: Logger
-        private let imbeMagic: [UInt8]
         private let listenPcmMagic: [UInt8]
+        private let codecRegistry: VoiceCodecRegistry
         private let onRx: (String) -> Void
         private let isAlive: (String) -> Bool
 
@@ -121,8 +131,8 @@ final class ScanVoiceListenTransport {
             audio: VoiceAudio,
             session: URLSession,
             logger: Logger,
-            imbeMagic: [UInt8],
             listenPcmMagic: [UInt8],
+            codecRegistry: VoiceCodecRegistry,
             onRx: @escaping (String) -> Void,
             isAliveCheck: @escaping (String) -> Bool
         ) {
@@ -134,8 +144,8 @@ final class ScanVoiceListenTransport {
             self.audio = audio
             self.session = session
             self.logger = logger
-            self.imbeMagic = imbeMagic
             self.listenPcmMagic = listenPcmMagic
+            self.codecRegistry = codecRegistry
             self.onRx = onRx
             self.isAlive = isAliveCheck
         }
@@ -167,11 +177,16 @@ final class ScanVoiceListenTransport {
 
         private func sendJoin() {
             guard let task else { return }
-            let join: [String: String] = [
+            // Scan sockets are listen-only — advertise decode caps so the
+            // server's join logging accurately reflects what this client can
+            // hear. The relay never asks a scan socket to TX.
+            let caps = codecRegistry.decodableCodecs().map { $0.wireId }
+            let join: [String: Any] = [
                 "type": "join",
                 "channel": channelLabel,
                 "unit_id": unitId,
                 "client": "ios_scan",
+                "caps": caps,
             ]
             guard let data = try? JSONSerialization.data(withJSONObject: join),
                   let text = String(data: data, encoding: .utf8) else { return }
@@ -220,23 +235,44 @@ final class ScanVoiceListenTransport {
                payload[payload.startIndex + 1] == listenPcmMagic[1] {
                 return
             }
-            if payload.count == 13,
-               payload[payload.startIndex] == imbeMagic[0],
-               payload[payload.startIndex + 1] == imbeMagic[1] {
-                guard P25ImbeNative.isAvailable || P25ImbeNative.initialize() else {
+            if payload.count >= 2,
+               let decoder = codecRegistry.decoder(
+                   forMagic: payload[payload.startIndex],
+                   payload[payload.startIndex + 1]
+               ) {
+                if decoder.codec == .imbe, !P25ImbeNative.isAvailable, !P25ImbeNative.initialize() {
                     logger.warning("scan IMBE frame discarded — vocoder not loaded")
                     return
                 }
-                let codeword = payload.subdata(in: 2..<13)
-                guard let pcm8k = P25ImbeNative.decodeCodeword11(codeword) else { return }
-                let pcm16 = P25ImbeNative.Frames.upsampleDup8kToLe16Mono(pcm8k160: pcm8k)
+                guard decoder.isReady else { return }
+                guard let samples = decoder.decodeFrame(payload) else { return }
+                let pcm16: Data
+                if decoder.nativeSampleRate == 8000 {
+                    pcm16 = P25ImbeNative.Frames.upsampleDup8kToLe16Mono(pcm8k160: samples)
+                } else {
+                    pcm16 = Self.shortLeMonoBytes(samples)
+                }
                 audio.enqueueIncoming(pcm16)
                 onRx(channelLabel)
                 return
             }
-            // Clear-PCM payload from a peer that lacks the vocoder.
+            // Clear-PCM payload from a peer that lacks any vocoder.
             audio.enqueueIncoming(payload)
             onRx(channelLabel)
+        }
+
+        private static func shortLeMonoBytes(_ samples: [Int16]) -> Data {
+            var out = Data(count: samples.count * 2)
+            out.withUnsafeMutableBytes { raw in
+                guard let base = raw.baseAddress else { return }
+                let bytes = base.assumingMemoryBound(to: UInt8.self)
+                for (i, s) in samples.enumerated() {
+                    let le = UInt16(bitPattern: s)
+                    bytes[i * 2] = UInt8(le & 0xff)
+                    bytes[i * 2 + 1] = UInt8((le >> 8) & 0xff)
+                }
+            }
+            return out
         }
 
         private func isJoinedFrame(_ text: String) -> Bool {
