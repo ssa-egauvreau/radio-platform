@@ -333,6 +333,7 @@ class RadioViewModel(
                     HardwareButtonEvent.VolumeCheckTapped -> soundPlayer.playVolumeCheck()
                     HardwareButtonEvent.ToggleDayNightPressed -> onDayNightKeyDown()
                     HardwareButtonEvent.ToggleDayNightReleased -> onDayNightKeyUp()
+                    HardwareButtonEvent.ForceInstallUpdatePressed -> onForceInstallUpdateKey()
                 }
             }
         }
@@ -476,10 +477,18 @@ class RadioViewModel(
             }
             is AppUpdater.UpdateProgress.Downloading -> {
                 startUpdateInProgress()
-                applyAppUpdateDownloadingBanner(progress.versionName)
+                applyAppUpdateDownloadingBanner(
+                    progress.versionName,
+                    progress.bytesDownloaded,
+                    progress.totalBytes,
+                )
             }
             is AppUpdater.UpdateProgress.Downloaded ->
                 onAppUpdateDownloaded(progress.notice)
+            is AppUpdater.UpdateProgress.Installing -> {
+                _uiState.update { it.copy(updateInstalling = true) }
+                applyAppUpdateInstallingBanner(progress.versionName)
+            }
             AppUpdater.UpdateProgress.UpToDate -> showUpToDate()
             AppUpdater.UpdateProgress.CheckFailed -> showUpdateCheckFailed()
         }
@@ -533,23 +542,75 @@ class RadioViewModel(
         }
     }
 
-    private fun applyAppUpdateDownloadingBanner(versionName: String) {
+    private fun applyAppUpdateDownloadingBanner(
+        versionName: String,
+        bytesDownloaded: Long = 0L,
+        totalBytes: Long? = null,
+    ) {
         val label = versionLabel(versionName)
+        val progressSuffix = formatDownloadProgress(bytesDownloaded, totalBytes)
         _uiState.update {
             it.copy(
-                appUpdateBanner = "UPDATE $label DOWNLOADING...",
-                statusMessage = "DOWNLOADING UPDATE",
+                appUpdateBanner = "UPDATE $label DOWNLOADING$progressSuffix",
+                statusMessage = "DOWNLOADING UPDATE$progressSuffix",
             )
         }
     }
 
+    /**
+     * Format the bytes-downloaded counter as a short suffix for the banner.
+     * Returns ` 12.4 MB / 38.1 MB · 32%` when total is known, ` 12.4 MB` when
+     * not, and `…` while we have no bytes yet so the banner stays moving
+     * even on a slow start.
+     */
+    private fun formatDownloadProgress(bytesDownloaded: Long, totalBytes: Long?): String {
+        if (bytesDownloaded <= 0L) return "…"
+        val mb = bytesDownloaded.toDouble() / 1_000_000.0
+        val mbStr = if (mb >= 10.0) "%.0f".format(mb) else "%.1f".format(mb)
+        if (totalBytes == null || totalBytes <= 0L) {
+            return " $mbStr MB"
+        }
+        val totalMb = totalBytes.toDouble() / 1_000_000.0
+        val totalStr = if (totalMb >= 10.0) "%.0f".format(totalMb) else "%.1f".format(totalMb)
+        val pct = ((bytesDownloaded.toDouble() / totalBytes.toDouble()) * 100).toInt()
+            .coerceIn(0, 100)
+        return " $mbStr / $totalStr MB · $pct%"
+    }
+
     private fun applyAppUpdateDownloadedBanner(versionName: String) {
+        // The download just finished — `AppUpdater` arms the install gate and
+        // fires the system installer next. Frame this as "installing" (not
+        // "reboot") because operators were power-cycling the device on the old
+        // "REBOOT TO INSTALL" wording even though that does nothing on its
+        // own. checkOnLaunch() now also retries the installer on the next
+        // start so a power cycle still helps — but the right action is to
+        // wait for the auto-install or trigger FORCE_INSTALL_UPDATE.
+        applyAppUpdateInstallingBanner(versionName)
+    }
+
+    private fun applyAppUpdateInstallingBanner(versionName: String) {
         val label = versionLabel(versionName)
         _uiState.update {
             it.copy(
-                appUpdateBanner = "UPDATE $label DOWNLOADED — REBOOT RADIO TO INSTALL",
-                statusMessage = "REBOOT TO INSTALL UPDATE",
+                appUpdateBanner = "INSTALLING UPDATE $label — DO NOT POWER OFF",
+                statusMessage = "INSTALLING UPDATE",
             )
+        }
+    }
+
+    /**
+     * Operator pressed the FORCE_INSTALL_UPDATE hardware key. If a download
+     * is pending, re-fire the installer and play the channel-switch tone
+     * so the operator gets audible feedback that the action registered.
+     * If there's nothing to install, play the "busy" tone — the same
+     * "you tried but no" cue used elsewhere — so the key feels alive.
+     */
+    private fun onForceInstallUpdateKey() {
+        val fired = appUpdater.forceRetryPendingInstall()
+        if (fired) {
+            soundPlayer.playChannelSwitch()
+        } else {
+            soundPlayer.playBusyAlert()
         }
     }
 

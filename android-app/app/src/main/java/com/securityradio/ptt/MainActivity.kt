@@ -410,6 +410,7 @@ class MainActivity : ComponentActivity() {
         val isPlayLast = repository.getMapping(HardwareAction.PLAY_LAST_TRANSMISSION).contains(keyCode)
         val isVolumeCheck = repository.getMapping(HardwareAction.VOLUME_CHECK).contains(keyCode)
         val isToggleDayNight = repository.getMapping(HardwareAction.TOGGLE_DAY_NIGHT).contains(keyCode)
+        val isForceInstallUpdate = repository.getMapping(HardwareAction.FORCE_INSTALL_UPDATE).contains(keyCode)
 
         // TM7+ knob: firmware sends a burst per detent; OS treats that as a held key and jumps
         // to min/max. Debounce here, then let super adjust volume once (do not use AudioManager
@@ -425,7 +426,7 @@ class MainActivity : ComponentActivity() {
         }
 
         if (isPtt || isEmergency || isChanUp || isChanDown || isScanToggle || isPlayLast || isVolumeCheck ||
-            isToggleDayNight
+            isToggleDayNight || isForceInstallUpdate
         ) {
             if (event?.repeatCount == 0) {
                 when {
@@ -437,6 +438,7 @@ class MainActivity : ComponentActivity() {
                     isPlayLast -> HardwareButtonRelay.sendEvent(HardwareButtonEvent.PlayLastTransmissionPressed)
                     isVolumeCheck -> HardwareButtonRelay.sendEvent(HardwareButtonEvent.VolumeCheckPressed)
                     isToggleDayNight -> HardwareButtonRelay.sendEvent(HardwareButtonEvent.ToggleDayNightPressed)
+                    isForceInstallUpdate -> HardwareButtonRelay.sendEvent(HardwareButtonEvent.ForceInstallUpdatePressed)
                 }
             }
             return true
