@@ -40,11 +40,17 @@ fun httpApiBaseUrlToVoiceWebSocketUrl(httpBaseUrl: String): String {
  * Half-duplex voice path over the relay WebSocket.
  *
  * - Default transport: PCM 16-bit signed LE mono @ 16000 Hz (Android capture).
- * - Uplink path: encode with P25-style 88-bit IMBE whenever [P25ImbeNative.isAvailable].
- * - Downlink auto-detects IMBE (13-byte magic frame) whenever the JNI codec can load — peers stay
- *   audible on mixed builds; uplink stays clear PCM until the codec loads after startup.
+ * - Uplink path: encoded with the codec the channel's `joined` reply asks for
+ *   (default IMBE), via [VoiceCodecRegistry]. The registry falls back to IMBE
+ *   if the requested codec's native lib hasn't loaded; if even IMBE isn't
+ *   available, the uplink ships clear PCM.
+ * - Downlink: each inbound frame's first two bytes select the right decoder
+ *   from the registry, so a channel can mix codecs mid-stream (e.g. during a
+ *   `codec_change` roll-out) without any client-side signaling.
  *
- * Codec: see [VoiceAudioSpecs] (PCM); IMBE via bundled dvmvocoder (GPL — see cpp/dvmvocoder).
+ * Codec libs: IMBE via bundled dvmvocoder (GPL — see cpp/dvmvocoder).
+ * Codec2 and Opus slots live in the registry but are not wired up yet — see
+ * Codec2VoiceCodec.kt / OpusVoiceCodec.kt for the integration plan.
  */
 sealed interface VoiceControlEvent {
     data class Joined(
@@ -52,6 +58,7 @@ sealed interface VoiceControlEvent {
         val permission: String,
         val aiDispatchListenPcm: Boolean = false,
         val recordListenPcm: Boolean = false,
+        val codec: VoiceCodec = VoiceCodec.DEFAULT,
     ) : VoiceControlEvent
     /** AI dispatch on this channel — uplink clear PCM instead of IMBE vocoder. */
     data class AiDispatchPcm(val enabled: Boolean) : VoiceControlEvent
@@ -59,6 +66,8 @@ sealed interface VoiceControlEvent {
     data class Busy(val holderUnit: String?) : VoiceControlEvent
     /** Dispatcher live-moved this radio to another channel (Live Channel Control). */
     data class Moved(val channel: String, val by: String?) : VoiceControlEvent
+    /** Admin flipped the channel's transmit codec; the encoder swaps on the next frame. */
+    data class CodecChanged(val codec: VoiceCodec) : VoiceControlEvent
 }
 
 class VoiceRelayTransport(
@@ -70,10 +79,12 @@ class VoiceRelayTransport(
      *  AGC so handset audio matches the radio-bridge mic chain. Defaults to
      *  false for current behaviour when an admin hasn't pushed otherwise. */
     private val bypassMicProcessingProvider: () -> Boolean = { false },
-    /** Read on every inbound IMBE frame. When non-null, the decoded PCM
-     *  runs through the shared post-decode chain (presence bell / soft
-     *  saturation / shelves / polyphase upsample) before reaching the
-     *  player. Null = legacy duplicate-upsample fast path. */
+    /** Read on every inbound 8 kHz vocoded frame (IMBE, Codec2). When non-null,
+     *  the decoded PCM runs through the shared post-decode chain (presence
+     *  bell / soft saturation / shelves / polyphase upsample) before reaching
+     *  the player. Null = legacy duplicate-upsample fast path. 16 kHz codecs
+     *  (Opus) bypass this chain because its polyphase upsample and presence
+     *  shaping are tuned for vocoded 8 kHz input. */
     private val postDecodeProcessorProvider: () -> PostDecodeChain.Processor? = { null },
 ) : StreamingPcmSink {
 
@@ -103,17 +114,36 @@ class VoiceRelayTransport(
 
     private var pcmAcc = ByteArray(2048)
     private var pcmAccLen = 0
-    private var lastP25TxEnabled: Boolean? = null
-    /** One-shot Logcat warning when our uplink falls back from IMBE to clear PCM. */
+    /** Tracks the codec the last frame was encoded with so a mid-stream codec
+     *  change can drop any fractional PCM in the accumulator (the next encoder
+     *  expects a fresh frame boundary, possibly at a different frame size). */
+    private var lastTxCodec: VoiceCodec? = null
+    /** One-shot Logcat warning when no encoder is available and uplink falls back to clear PCM. */
     private var warnedClearTx = false
     private val pcmFrameScratch = ByteArray(P25ImbeNative.Frames.PCM_16K_FRAME_BYTES)
 
-    /** Speech conditioning for the IMBE uplink; reset at the start of each talk-spurt. */
+    /** Speech conditioning for the vocoder uplink; reset at the start of each talk-spurt. */
     private val txConditioner = ImbeTxConditioner()
     private var lastConsumeNs = 0L
 
-    /** Two-byte sentinel so random PCM blobs are unlikely to collide; followed by an 11-byte codeword. */
-    private val imbeWsMagic = byteArrayOf(0xF5.toByte(), 0xAB.toByte())
+    /** Registry of every voice codec this client can encode + decode. IMBE is
+     *  always present (its native lib is the existing dvmvocoder JNI build);
+     *  Codec2 + Opus are present as registry slots but report isReady = false
+     *  until their native libs land. */
+    private val codecRegistry: VoiceCodecRegistry = VoiceCodecRegistry()
+        .registerEncoder(ImbeEncoder())
+        .registerDecoder(ImbeDecoder())
+        .registerEncoder(Codec2Encoder())
+        .registerDecoder(Codec2Decoder())
+        .registerEncoder(OpusEncoder())
+        .registerDecoder(OpusDecoder())
+
+    /** Codec the channel asked us to TX with. Updated by the joined reply and
+     *  by codec_change push messages; the registry resolves it to an actual
+     *  ready encoder (falling back to IMBE if the requested lib is missing). */
+    @Volatile
+    private var currentTxCodec: VoiceCodec = VoiceCodec.DEFAULT
+
     /** Recording / AI sideband — server records only; not broadcast on the channel. */
     private val listenPcmMagic = byteArrayOf(0xF6.toByte(), 0xAC.toByte())
 
@@ -159,18 +189,34 @@ class VoiceRelayTransport(
                 "joined" -> {
                     recordListenPcm = json.optBoolean("record_listen_pcm", false)
                     aiDispatchListenPcm = json.optBoolean("ai_dispatch_listen_pcm", false)
+                    val codec = VoiceCodec.fromWireId(json.optString("codec", null)) ?: VoiceCodec.DEFAULT
+                    currentTxCodec = codec
                     _controlEvents.tryEmit(
                         VoiceControlEvent.Joined(
                             channel = json.optString("channel"),
                             permission = json.optString("permission", "talk"),
                             aiDispatchListenPcm = aiDispatchListenPcm,
                             recordListenPcm = recordListenPcm,
+                            codec = codec,
                         ),
                     )
                 }
                 "ai_dispatch_pcm" -> {
                     aiDispatchListenPcm = json.optBoolean("enabled", false)
                     _controlEvents.tryEmit(VoiceControlEvent.AiDispatchPcm(enabled = aiDispatchListenPcm))
+                }
+                "codec_change" -> {
+                    // Admin flipped this channel's codec while we were connected. The next
+                    // encoded frame goes through the new codec; the inbound path picks the
+                    // right decoder per frame from magic bytes so it needs no signaling.
+                    val codec = VoiceCodec.fromWireId(json.optString("codec", null))
+                    if (codec != null) {
+                        currentTxCodec = codec
+                        codecRegistry.encoderFor(codec)?.resetForTalkSpurt()
+                        _controlEvents.tryEmit(VoiceControlEvent.CodecChanged(codec = codec))
+                    } else {
+                        Log.w(TAG, "codec_change frame with unknown codec: ${json.optString("codec")}")
+                    }
                 }
                 "error" -> {
                     _controlEvents.tryEmit(
@@ -194,31 +240,63 @@ class VoiceRelayTransport(
         }
     }
 
-    /** WebSocket inbound: IMBE frames (13-byte magic) decoded when native library is loadable; else PCM. */
+    /**
+     * WebSocket inbound dispatch. The first two bytes identify the codec via
+     * [VoiceCodecRegistry.decoderForMagic]: known codecs route through the
+     * matching decoder and are then upsampled / post-processed for playback;
+     * anything else is treated as raw clear PCM (the legacy fallback for
+     * pre-vocoder clients and the soundboard tone-out path).
+     */
     private fun dispatchInboundVoice(payload: ByteArray) {
-        if (payload.size == 13 &&
-            payload[0] == imbeWsMagic[0] &&
-            payload[1] == imbeWsMagic[1]
-        ) {
-            if (!ensureImbeNativeLoadedForRx()) {
-                Log.w(
-                    TAG,
-                    "IMBE frame discarded: JNI vocoder unavailable (receiver cannot unpack peer digital voice)",
-                )
+        if (payload.size >= 2) {
+            val decoder = codecRegistry.decoderForMagic(payload[0], payload[1])
+            if (decoder != null) {
+                if (decoder.codec == VoiceCodec.IMBE && !ensureImbeNativeLoadedForRx()) {
+                    // Lazy-load the JNI lib on first IMBE frame so peers stay audible
+                    // even before this radio opens the PTT screen. Other codecs load
+                    // (or fail to load) eagerly with their own native libs.
+                    Log.w(
+                        TAG,
+                        "IMBE frame discarded: JNI vocoder unavailable (receiver cannot unpack peer digital voice)",
+                    )
+                    return
+                }
+                if (!decoder.isReady) {
+                    Log.w(TAG, "Inbound ${decoder.codec.wireId} frame dropped — decoder native lib not loaded")
+                    return
+                }
+                val samples = decoder.decodeFrame(payload) ?: run {
+                    Log.w(TAG, "${decoder.codec.wireId} decode returned null — check peer encoder alignment")
+                    return
+                }
+                val pcm16LittleEndian = renderDecoded(samples, decoder.nativeSampleRate)
+                inbound.writePcmFromMain(pcm16LittleEndian)
                 return
             }
-            val codeword = payload.copyOfRange(2, 13)
-            val pcm8k160 =
-                P25ImbeNative.decodeCodeword11(codeword)
-                    ?: run {
-                        Log.w(TAG, "IMBE decode returned null for one frame — check peer encoder alignment")
-                        return
-                    }
-            val pcm16LittleEndian = applyPostDecodeOrDup(pcm8k160)
-            inbound.writePcmFromMain(pcm16LittleEndian)
-            return
         }
         inbound.writePcmFromMain(payload)
+    }
+
+    /**
+     * Brings a decoder's native-rate output to the playback rate (16 kHz mono
+     * PCM-16 LE). 8 kHz output (IMBE, Codec2) runs through the existing
+     * post-decode chain or duplicate-upsample fast path; 16 kHz output (Opus)
+     * is shipped to the player unchanged since the chain's polyphase upsample
+     * and presence-bell shaping are tuned for vocoded 8 kHz input.
+     */
+    private fun renderDecoded(samples: ShortArray, nativeRate: Int): ByteArray {
+        return when (nativeRate) {
+            8000 -> applyPostDecodeOrDup(samples)
+            16000 -> shortLeMonoBytes(samples)
+            else -> shortLeMonoBytes(samples)
+        }
+    }
+
+    private fun shortLeMonoBytes(samples: ShortArray): ByteArray {
+        val out = ByteArray(samples.size * 2)
+        val bb = java.nio.ByteBuffer.wrap(out).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        for (s in samples) bb.putShort(s)
+        return out
     }
 
     /** Last inbound-voice frame timestamp (ns). Used purely to detect a
@@ -262,15 +340,16 @@ class VoiceRelayTransport(
     @Volatile
     private var recordListenPcm: Boolean = false
 
-    private fun p25UplinkEligible(): Boolean = P25ImbeNative.isAvailable
-
-    private fun reconcileAccumulatorForModeToggle() {
-        val cur = p25UplinkEligible()
-        val prev = lastP25TxEnabled
+    /** Discard any fractional staged PCM on a mid-stream codec change so the
+     *  next encoder sees a clean 20 ms boundary (frame sizes may differ).
+     *  [cur] is null when the registry has no encoder ready and uplink is
+     *  falling back to clear PCM. */
+    private fun reconcileAccumulatorForCodecToggle(cur: VoiceCodec?) {
+        val prev = lastTxCodec
         if (prev != null && prev != cur) {
             pcmAccLen = 0
         }
-        lastP25TxEnabled = cur
+        lastTxCodec = cur
     }
 
     private fun appendAccumulator(fragment: ByteArray, len: Int) {
@@ -290,7 +369,8 @@ class VoiceRelayTransport(
     }
 
     /**
-     * Drop any fractional uplink PCM held for IMBE framing (preference toggles / disconnect).
+     * Drop any fractional uplink PCM held for vocoder framing (preference
+     * toggles / disconnect / mid-stream codec change cleanup).
      */
     fun discardPendingUplinkTail() {
         pcmAccLen = 0
@@ -325,21 +405,23 @@ class VoiceRelayTransport(
 
     override fun consumePcm(buffer: ByteArray, length: Int) {
         if (!wantOnline.get() || length <= 0) return
-        reconcileAccumulatorForModeToggle()
+
+        val encoder = codecRegistry.txEncoderFor(currentTxCodec)
+        reconcileAccumulatorForCodecToggle(encoder?.codec)
 
         val wsPrepared = acquireActiveSocketPrepared()
         val active = wsPrepared ?: return
 
-        val p25 = p25UplinkEligible()
-        if (!p25) {
-            // Native vocoder didn't load → uplink is clear PCM, peers will hear non-vocoded
-            // audio. Log once per process so this is visible in Logcat when troubleshooting
-            // "everything sounds raw on the dispatch portal".
+        if (encoder == null) {
+            // No vocoder encoder is ready (e.g. JNI lib failed to package for this ABI),
+            // and the registry has no fallback. Peers hear non-vocoded audio. Logged once
+            // per process so the "everything sounds raw on the dispatch portal" case is
+            // visible in Logcat without spamming on every frame.
             if (!warnedClearTx) {
                 warnedClearTx = true
                 Log.w(
                     TAG,
-                    "P25 IMBE encoder unavailable — transmitting clear PCM (peers will hear non-vocoded audio). " +
+                    "No voice encoder available — transmitting clear PCM (peers hear non-vocoded audio). " +
                         "Check libsecurityradiovocoder.so was packaged for this ABI.",
                 )
             }
@@ -348,22 +430,24 @@ class VoiceRelayTransport(
             return
         }
 
-        // On-air is IMBE, which the relay never records (Whisper can't read vocoded speech), so
-        // always pair every keyed talk-spurt with a clear-PCM sideband for the transmission log /
-        // AI dispatch. The relay records it but never broadcasts it. This must NOT be gated on the
-        // `record_listen_pcm` join ack: that arrives asynchronously, so a talk-spurt keyed before
-        // (or right after a reconnect, before) the ack would ship IMBE only and the recorder would
-        // store nothing — leaving the transmission silent in the log and invisible to AI dispatch.
+        // Every vocoded talk-spurt also ships a clear-PCM sideband so the relay can
+        // record + transcribe (Whisper can't read vocoded speech). The relay records
+        // it but never broadcasts it. Sending it must NOT be gated on the
+        // `record_listen_pcm` join ack — that arrives asynchronously, so a talk-spurt
+        // keyed before the ack would ship vocoded only and the recorder would store
+        // nothing, leaving the transmission silent in the log and invisible to AI dispatch.
         val side = ByteArray(2 + length)
         side[0] = listenPcmMagic[0]
         side[1] = listenPcmMagic[1]
         System.arraycopy(buffer, 0, side, 2, length)
         sendBinaryWs(active, side)
 
-        // A gap between mic frames means a fresh key-up — re-learn the noise floor.
+        // A gap between mic frames means a fresh key-up — re-learn the noise floor
+        // and reset any per-spurt encoder state (Opus prediction, etc.).
         val now = System.nanoTime()
         if (now - lastConsumeNs > TX_GAP_RESET_NS) {
             txConditioner.reset()
+            encoder.resetForTalkSpurt()
         }
         lastConsumeNs = now
 
@@ -378,12 +462,7 @@ class VoiceRelayTransport(
                 pcmFrameScratch.size,
                 bypassExpanderAgc = bypassMicProcessingProvider(),
             )
-            val imbeIn = P25ImbeNative.Frames.downsampleAvg16kToImbe(pcmFrameScratch)
-            val codeword11 = P25ImbeNative.encodeFrame(imbeIn) ?: continue
-            val packet = ByteArray(2 + codeword11.size)
-            packet[0] = imbeWsMagic[0]
-            packet[1] = imbeWsMagic[1]
-            System.arraycopy(codeword11, 0, packet, 2, codeword11.size)
+            val packet = encoder.encodeFrame(pcmFrameScratch) ?: continue
             sendBinaryWs(active, packet)
         }
     }
@@ -439,7 +518,12 @@ class VoiceRelayTransport(
     private fun sendJoin(ws: WebSocket) {
         val uid = escapeJsonFragment(pendingUnitId)
         val ch = escapeJsonFragment(pendingChannelRaw)
-        val json = """{"type":"join","unit_id":"$uid","channel":"$ch","client":"android"}"""
+        // Re-check encodable codecs at every join (not just once at construction)
+        // because the IMBE native lib may load lazily on first RX frame.
+        val caps = codecRegistry.encodableCodecs()
+            .joinToString(",") { "\"${it.wireId}\"" }
+        val json =
+            """{"type":"join","unit_id":"$uid","channel":"$ch","client":"android","caps":[$caps]}"""
         try {
             ws.send(json)
         } catch (_: Exception) {
