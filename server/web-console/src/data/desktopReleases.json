@@ -1,0 +1,32 @@
+[
+  {
+    "version": "1.20",
+    "date": "2026-05-28",
+    "title": "Opus voice and release notes",
+    "notes": "Dispatch workstations running safeT Command (desktop installer).",
+    "changes": [
+      "Web console Opus transmit now works correctly on Android handsets.",
+      "Admin Downloads shows previous Android and desktop builds with expandable release notes.",
+      "Transmission log vocoder preview reads the correct 16 kHz audio from recordings."
+    ]
+  },
+  {
+    "version": "1.19",
+    "date": "2026-05-27",
+    "title": "Codec2 and Opus on channels",
+    "changes": [
+      "Channels can use Codec2 3200 or Opus instead of IMBE where configured.",
+      "Mission Control and the dispatch console decode inbound Opus from handsets.",
+      "Android jitter buffer reduces cut-outs on bursty network audio."
+    ]
+  },
+  {
+    "version": "1.18",
+    "date": "2026-05-20",
+    "title": "Clearer transmission log transcripts",
+    "changes": [
+      "The transmission log records clear voice for better Whisper transcripts.",
+      "Radios and the console send clear audio sideband for every channel."
+    ]
+  }
+]

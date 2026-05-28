@@ -43,6 +43,19 @@ interface ResolvedManifest {
   notes: string;
 }
 
+/** One row in release-history.json (newest first). */
+export interface AndroidReleaseHistoryEntry {
+  versionCode: number;
+  versionName: string;
+  notes: string;
+  mandatory: boolean;
+  publishedAt: string;
+  file: string;
+}
+
+const HISTORY_FILE = "release-history.json";
+const MAX_HISTORY_ENTRIES = 50;
+
 interface AndroidPublishAuthError {
   status: 401 | 503;
   error: "unauthorized" | "publish_disabled";
@@ -79,6 +92,75 @@ export function androidUpdatePublishAuthError(
     return { status: 401, error: "unauthorized" };
   }
   return null;
+}
+
+function historyPath(): string {
+  return join(updatesDir, HISTORY_FILE);
+}
+
+function readHistoryFile(): AndroidReleaseHistoryEntry[] {
+  const path = historyPath();
+  if (!existsSync(path)) {
+    return [];
+  }
+  try {
+    const raw = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (!Array.isArray(raw)) {
+      return [];
+    }
+    const out: AndroidReleaseHistoryEntry[] = [];
+    for (const item of raw) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const row = item as Record<string, unknown>;
+      const versionCode = Number(row.versionCode);
+      const versionName = typeof row.versionName === "string" ? row.versionName : "";
+      const file = typeof row.file === "string" ? row.file : "";
+      const publishedAt = typeof row.publishedAt === "string" ? row.publishedAt : "";
+      if (!Number.isInteger(versionCode) || versionCode <= 0 || versionName === "" || file === "" || /[\\/]/.test(file)) {
+        continue;
+      }
+      out.push({
+        versionCode,
+        versionName,
+        file,
+        publishedAt: publishedAt || new Date(0).toISOString(),
+        mandatory: row.mandatory === true,
+        notes: typeof row.notes === "string" ? row.notes.slice(0, 500) : "",
+      });
+    }
+    return out.sort((a, b) => b.versionCode - a.versionCode);
+  } catch {
+    return [];
+  }
+}
+
+function writeHistoryFile(entries: AndroidReleaseHistoryEntry[]): void {
+  mkdirSync(updatesDir, { recursive: true });
+  writeFileSync(historyPath(), `${JSON.stringify(entries.slice(0, MAX_HISTORY_ENTRIES), null, 2)}\n`);
+}
+
+/** Append or refresh a build in release-history.json (called on every publish). */
+function recordReleaseHistory(manifest: {
+  versionCode: number;
+  versionName: string;
+  fileName: string;
+  mandatory: boolean;
+  notes: string;
+}): void {
+  const publishedAt = new Date().toISOString();
+  const row: AndroidReleaseHistoryEntry = {
+    versionCode: manifest.versionCode,
+    versionName: manifest.versionName,
+    file: manifest.fileName,
+    mandatory: manifest.mandatory,
+    notes: manifest.notes,
+    publishedAt,
+  };
+  const history = readHistoryFile().filter((h) => h.versionCode !== row.versionCode);
+  history.unshift(row);
+  writeHistoryFile(history);
 }
 
 /** Reads and validates version.json + the referenced APK, or null if unpublished/invalid. */
@@ -167,6 +249,13 @@ export function handleAndroidUpdatePublish(req: Request, res: Response): void {
     writeFileSync(join(updatesDir, fileName), apk);
     const manifest = { versionCode, versionName, file: fileName, mandatory, notes };
     writeFileSync(join(updatesDir, "version.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+    recordReleaseHistory({
+      versionCode,
+      versionName,
+      fileName,
+      mandatory,
+      notes,
+    });
   } catch (e) {
     res.status(500).json({ error: "write_failed", message: e instanceof Error ? e.message : String(e) });
     return;
@@ -174,6 +263,54 @@ export function handleAndroidUpdatePublish(req: Request, res: Response): void {
   // Force the next manifest read to re-hash the new APK.
   shaCache = null;
   res.json({ ok: true, versionCode, versionName, file: fileName, bytes: apk.length });
+}
+
+export interface AndroidReleaseRecord {
+  versionCode: number;
+  versionName: string;
+  notes: string;
+  mandatory: boolean;
+  publishedAt: string;
+  /** Present only for the latest published build (handset + admin download). */
+  url: string | null;
+  sha256: string | null;
+}
+
+/** Public: version history for admin downloads (newest first). */
+export function handleAndroidReleaseHistory(_req: Request, res: Response): void {
+  const manifest = readManifest();
+  let history = readHistoryFile();
+
+  if (manifest && !history.some((h) => h.versionCode === manifest.versionCode)) {
+    history = [
+      {
+        versionCode: manifest.versionCode,
+        versionName: manifest.versionName,
+        file: manifest.fileName,
+        mandatory: manifest.mandatory,
+        notes: manifest.notes,
+        publishedAt: new Date().toISOString(),
+      },
+      ...history,
+    ];
+  }
+
+  const latestCode = manifest?.versionCode ?? history[0]?.versionCode ?? null;
+  const releases: AndroidReleaseRecord[] = history.map((h) => {
+    const isLatest = latestCode !== null && h.versionCode === latestCode;
+    return {
+      versionCode: h.versionCode,
+      versionName: h.versionName,
+      notes: h.notes,
+      mandatory: h.mandatory,
+      publishedAt: h.publishedAt,
+      url: isLatest && manifest ? "/v1/app/android/apk" : null,
+      sha256: isLatest && manifest ? apkSha256(manifest.apkPath) : null,
+    };
+  });
+
+  res.setHeader("Cache-Control", "no-cache");
+  res.json({ releases });
 }
 
 /** Public: streams the published APK so the handset can install it. */

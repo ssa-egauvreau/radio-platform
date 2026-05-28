@@ -161,6 +161,7 @@ import {
   handleAndroidUpdateApk,
   handleAndroidUpdateManifest,
   handleAndroidUpdatePublish,
+  handleAndroidReleaseHistory,
 } from "./appUpdate.js";
 import { listTen8MapIncidents } from "./ten8/mapIncidents.js";
 import { listTen8ActiveIncidents, listTen8WebhookLog } from "./ten8/store.js";
@@ -349,6 +350,7 @@ export function createApiRouter(): Router {
 
   // Public, unauthenticated: the sideloaded Android fleet polls these to self-update.
   router.get("/app/android/version", handleAndroidUpdateManifest);
+  router.get("/app/android/releases", handleAndroidReleaseHistory);
   router.get("/app/android/apk", handleAndroidUpdateApk);
   // Reject unauthorized uploads before raw body parsing to avoid large-buffer DoS.
   function androidUpdatePublishPreAuth(req: Request, res: Response, next: NextFunction): void {

@@ -421,6 +421,17 @@ export interface AndroidAppRelease {
   notes: string;
 }
 
+/** One row in the Android OTA release history (newest first). */
+export interface AndroidReleaseRecord {
+  versionCode: number;
+  versionName: string;
+  notes: string;
+  mandatory: boolean;
+  publishedAt: string;
+  url: string | null;
+  sha256: string | null;
+}
+
 export interface Bridge {
   id: number;
   name: string;
@@ -920,6 +931,10 @@ export const api = {
 
   /** Latest OTA APK published for handsets (same feed the radio app polls). */
   getAndroidAppRelease: () => request<AndroidAppRelease>("GET", "/v1/app/android/version"),
+
+  /** Android OTA history for the admin Downloads page (newest first). */
+  getAndroidReleaseHistory: () =>
+    request<{ releases: AndroidReleaseRecord[] }>("GET", "/v1/app/android/releases"),
 
   // --- custom radio tones ------------------------------------------------
   listSounds: () => request<{ sounds: AgencySound[] }>("GET", "/v1/admin/sounds"),

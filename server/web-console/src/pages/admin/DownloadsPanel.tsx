@@ -1,14 +1,65 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, ApiError, describeError, type AndroidAppRelease } from "../../api";
+import {
+  api,
+  ApiError,
+  describeError,
+  type AndroidReleaseRecord,
+} from "../../api";
+import {
+  ReleaseHistoryAccordion,
+  type ReleaseHistoryItem,
+} from "../../components/ReleaseHistoryAccordion";
+import desktopReleasesJson from "../../data/desktopReleases.json";
 
 // Where the Windows installer for the desktop console (safeT Command) is
 // published as a GitHub Actions artifact. See .github/workflows/desktop-build.yml
-// — every push under desktop-console/** (and any manual workflow_dispatch)
-// produces a `safeT-Command-Windows-Installer` artifact attached to the run.
-// Linking to the workflow page lets an admin grab the latest installer
-// without us having to mirror the binary on the server.
 const DESKTOP_DOWNLOADS_URL =
   "https://github.com/ssa-egauvreau/safeT-PTT/actions/workflows/desktop-build.yml";
+
+type DesktopRelease = {
+  version: string;
+  date: string;
+  title: string;
+  notes?: string;
+  changes: string[];
+};
+
+const DESKTOP_RELEASES = desktopReleasesJson as DesktopRelease[];
+
+function formatIsoDate(iso: string): string {
+  const d = new Date(`${iso}T12:00:00`);
+  if (Number.isNaN(d.getTime())) {
+    return iso;
+  }
+  return d.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function androidHistoryItems(releases: AndroidReleaseRecord[]): ReleaseHistoryItem[] {
+  return releases.map((r, index) => ({
+    id: `android-${r.versionCode}`,
+    versionLabel: r.versionName,
+    buildLabel: `build ${r.versionCode}`,
+    dateLabel: formatIsoDate(r.publishedAt.slice(0, 10)),
+    notes: r.notes || undefined,
+    isCurrent: index === 0,
+  }));
+}
+
+function desktopHistoryItems(releases: DesktopRelease[]): ReleaseHistoryItem[] {
+  return releases.map((r, index) => ({
+    id: `desktop-${r.version}-${r.date}`,
+    versionLabel: `Version ${r.version}`,
+    dateLabel: formatIsoDate(r.date),
+    title: r.title,
+    notes: r.notes,
+    changes: r.changes,
+    isCurrent: index === 0,
+  }));
+}
 
 /** Admin: download links for the Android handset app and the desktop console. */
 export function DownloadsPanel() {
@@ -27,24 +78,28 @@ export function DownloadsPanel() {
   );
 }
 
-/** Android APK section — was the old AndroidAppPanel. Behaviour unchanged. */
 function AndroidDownloadSection() {
-  const [release, setRelease] = useState<AndroidAppRelease | null>(null);
+  const [releases, setReleases] = useState<AndroidReleaseRecord[]>([]);
   const [unpublished, setUnpublished] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  const current = releases[0] ?? null;
 
   async function reload() {
     setLoading(true);
     setError(null);
     setUnpublished(false);
     try {
-      const res = await api.getAndroidAppRelease();
-      setRelease(res);
+      const res = await api.getAndroidReleaseHistory();
+      setReleases(res.releases);
+      if (res.releases.length === 0) {
+        setUnpublished(true);
+      }
     } catch (err) {
       if (err instanceof ApiError && err.status === 404) {
-        setRelease(null);
+        setReleases([]);
         setUnpublished(true);
       } else {
         setError(describeError(err));
@@ -59,10 +114,10 @@ function AndroidDownloadSection() {
   }, []);
 
   const apkUrl = useMemo(() => {
-    if (!release?.url) return "";
-    const path = release.url.startsWith("/") ? release.url : `/${release.url}`;
+    if (!current?.url) return "";
+    const path = current.url.startsWith("/") ? current.url : `/${current.url}`;
     return `${window.location.origin}${path}`;
-  }, [release?.url]);
+  }, [current?.url]);
 
   async function copyLink() {
     if (!apkUrl) return;
@@ -74,6 +129,8 @@ function AndroidDownloadSection() {
       setError("Could not copy — select the link and copy manually.");
     }
   }
+
+  const historyItems = androidHistoryItems(releases);
 
   return (
     <section className="downloads-section">
@@ -99,22 +156,13 @@ function AndroidDownloadSection() {
         </div>
       )}
 
-      {!loading && release && (
+      {!loading && current && (
         <div className="card-like android-app-card">
           <div className="android-app-version">
             <span className="android-app-version-label">Published version</span>
-            <strong className="android-app-version-name">
-              {release.versionName}
-            </strong>
-            <span className="muted">(build {release.versionCode})</span>
+            <strong className="android-app-version-name">{current.versionName}</strong>
+            <span className="muted">(build {current.versionCode})</span>
           </div>
-
-          {release.notes && (
-            <p className="android-app-notes">
-              <span className="muted">Release notes: </span>
-              {release.notes}
-            </p>
-          )}
 
           <div className="android-app-download">
             <a className="btn primary android-app-dl-btn" href={apkUrl} download>
@@ -131,6 +179,11 @@ function AndroidDownloadSection() {
               {apkUrl}
             </a>
           </p>
+
+          <ReleaseHistoryAccordion
+            items={historyItems}
+            emptyMessage="Release notes will appear here after the next Android publish."
+          />
 
           <details className="android-app-install">
             <summary>Install steps on the handset</summary>
@@ -155,11 +208,10 @@ function AndroidDownloadSection() {
   );
 }
 
-/** Desktop console download — links out to the GitHub Actions workflow page
- *  where the Windows installer is published as an artifact. We don't mirror
- *  the installer on the server (yet), so the link goes directly to where
- *  CI puts it. */
 function DesktopDownloadSection() {
+  const current = DESKTOP_RELEASES[0];
+  const historyItems = desktopHistoryItems(DESKTOP_RELEASES);
+
   return (
     <section className="downloads-section">
       <h3 className="downloads-section-title">Desktop console (safeT Command)</h3>
@@ -171,15 +223,18 @@ function DesktopDownloadSection() {
       </p>
 
       <div className="card-like android-app-card">
-        <div className="android-app-version">
-          <span className="android-app-version-label">Latest CI build</span>
-          <strong className="android-app-version-name">Windows installer (.exe)</strong>
-        </div>
+        {current ? (
+          <div className="android-app-version">
+            <span className="android-app-version-label">Current release</span>
+            <strong className="android-app-version-name">Version {current.version}</strong>
+            <span className="muted">{formatIsoDate(current.date)}</span>
+          </div>
+        ) : null}
 
         <p className="android-app-notes muted" style={{ fontSize: "0.92rem" }}>
           Click below to open the build page on GitHub, then download the
           installer attached to the most recent successful run. Sign in to
-          GitHub first if you're prompted.
+          GitHub first if you&apos;re prompted.
         </p>
 
         <div className="android-app-download">
@@ -192,6 +247,11 @@ function DesktopDownloadSection() {
             Open desktop downloads page
           </a>
         </div>
+
+        <ReleaseHistoryAccordion
+          items={historyItems}
+          emptyMessage="Desktop release notes are listed in productUpdates.json."
+        />
 
         <details className="android-app-install">
           <summary>Where the installer is on the GitHub page</summary>

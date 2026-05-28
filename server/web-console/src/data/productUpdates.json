@@ -1,5 +1,26 @@
 [
   {
+    "version": "1.20",
+    "date": "2026-05-28",
+    "title": "Opus voice and release notes",
+    "changes": [
+      "Web console Opus transmit now works on Android handsets (no more garbled or silent audio).",
+      "Admin Downloads lists previous Android and desktop builds — click the arrow to read each version's notes.",
+      "The public Updates page is refreshed; older releases collapse so the list is easier to scan.",
+      "Transmission log vocoder preview works again (fixed a false 48 kHz error)."
+    ]
+  },
+  {
+    "version": "1.19",
+    "date": "2026-05-27",
+    "title": "Codec2 and Opus voice codecs",
+    "changes": [
+      "Agencies can set Codec2 3200 or Opus as the default codec for new channels.",
+      "Android handsets and the dispatch console can send and receive Opus when the channel is set to Opus.",
+      "Codec2 device-to-device and Android-to-console paths remain supported."
+    ]
+  },
+  {
     "version": "1.18",
     "date": "2026-05-20",
     "title": "Clearer transmission log transcripts",

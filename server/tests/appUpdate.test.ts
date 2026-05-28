@@ -44,6 +44,7 @@ const {
   handleAndroidUpdateManifest,
   handleAndroidUpdatePublish,
   handleAndroidUpdateApk,
+  handleAndroidReleaseHistory,
 } = await import("../src/appUpdate.js");
 
 // Mock Express Response that captures whatever the handler does.
@@ -383,6 +384,53 @@ test("handleAndroidUpdatePublish: happy path writes APK + version.json and the n
   handleAndroidUpdateManifest(mockReq(), res2);
   assert.equal(cap2.status, 200);
   assert.equal((cap2.body as { versionCode: number }).versionCode, 9);
+
+  const historyPath = join(updatesDir, "release-history.json");
+  assert.ok(existsSync(historyPath));
+  const history = JSON.parse(readFileSync(historyPath, "utf8")) as { versionCode: number }[];
+  assert.equal(history[0]?.versionCode, 9);
+});
+
+test("handleAndroidReleaseHistory: returns releases newest-first with download on latest only", () => {
+  clearUpdatesDir();
+  handleAndroidUpdatePublish(
+    mockReq({
+      headers: {
+        authorization: "Bearer test-publish-token",
+        "x-version-code": "20",
+        "x-version-name": "0.2.0",
+        "x-notes": "first publish",
+      },
+      body: Buffer.from("apk-20"),
+    }),
+    mockRes().res,
+  );
+  handleAndroidUpdatePublish(
+    mockReq({
+      headers: {
+        authorization: "Bearer test-publish-token",
+        "x-version-code": "21",
+        "x-version-name": "0.2.1",
+        "x-notes": "second publish",
+      },
+      body: Buffer.from("apk-21"),
+    }),
+    mockRes().res,
+  );
+
+  const { res, captured } = mockRes();
+  handleAndroidReleaseHistory(mockReq(), res);
+  assert.equal(captured.status, 200);
+  const body = captured.body as {
+    releases: { versionCode: number; notes: string; url: string | null }[];
+  };
+  assert.equal(body.releases.length, 2);
+  assert.equal(body.releases[0]?.versionCode, 21);
+  assert.equal(body.releases[0]?.url, "/v1/app/android/apk");
+  assert.equal(body.releases[0]?.notes, "second publish");
+  assert.equal(body.releases[1]?.versionCode, 20);
+  assert.equal(body.releases[1]?.url, null);
+  assert.equal(body.releases[1]?.notes, "first publish");
 });
 
 test("handleAndroidUpdatePublish: versionName is filename-sanitised (path-traversal safe)", () => {

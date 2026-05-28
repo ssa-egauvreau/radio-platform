@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { SafetMark } from "../icons";
 import updatesJson from "../data/productUpdates.json";
@@ -25,6 +25,10 @@ function formatUpdateDate(iso: string): string {
 }
 
 export function UpdatesPage() {
+  const [openKey, setOpenKey] = useState<string | null>(
+    UPDATES[0] ? `${UPDATES[0].version}-${UPDATES[0].date}` : null,
+  );
+
   useEffect(() => {
     window.scrollTo(0, 0);
   }, []);
@@ -62,27 +66,44 @@ export function UpdatesPage() {
           <h1>Product updates</h1>
           <p>
             Each release lists a <strong>version</strong>, <strong>date</strong>, and what changed in
-            plain language. Newest updates are first.
+            plain language. Newest updates are first — click the arrow to expand or collapse a
+            version.
           </p>
         </header>
 
         <ol className="lp-updates-list">
-          {UPDATES.map((entry) => (
-            <li key={`${entry.version}-${entry.date}`} className="lp-update-card">
-              <div className="lp-update-meta">
-                <span className="lp-update-version">Version {entry.version}</span>
-                <time className="lp-update-date" dateTime={entry.date}>
-                  {formatUpdateDate(entry.date)}
-                </time>
-              </div>
-              <h2 className="lp-update-title">{entry.title}</h2>
-              <ul className="lp-update-changes">
-                {entry.changes.map((line) => (
-                  <li key={line}>{line}</li>
-                ))}
-              </ul>
-            </li>
-          ))}
+          {UPDATES.map((entry) => {
+            const key = `${entry.version}-${entry.date}`;
+            const expanded = openKey === key;
+            return (
+              <li key={key} className={expanded ? "lp-update-card is-open" : "lp-update-card"}>
+                <button
+                  type="button"
+                  className="lp-update-toggle"
+                  aria-expanded={expanded}
+                  onClick={() => setOpenKey(expanded ? null : key)}
+                >
+                  <span className="lp-update-chevron" aria-hidden>
+                    {expanded ? "▼" : "▶"}
+                  </span>
+                  <span className="lp-update-meta">
+                    <span className="lp-update-version">Version {entry.version}</span>
+                    <time className="lp-update-date" dateTime={entry.date}>
+                      {formatUpdateDate(entry.date)}
+                    </time>
+                  </span>
+                  <span className="lp-update-title">{entry.title}</span>
+                </button>
+                {expanded ? (
+                  <ul className="lp-update-changes">
+                    {entry.changes.map((line) => (
+                      <li key={line}>{line}</li>
+                    ))}
+                  </ul>
+                ) : null}
+              </li>
+            );
+          })}
         </ol>
       </main>
 
