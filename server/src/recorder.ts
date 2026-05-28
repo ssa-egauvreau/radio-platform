@@ -7,6 +7,7 @@ import { encodeWavPcm16 } from "./wav.js";
 import { enqueueTranscription } from "./transcribe.js";
 import { isAiDispatchChannelCached } from "./aiDispatch/channelCache.js";
 import { createImbeDecoder, type ImbeStreamDecoder } from "./imbeServerCodec.js";
+import { detectFrameCodec, type VoiceCodec } from "./voiceCodecs.js";
 
 const SAMPLE_RATE = 16000;
 /** Silence after the last frame that closes a transmission. */
@@ -15,8 +16,14 @@ const GAP_MS = 1500;
 const MAX_MS = 5 * 60 * 1000;
 /** Ignore key bumps shorter than this (~300 ms of 16 kHz mono PCM-16). */
 const MIN_BYTES = Math.round(SAMPLE_RATE * 2 * 0.3);
-const IMBE_MAGIC_0 = 0xf5;
-const IMBE_MAGIC_1 = 0xab;
+
+/** Codecs the server can decode for the recorder. Codec2 / Opus arrive via
+ *  the clear-PCM sideband on the recording path today, so a vocoded frame in
+ *  those codecs is dropped rather than written into the WAV as raw bytes. */
+const SERVER_DECODABLE: ReadonlySet<VoiceCodec> = new Set(["imbe"]);
+
+/** Log "no server decoder for X" once per codec per process to avoid spam. */
+const warnedNoDecoder = new Set<VoiceCodec>();
 
 export interface FrameAttribution {
   agencyId: number;
@@ -52,8 +59,12 @@ interface ActiveRecording extends FrameAttribution {
 const active = new Map<string, ActiveRecording>();
 let sweepTimer: NodeJS.Timeout | null = null;
 
-function isImbeFrame(payload: Buffer): boolean {
-  return payload.length === 13 && payload[0] === IMBE_MAGIC_0 && payload[1] === IMBE_MAGIC_1;
+/** Identifies a vocoded frame (any codec) by its leading magic bytes — used to
+ *  decide whether the recorder should decode the payload or skip it in favor
+ *  of the clear-PCM sideband. Anything that isn't a known codec falls through
+ *  and is treated as raw PCM. */
+function frameVocoder(payload: Buffer): VoiceCodec | null {
+  return detectFrameCodec(payload);
 }
 
 async function finalize(rec: ActiveRecording): Promise<void> {
@@ -110,10 +121,23 @@ export function recordFrame(attr: FrameAttribution, payload: Buffer): void {
     attr.aiDispatchListenPcm === true ||
     isAiDispatchChannelCached(attr.agencyId, attr.channelName);
 
-  // Transmission log + Whisper need clear PCM — decoded IMBE is poor for speech-to-text.
+  // Transmission log + Whisper need clear PCM — decoded vocoder audio (any codec)
+  // is poor for speech-to-text. Drop a vocoded frame when the clear-PCM sideband
+  // is being shipped, regardless of which codec the frame is in.
   let pcm: Buffer;
-  if (isImbeFrame(payload)) {
+  const codec = frameVocoder(payload);
+  if (codec !== null) {
     if (preferClearPcm) {
+      return;
+    }
+    if (!SERVER_DECODABLE.has(codec)) {
+      if (!warnedNoDecoder.has(codec)) {
+        warnedNoDecoder.add(codec);
+        console.warn(
+          `Recorder has no server-side decoder for ${codec}; dropping vocoded frames on this channel ` +
+            `(transmissions still record via the clear-PCM sideband).`,
+        );
+      }
       return;
     }
     if (!rec.decoder) {
