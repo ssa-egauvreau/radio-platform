@@ -39,8 +39,9 @@ final class RadioScreenUITests: XCTestCase {
         // Text as its accessibility label), not as a separate staticText.
         XCTAssertTrue(app.buttons["EMERGENCY"].exists)
 
-        // The sign-out chip is visible on the operator strip.
-        XCTAssertTrue(app.buttons["SIGN OUT"].exists)
+        // Settings tab is always visible in the icon-only tab strip (its
+        // accessibilityLabel is "SETTINGS"). Sign-out now lives inside it.
+        XCTAssertTrue(app.buttons["SETTINGS"].exists)
     }
 
     func test_radio_signOut_returnsToLogin() throws {
@@ -48,9 +49,17 @@ final class RadioScreenUITests: XCTestCase {
         app.launchArguments += ["-uitest-logged-in"]
         app.launch()
 
-        let signOut = app.buttons["SIGN OUT"]
-        XCTAssertTrue(signOut.waitForExistence(timeout: 5))
-        signOut.tap()
+        let settings = app.buttons["SETTINGS"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        settings.tap()
+
+        let openConfirm = app.buttons["Sign Out…"]
+        XCTAssertTrue(openConfirm.waitForExistence(timeout: 3))
+        openConfirm.tap()
+
+        let confirm = app.buttons["Sign Out"]
+        XCTAssertTrue(confirm.waitForExistence(timeout: 3))
+        confirm.tap()
 
         XCTAssertTrue(app.buttons["SIGN IN"].waitForExistence(timeout: 3))
     }

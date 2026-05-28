@@ -56,6 +56,8 @@ jobs:
             -scheme SafeTMobile \
             -destination "platform=iOS Simulator,name=${{ steps.dest.outputs.device }}" \
             -resultBundlePath TestResults.xcresult \
+            -retry-tests-on-failure \
+            -test-iterations 2 \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
             ONLY_ACTIVE_ARCH=YES

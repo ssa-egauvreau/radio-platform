@@ -1,0 +1,195 @@
+import SwiftUI
+
+/// Operator-facing settings sheet. Drives the radio shell's scan list, surfaces
+/// read-only GPS / account status, and gates sign-out behind a confirmation so
+/// it can't be hit by mistake mid-shift.
+struct SettingsScreen: View {
+    let state: RadioUiState
+    let onEvent: (RadioUiEvent) -> Void
+    let onSignOut: () -> Void
+    let onClose: () -> Void
+
+    @State private var confirmingSignOut = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                accountSection
+                scanSection
+                gpsSection
+                aboutSection
+                signOutSection
+            }
+            .listStyle(.insetGrouped)
+            .scrollContentBackground(.hidden)
+            .background(Color.safetBackground)
+            .navigationTitle("SETTINGS")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("CLOSE") { onClose() }
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.safetText)
+                }
+            }
+            .confirmationDialog("Sign out of safeT?", isPresented: $confirmingSignOut) {
+                Button("Sign Out", role: .destructive) {
+                    onSignOut()
+                }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("You will be returned to the login screen.")
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+
+    private var accountSection: some View {
+        Section("Account") {
+            row("Operator", state.operatorDisplayName)
+            row("Unit", state.localShortUnitId)
+            if !state.agencyName.isEmpty {
+                row("Agency", state.agencyName)
+            }
+        }
+        .listRowBackground(Color.safetSurface)
+    }
+
+    private var scanSection: some View {
+        Section {
+            Toggle(isOn: Binding(
+                get: { state.scanActive },
+                set: { _ in onEvent(.toggleScan) }
+            )) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Scan")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.safetText)
+                    Text(scanSubtitle)
+                        .font(.system(size: 11))
+                        .foregroundColor(.safetTextDim)
+                }
+            }
+            .tint(.safetGreen)
+            NavigationLink {
+                ScanPickerScreen(
+                    channels: state.channelCatalog,
+                    homeChannel: tunedChannel,
+                    selection: Binding(
+                        get: { state.scanIncludedChannels },
+                        set: { onEvent(.setScanChannels($0)) }
+                    )
+                )
+            } label: {
+                HStack {
+                    Text("Scan Channels")
+                        .foregroundColor(.safetText)
+                    Spacer()
+                    Text(scanChannelsLabel)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(.safetTextDim)
+                }
+            }
+            .disabled(state.channelCatalog.isEmpty)
+        } header: {
+            Text("Scan")
+        } footer: {
+            Text("Scan opens extra listen-only streams for the channels you pick. The currently tuned channel is always heard.")
+                .font(.system(size: 11))
+                .foregroundColor(.safetTextDim)
+        }
+        .listRowBackground(Color.safetSurface)
+    }
+
+    private var gpsSection: some View {
+        Section {
+            HStack {
+                Image(systemName: state.locationAuthorized ? "location.fill" : "location.slash")
+                    .foregroundColor(state.locationAuthorized ? .safetGreen : .safetAmber)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("GPS")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(.safetText)
+                    Text(state.locationAuthorized
+                         ? "Reporting position to dispatch"
+                         : "Awaiting location permission")
+                        .font(.system(size: 11))
+                        .foregroundColor(.safetTextDim)
+                }
+            }
+        } header: {
+            Text("Location")
+        } footer: {
+            Text("GPS is always on for unit safety. Change permission in iOS Settings → safeT Mobile.")
+                .font(.system(size: 11))
+                .foregroundColor(.safetTextDim)
+        }
+        .listRowBackground(Color.safetSurface)
+    }
+
+    private var aboutSection: some View {
+        Section("About") {
+            row("App", "safeT Mobile")
+            row("Version", appVersion)
+            row("Server", RadioConfig.apiBaseURL.host(percentEncoded: false) ?? "—")
+        }
+        .listRowBackground(Color.safetSurface)
+    }
+
+    private var signOutSection: some View {
+        Section {
+            Button(role: .destructive) {
+                confirmingSignOut = true
+            } label: {
+                HStack {
+                    Image(systemName: "rectangle.portrait.and.arrow.right")
+                    // Ellipsis is the iOS convention for "opens a
+                    // confirmation" — and keeps this label distinct from the
+                    // confirmation dialog's "Sign Out" so VoiceOver and UI
+                    // tests can target each unambiguously.
+                    Text("Sign Out…")
+                        .font(.system(size: 15, weight: .semibold))
+                }
+                .foregroundColor(.safetRed)
+            }
+        }
+        .listRowBackground(Color.safetSurface)
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack {
+            Text(label).foregroundColor(.safetTextDim)
+            Spacer()
+            Text(value)
+                .font(.system(size: 13, design: .monospaced))
+                .foregroundColor(.safetText)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+    }
+
+    private var tunedChannel: String? {
+        state.channelLabel == "----" ? nil : state.channelLabel
+    }
+
+    private var scanSubtitle: String {
+        if state.scanActive {
+            let home = tunedChannel?.lowercased() ?? ""
+            let listening = state.scanIncludedChannels.filter { $0 != home }.count
+            return listening > 0 ? "Listening to \(listening) channel\(listening == 1 ? "" : "s")" : "Pick channels below"
+        }
+        return "Off"
+    }
+
+    private var scanChannelsLabel: String {
+        let count = state.scanIncludedChannels.count
+        return count > 0 ? "\(count) selected" : "None"
+    }
+
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "0.0"
+        let build = info?["CFBundleVersion"] as? String ?? "0"
+        return "\(short) (\(build))"
+    }
+}

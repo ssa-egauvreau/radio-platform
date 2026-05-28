@@ -10,14 +10,16 @@ struct RadioScreen: View {
     @State private var showingMap = false
     @State private var showingUnits = false
     @State private var showingTranscripts = false
+    @State private var showingSettings = false
 
     var body: some View {
         let state = viewModel.uiState
         ZStack {
             Color.safetBackground.ignoresSafeArea()
-            VStack(spacing: 14) {
+            VStack(spacing: 12) {
                 statusStrip(state)
                 operatorStrip(state)
+                tabStrip(state)
                 displayPanel(state)
                 channelRow(state)
                 Spacer(minLength: 12)
@@ -26,66 +28,56 @@ struct RadioScreen: View {
             }
             .padding(16)
         }
-        .sheet(isPresented: $showingDispatch) {
+        .sheet(isPresented: $showingDispatch) { sheetWrap("DISPATCH", isPresented: $showingDispatch) {
             if let token = session.token {
-                NavigationStack {
-                    DispatchScreen(api: RadioApiClient(token: token))
-                        .toolbar {
-                            ToolbarItem(placement: .navigationBarLeading) {
-                                Button("CLOSE") { showingDispatch = false }
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(.safetText)
-                            }
-                        }
-                }
-                .preferredColorScheme(.dark)
+                DispatchScreen(api: RadioApiClient(token: token))
             }
-        }
-        .sheet(isPresented: $showingMap) {
+        } }
+        .sheet(isPresented: $showingMap) { sheetWrap("MAP", isPresented: $showingMap) {
             if let token = session.token {
-                NavigationStack {
-                    MapScreen(api: RadioApiClient(token: token))
-                        .toolbar {
-                            ToolbarItem(placement: .navigationBarLeading) {
-                                Button("CLOSE") { showingMap = false }
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(.safetText)
-                            }
-                        }
-                }
-                .preferredColorScheme(.dark)
+                MapScreen(api: RadioApiClient(token: token))
             }
-        }
-        .sheet(isPresented: $showingTranscripts) {
+        } }
+        .sheet(isPresented: $showingTranscripts) { sheetWrap("TX LOG", isPresented: $showingTranscripts) {
             if let token = session.token {
-                NavigationStack {
-                    TranscriptionsScreen(api: RadioApiClient(token: token))
-                        .toolbar {
-                            ToolbarItem(placement: .navigationBarLeading) {
-                                Button("CLOSE") { showingTranscripts = false }
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(.safetText)
-                            }
-                        }
-                }
-                .preferredColorScheme(.dark)
+                TranscriptionsScreen(api: RadioApiClient(token: token))
             }
-        }
-        .sheet(isPresented: $showingUnits) {
+        } }
+        .sheet(isPresented: $showingUnits) { sheetWrap("UNITS", isPresented: $showingUnits) {
             if let token = session.token {
-                NavigationStack {
-                    UnitsScreen(api: RadioApiClient(token: token))
-                        .toolbar {
-                            ToolbarItem(placement: .navigationBarLeading) {
-                                Button("CLOSE") { showingUnits = false }
-                                    .font(.system(size: 12, weight: .bold))
-                                    .foregroundColor(.safetText)
-                            }
-                        }
-                }
-                .preferredColorScheme(.dark)
+                UnitsScreen(api: RadioApiClient(token: token))
             }
+        } }
+        .sheet(isPresented: $showingSettings) {
+            SettingsScreen(
+                state: viewModel.uiState,
+                onEvent: { viewModel.handle($0) },
+                onSignOut: {
+                    showingSettings = false
+                    session.logout()
+                },
+                onClose: { showingSettings = false }
+            )
         }
+    }
+
+    @ViewBuilder
+    private func sheetWrap<Content: View>(
+        _ title: String,
+        isPresented: Binding<Bool>,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        NavigationStack {
+            content()
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarLeading) {
+                        Button("CLOSE") { isPresented.wrappedValue = false }
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.safetText)
+                    }
+                }
+        }
+        .preferredColorScheme(.dark)
     }
 
     // MARK: - status strip
@@ -105,84 +97,72 @@ struct RadioScreen: View {
     }
 
     private func operatorStrip(_ state: RadioUiState) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Text(state.operatorDisplayName.uppercased())
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundColor(.safetTextDim)
                 .lineLimit(1)
+                .truncationMode(.tail)
             if !state.agencyName.isEmpty {
-                Text("•").foregroundColor(.safetTextDim.opacity(0.6)).font(.system(size: 10))
+                Text("·").foregroundColor(.safetTextDim.opacity(0.6)).font(.system(size: 10))
                 Text(state.agencyName)
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.safetTextDim)
                     .lineLimit(1)
+                    .truncationMode(.tail)
             }
             Spacer()
-            if session.currentUser?.isOperator == true {
-                Button {
-                    showingDispatch = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "shield.lefthalf.filled")
-                            .font(.system(size: 10, weight: .bold))
-                        Text("DISPATCH")
-                            .font(.system(size: 10, weight: .bold))
-                    }
-                    .foregroundColor(.safetAmber)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .overlay(Capsule().stroke(Color.safetAmber.opacity(0.7), lineWidth: 1))
-                }
-            }
-            Button {
-                showingMap = true
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "map")
-                        .font(.system(size: 10, weight: .bold))
-                    Text("MAP")
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .foregroundColor(.safetTextDim)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .overlay(Capsule().stroke(Color.safetBorder, lineWidth: 1))
-            }
-            Button {
-                showingUnits = true
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "person.2.fill")
-                        .font(.system(size: 10, weight: .bold))
-                    Text("UNITS")
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .foregroundColor(.safetTextDim)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .overlay(Capsule().stroke(Color.safetBorder, lineWidth: 1))
-            }
-            Button {
-                showingTranscripts = true
-            } label: {
-                HStack(spacing: 4) {
-                    Image(systemName: "text.bubble")
-                        .font(.system(size: 10, weight: .bold))
-                    Text("TX LOG")
-                        .font(.system(size: 10, weight: .bold))
-                }
-                .foregroundColor(.safetTextDim)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .overlay(Capsule().stroke(Color.safetBorder, lineWidth: 1))
-            }
-            Button("SIGN OUT") { session.logout() }
-                .font(.system(size: 10, weight: .bold))
-                .foregroundColor(.safetTextDim)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .overlay(Capsule().stroke(Color.safetBorder, lineWidth: 1))
         }
+    }
+
+    // Icon-only tab buttons. Earlier revisions paired an SF Symbol with a
+    // label inside each pill; once the operator/agency line was added beside
+    // them the row ran out of horizontal space and SwiftUI wrapped each text
+    // label vertically (one letter per line). Icons-only keeps every button a
+    // fixed square so the row stays scannable regardless of label length.
+    private func tabStrip(_ state: RadioUiState) -> some View {
+        HStack(spacing: 8) {
+            if session.currentUser?.isOperator == true {
+                tabButton(icon: "shield.lefthalf.filled", label: "DISPATCH", tint: .safetAmber) {
+                    showingDispatch = true
+                }
+            }
+            tabButton(icon: "map", label: "MAP") { showingMap = true }
+            tabButton(icon: "person.2.fill", label: "UNITS") { showingUnits = true }
+            tabButton(icon: "text.bubble", label: "TX LOG") { showingTranscripts = true }
+            tabButton(
+                icon: "dot.radiowaves.left.and.right",
+                label: "SCAN",
+                tint: state.scanActive ? .safetGreen : .safetTextDim,
+                highlighted: state.scanActive
+            ) {
+                viewModel.handle(.toggleScan)
+            }
+            tabButton(icon: "gearshape.fill", label: "SETTINGS") { showingSettings = true }
+        }
+    }
+
+    private func tabButton(
+        icon: String,
+        label: String,
+        tint: Color = .safetTextDim,
+        highlighted: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 16, weight: .bold))
+                .foregroundColor(tint)
+                .frame(maxWidth: .infinity)
+                .frame(height: 36)
+                .background(highlighted ? tint.opacity(0.15) : Color.safetSurface)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(highlighted ? tint : Color.safetBorder, lineWidth: 1)
+                )
+                .cornerRadius(8)
+        }
+        .accessibilityLabel(label)
     }
 
     private func networkPill(_ label: String) -> some View {
@@ -224,9 +204,21 @@ struct RadioScreen: View {
                         .overlay(Capsule().stroke(Color.safetSignal.opacity(0.7), lineWidth: 1))
                 }
                 if let count = state.radiosOnlineOnChannel {
-                    Text("\(count) ON CHANNEL")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.safetTextDim)
+                    Button {
+                        showingUnits = true
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "person.2.fill")
+                                .font(.system(size: 9, weight: .bold))
+                            Text("\(count) ON CHANNEL")
+                                .font(.system(size: 11, weight: .semibold))
+                        }
+                        .foregroundColor(.safetSignal)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .overlay(Capsule().stroke(Color.safetSignal.opacity(0.5), lineWidth: 1))
+                    }
+                    .accessibilityLabel("\(count) radios on channel. Open units roster.")
                 }
             }
 
@@ -234,6 +226,10 @@ struct RadioScreen: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.safetTextDim)
                 .lineLimit(1)
+
+            if state.scanActive {
+                scanBanner(state)
+            }
 
             Divider().overlay(Color.safetBorder)
 
@@ -257,6 +253,28 @@ struct RadioScreen: View {
         .cornerRadius(10)
     }
 
+    private func scanBanner(_ state: RadioUiState) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "dot.radiowaves.left.and.right")
+                .font(.system(size: 10, weight: .bold))
+            if let rx = state.scanRxChannel {
+                Text("SCAN: \(rx.uppercased())")
+                    .font(.system(size: 11, weight: .heavy, design: .monospaced))
+            } else {
+                let home = state.channelLabel.lowercased()
+                let count = state.scanIncludedChannels.filter { $0 != home }.count
+                Text(count > 0 ? "SCAN ON · \(count) CH" : "SCAN ON · PICK CHANNELS")
+                    .font(.system(size: 11, weight: .heavy, design: .monospaced))
+            }
+            Spacer()
+        }
+        .foregroundColor(state.scanRxChannel != nil ? .safetGreen : .safetSignal)
+        .padding(.vertical, 4)
+        .padding(.horizontal, 8)
+        .background((state.scanRxChannel != nil ? Color.safetGreen : Color.safetSignal).opacity(0.12))
+        .cornerRadius(6)
+    }
+
     private func statusColor(_ state: RadioUiState) -> Color {
         if state.isEmergencyActive { return .safetRed }
         if state.pttBusyTone { return .safetAmber }
@@ -265,27 +283,17 @@ struct RadioScreen: View {
         return .safetTextDim
     }
 
-    // MARK: - channel / GPS controls
+    // MARK: - channel controls
 
     private func channelRow(_ state: RadioUiState) -> some View {
-        let gps = gpsButtonStyle(state)
-        return HStack(spacing: 10) {
+        HStack(spacing: 10) {
             controlButton(title: "CH \u{25BC}", enabled: !state.channelsLoading) {
                 viewModel.handle(.channelDown)
-            }
-            controlButton(title: gps.title, tint: gps.tint, enabled: true) {
-                viewModel.handle(.toggleGps)
             }
             controlButton(title: "CH \u{25B2}", enabled: !state.channelsLoading) {
                 viewModel.handle(.channelUp)
             }
         }
-    }
-
-    private func gpsButtonStyle(_ state: RadioUiState) -> (title: String, tint: Color) {
-        if !state.gpsActive { return ("GPS OFF", .safetTextDim) }
-        if state.locationAuthorized { return ("GPS ON", .safetGreen) }
-        return ("GPS \u{2014} NO ACCESS", .safetAmber)
     }
 
     private func controlButton(
