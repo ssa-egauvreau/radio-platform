@@ -2,18 +2,28 @@ import Foundation
 import os
 
 /// Opens a WebSocket to `/v1/voice/stream`, sends the `join` frame the server
-/// expects, and relays voice. Uplink uses P25 IMBE (88-bit codewords) when the
-/// native vocoder loads; otherwise clear PCM. Downlink auto-detects IMBE frames.
+/// expects, and relays voice.
+///
+/// Uplink uses whichever codec the channel's `joined` reply asks for (default
+/// IMBE), via `VoiceCodecRegistry`. The registry falls back to IMBE if the
+/// requested codec's native lib hasn't loaded; if even IMBE isn't available,
+/// the uplink ships clear PCM. Downlink dispatches each inbound frame to the
+/// right decoder by its leading magic bytes, so a channel can mix codecs
+/// mid-stream (e.g. during a `codec_change` roll-out) without any client-side
+/// signaling.
 @MainActor
 final class VoiceTransport {
     enum Permission: String { case listenOnly = "listen_only", talk, talkPriority = "talk_priority" }
 
-    struct Joined { let channel: String; let permission: Permission; let unitId: String }
+    struct Joined { let channel: String; let permission: Permission; let unitId: String; let codec: VoiceCodec }
 
     var onJoined: ((Joined) -> Void)?
     var onError: ((String) -> Void)?
     var onBusy: ((String?) -> Void)?
     var onReceivingChange: ((Bool) -> Void)?
+    /// Admin flipped the channel's transmit codec; the encoder swaps on the
+    /// next frame. UI can surface the change via this callback.
+    var onCodecChange: ((VoiceCodec) -> Void)?
 
     private let baseURL: URL
     private let token: String
@@ -34,6 +44,11 @@ final class VoiceTransport {
     private var pcmFrameScratch = Data(count: P25ImbeNative.Frames.pcm16kFrameBytes)
     private var lastConsumeNs: UInt64 = 0
     private var warnedClearTx = false
+    /// Tracks the codec the last frame was encoded with so a mid-stream
+    /// codec change can drop any fractional PCM in the accumulator (the next
+    /// encoder expects a fresh frame boundary, possibly at a different
+    /// frame size).
+    private var lastTxCodec: VoiceCodec?
     // Each PTT key-up/key-down pair gets a unique capture session id from
     // VoiceAudio. We only accept frames for the currently armed session so
     // late frames from a prior key-up cannot repopulate `pcmAcc`.
@@ -42,7 +57,26 @@ final class VoiceTransport {
     // file in practice.
     var activeCaptureSessionId: UInt64?
 
-    private let imbeMagic: [UInt8] = [0xF5, 0xAB]
+    /// Registry of every voice codec this client can encode + decode. IMBE
+    /// is always present (wraps the existing P25ImbeNative); Codec2 + Opus
+    /// are present as registry slots but report isReady = false until their
+    /// native libs land.
+    private let codecRegistry: VoiceCodecRegistry = {
+        let registry = VoiceCodecRegistry()
+        registry.registerEncoder(ImbeEncoder())
+        registry.registerDecoder(ImbeDecoder())
+        registry.registerEncoder(Codec2Encoder())
+        registry.registerDecoder(Codec2Decoder())
+        registry.registerEncoder(OpusEncoder())
+        registry.registerDecoder(OpusDecoder())
+        return registry
+    }()
+
+    /// Codec the channel asked us to TX with. Updated by the joined reply and
+    /// by codec_change push messages; the registry resolves it to an actual
+    /// ready encoder (falling back to IMBE if the requested lib is missing).
+    private var currentTxCodec: VoiceCodec = .default
+
     private let listenPcmMagic: [UInt8] = [0xF6, 0xAC]
 
     /// Agency-pushed RX shaping (presence bell, soft saturation, shelves,
@@ -117,11 +151,16 @@ final class VoiceTransport {
         guard let task, !frame.isEmpty else { return }
         guard activeCaptureSessionId == captureSessionId else { return }
 
-        let p25 = P25ImbeNative.isAvailable
-        if !p25 {
+        let encoder = codecRegistry.txEncoder(for: currentTxCodec)
+        reconcileAccumulatorForCodecToggle(encoder?.codec)
+
+        guard let encoder else {
+            // No vocoder encoder is ready and the registry has no fallback.
+            // Peers hear non-vocoded audio; logged once per process so the
+            // "everything sounds raw on the dispatch portal" case is visible.
             if !warnedClearTx {
                 warnedClearTx = true
-                logger.warning("P25 IMBE encoder unavailable — uplink clear PCM")
+                logger.warning("No voice encoder available — uplink clear PCM")
             }
             pcmAcc.removeAll(keepingCapacity: true)
             task.send(.data(frame)) { _ in }
@@ -137,6 +176,7 @@ final class VoiceTransport {
         let now = DispatchTime.now().uptimeNanoseconds
         if lastConsumeNs > 0, now - lastConsumeNs > 300_000_000 {
             txConditioner.reset()
+            encoder.resetForTalkSpurt()
         }
         lastConsumeNs = now
 
@@ -147,14 +187,21 @@ final class VoiceTransport {
             pcmAcc.removeFirst(frameBytes)
 
             txConditioner.conditionLe16(frame: &pcmFrameScratch)
-            guard let imbeIn = P25ImbeNative.Frames.downsampleAvg16kToImbe(frame16k: pcmFrameScratch),
-                  let codeword = P25ImbeNative.encodeFrame(samples8k160: imbeIn) else { continue }
-            var packet = Data(capacity: 13)
-            packet.append(imbeMagic[0])
-            packet.append(imbeMagic[1])
-            packet.append(codeword)
+            guard let packet = encoder.encodeFrame(pcmFrameScratch) else { continue }
             task.send(.data(packet)) { _ in }
         }
+    }
+
+    /// Discard any fractional staged PCM on a mid-stream codec change so the
+    /// next encoder sees a clean 20 ms boundary (frame sizes may differ).
+    /// `current` is nil when the registry has no encoder ready and uplink is
+    /// falling back to clear PCM.
+    private func reconcileAccumulatorForCodecToggle(_ current: VoiceCodec?) {
+        let prev = lastTxCodec
+        if prev != nil, prev != current {
+            pcmAcc.removeAll(keepingCapacity: true)
+        }
+        lastTxCodec = current
     }
 
     // MARK: - private
@@ -227,11 +274,15 @@ final class VoiceTransport {
 
     private func sendJoinFrame() {
         guard let channel = currentChannel, let task else { return }
-        let join: [String: String] = [
+        // Re-check encodable codecs at every join (not just once at construction)
+        // because some native libs (IMBE) may load lazily on first RX frame.
+        let caps = codecRegistry.encodableCodecs().map { $0.wireId }
+        let join: [String: Any] = [
             "type": "join",
             "channel": channel,
             "unit_id": unitId,
             "client": "ios",
+            "caps": caps,
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: join),
               let text = String(data: data, encoding: .utf8) else { return }
@@ -291,29 +342,62 @@ final class VoiceTransport {
     }
 
     private func dispatchInboundVoice(_ payload: Data) {
+        // Clear-PCM sideband — not for playback (server-only recording path).
         if payload.count >= 2,
            payload[payload.startIndex] == listenPcmMagic[0],
            payload[payload.startIndex + 1] == listenPcmMagic[1] {
             return
         }
-        if payload.count == 13,
-           payload[payload.startIndex] == imbeMagic[0],
-           payload[payload.startIndex + 1] == imbeMagic[1] {
-            guard P25ImbeNative.isAvailable || P25ImbeNative.initialize() else {
+        if payload.count >= 2,
+           let decoder = codecRegistry.decoder(forMagic: payload[payload.startIndex], payload[payload.startIndex + 1]) {
+            // Lazy-load IMBE on first frame so peers stay audible even before
+            // this radio opens the PTT screen. Other codecs load (or fail to
+            // load) eagerly with their own native libs.
+            if decoder.codec == .imbe, !P25ImbeNative.isAvailable, !P25ImbeNative.initialize() {
                 logger.warning("IMBE frame discarded — vocoder not loaded")
                 return
             }
-            let codeword = payload.subdata(in: 2..<13)
-            guard let pcm8k = P25ImbeNative.decodeCodeword11(codeword) else { return }
-            let pcm16 = applyPostDecodeOrDup(pcm8k)
+            guard decoder.isReady else {
+                logger.warning("Inbound \(decoder.codec.wireId, privacy: .public) frame dropped — decoder native lib not loaded")
+                return
+            }
+            guard let samples = decoder.decodeFrame(payload) else { return }
+            let pcm16 = renderDecoded(samples, nativeRate: decoder.nativeSampleRate)
             lastReceivedAt = Date()
             onReceivingChange?(true)
             audio.enqueueIncoming(pcm16)
             return
         }
+        // Unknown magic — legacy clear PCM path (soundboard tone-out, etc.).
         lastReceivedAt = Date()
         onReceivingChange?(true)
         audio.enqueueIncoming(payload)
+    }
+
+    /// Brings a decoder's native-rate output to the playback rate (16 kHz mono
+    /// PCM-16 LE). 8 kHz output (IMBE, Codec2) runs through the existing
+    /// post-decode chain or duplicate-upsample fast path; 16 kHz output (Opus)
+    /// is shipped to the player unchanged since the chain's polyphase upsample
+    /// and presence-bell shaping are tuned for vocoded 8 kHz input.
+    private func renderDecoded(_ samples: [Int16], nativeRate: Int) -> Data {
+        if nativeRate == 8000 {
+            return applyPostDecodeOrDup(samples)
+        }
+        return shortLeMonoBytes(samples)
+    }
+
+    private func shortLeMonoBytes(_ samples: [Int16]) -> Data {
+        var out = Data(count: samples.count * 2)
+        out.withUnsafeMutableBytes { raw in
+            guard let base = raw.baseAddress else { return }
+            let bytes = base.assumingMemoryBound(to: UInt8.self)
+            for (i, s) in samples.enumerated() {
+                let le = UInt16(bitPattern: s)
+                bytes[i * 2] = UInt8(le & 0xff)
+                bytes[i * 2 + 1] = UInt8((le >> 8) & 0xff)
+            }
+        }
+        return out
     }
 
     private func handleTextFrame(_ text: String) {
@@ -326,8 +410,22 @@ final class VoiceTransport {
             let permRaw = (object["permission"] as? String) ?? "listen_only"
             let unit = (object["unit_id"] as? String) ?? unitId
             let permission = Permission(rawValue: permRaw) ?? .listenOnly
+            let codec = VoiceCodec.fromWireId(object["codec"] as? String) ?? .default
+            currentTxCodec = codec
             reconnectAttempts = 0
-            onJoined?(Joined(channel: channel, permission: permission, unitId: unit))
+            onJoined?(Joined(channel: channel, permission: permission, unitId: unit, codec: codec))
+        case "codec_change":
+            // Admin flipped this channel's codec while we were connected. The
+            // next encoded frame goes through the new codec; the inbound path
+            // picks the right decoder per frame from magic bytes so it needs
+            // no further signaling.
+            if let codec = VoiceCodec.fromWireId(object["codec"] as? String) {
+                currentTxCodec = codec
+                codecRegistry.encoder(for: codec)?.resetForTalkSpurt()
+                onCodecChange?(codec)
+            } else {
+                logger.warning("codec_change frame with unknown codec")
+            }
         case "busy":
             let holder = (object["unit_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             onBusy?(holder?.isEmpty == true ? nil : holder)

@@ -41,6 +41,12 @@ import {
   type Permission,
 } from "./store.js";
 import { recordFrame, type FrameAttribution } from "./recorder.js";
+import {
+  DEFAULT_VOICE_CODEC,
+  VOICE_CODECS,
+  coerceVoiceCodec,
+  type VoiceCodec,
+} from "./voiceCodecs.js";
 
 /** Sideband PCM for transmission log / AI — not broadcast (pairs with on-air IMBE). */
 const LISTEN_PCM_MAGIC_0 = 0xf6;
@@ -123,6 +129,16 @@ interface ClientMeta {
   recordListenPcm: boolean;
   /** Cached from the users table for console accounts (roster / live control). */
   deviceType: string | null;
+  /** Codec the client should use to transmit on this channel — taken from the
+   *  channel row at join time, updated by [notifyChannelCodec] when an admin
+   *  flips the channel's codec while clients are connected. */
+  codec: VoiceCodec;
+  /** Codecs the client said it can encode/decode (from `caps` on the join
+   *  control frame). Empty array means the client predates multi-codec and is
+   *  effectively IMBE-only. The relay never blocks on this — frames are
+   *  forwarded by magic-byte regardless — but it gates whether [notifyChannelCodec]
+   *  bothers pushing a codec the client can't honor. */
+  caps: VoiceCodec[];
 }
 
 /** Throttle for the per-client "channel busy" notice. */
@@ -224,6 +240,37 @@ export function notifyChannelAiDispatchListenPcm(
     meta.aiDispatchListenPcm = enabled;
     try {
       ws.send(JSON.stringify({ type: "ai_dispatch_pcm", enabled }));
+    } catch {
+      /* socket closing */
+    }
+  }
+}
+
+/**
+ * Tell connected voice clients on a channel which codec to transmit with.
+ * Triggered by the admin PATCH that updates `radio_channels.codec`. The relay
+ * keeps the per-client `meta.codec` in sync and pushes a control frame so
+ * clients can flush their TX encoder and swap mid-session. RX is unaffected —
+ * peers detect each incoming frame's codec from its leading magic bytes.
+ *
+ * A client that doesn't advertise support for the new codec still receives
+ * the push (for visibility) but is expected to fall back to its best-supported
+ * encoder on TX. Listening side keeps working regardless.
+ */
+export function notifyChannelCodec(
+  agencyId: number,
+  channelName: string,
+  codec: VoiceCodec,
+): void {
+  const chNorm = normalizedChannel(channelName);
+  const key = channelKey(agencyId, chNorm);
+  for (const [ws, meta] of clientMeta) {
+    if (meta.channelKey !== key) {
+      continue;
+    }
+    meta.codec = codec;
+    try {
+      ws.send(JSON.stringify({ type: "codec_change", codec }));
     } catch {
       /* socket closing */
     }
@@ -936,6 +983,8 @@ export function attachVoiceRelay(
             aiDispatchListenPcm: false,
             recordListenPcm: true,
             deviceType: null,
+            codec: DEFAULT_VOICE_CODEC,
+            caps: [],
           });
           wss.emit("connection", ws, req);
         });
@@ -967,7 +1016,7 @@ export function attachVoiceRelay(
   async function handleJoin(
     ws: WebSocket,
     meta: ClientMeta,
-    json: { channel?: string; unit_id?: string; client?: string },
+    json: { channel?: string; unit_id?: string; client?: string; caps?: unknown },
   ): Promise<void> {
     // A remote bridge runner keys only the channel its bridge row configures.
     const channelName =
@@ -980,9 +1029,18 @@ export function attachVoiceRelay(
       return;
     }
 
-    let channelRow: { id: number } | null = null;
+    // Multi-codec capability: client lists every codec it can encode/decode.
+    // Older clients omit this field — they are effectively IMBE-only.
+    meta.caps = Array.isArray(json.caps)
+      ? json.caps.filter((c): c is VoiceCodec =>
+          typeof c === "string" && (VOICE_CODECS as readonly string[]).includes(c),
+        )
+      : [];
+
+    let channelRow: { id: number; codec: VoiceCodec } | null = null;
     try {
-      channelRow = await getChannelByName(meta.agencyId, channelName);
+      const row = await getChannelByName(meta.agencyId, channelName);
+      channelRow = row ? { id: row.id, codec: row.codec } : null;
     } catch {
       channelRow = null; // no database — recording/permissions degrade gracefully
     }
@@ -1081,6 +1139,10 @@ export function attachVoiceRelay(
     }
     meta.aiDispatchListenPcm = aiListenPcm;
     meta.recordListenPcm = true;
+    // A real channel carries its codec on the row; simulcast keys IMBE for now
+    // (per-member-channel codecs may differ — handled in a follow-up). Coerce
+    // through the registry so an unexpected DB value falls back to the default.
+    meta.codec = channelRow ? coerceVoiceCodec(channelRow.codec) : DEFAULT_VOICE_CODEC;
     const prior = voiceRoster.get(ws);
     voiceRoster.set(ws, {
       channelKey: chanKey,
@@ -1101,6 +1163,7 @@ export function attachVoiceRelay(
         permission,
         unit_id: unitId,
         record_listen_pcm: true,
+        codec: meta.codec,
         ...(aiListenPcm ? { ai_dispatch_listen_pcm: true } : {}),
       }),
     );

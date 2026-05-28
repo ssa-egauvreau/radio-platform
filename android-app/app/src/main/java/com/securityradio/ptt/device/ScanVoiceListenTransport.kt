@@ -74,7 +74,20 @@ class ScanVoiceListenTransport(
             Thread(r, "scan-voice-reconnect").apply { isDaemon = true }
         }
 
-    private val imbeWsMagic = byteArrayOf(0xF5.toByte(), 0xAB.toByte())
+    /** RX-only codec dispatch. Scan listeners pick the right decoder per
+     *  inbound frame's magic bytes so a channel on Codec2 or Opus stays
+     *  audible while scanning, not just the IMBE channels. */
+    private val codecRegistry: VoiceCodecRegistry = VoiceCodecRegistry()
+        .registerDecoder(ImbeDecoder())
+        .registerDecoder(Codec2Decoder())
+        .registerDecoder(OpusDecoder())
+
+    private fun shortLeMonoBytes(samples: ShortArray): ByteArray {
+        val out = ByteArray(samples.size * 2)
+        val bb = java.nio.ByteBuffer.wrap(out).order(java.nio.ByteOrder.LITTLE_ENDIAN)
+        for (s in samples) bb.putShort(s)
+        return out
+    }
 
     /** Lowercase channel label → live socket. */
     private val channels = ConcurrentHashMap<String, ScanChannelConnection>()
@@ -273,8 +286,13 @@ class ScanVoiceListenTransport(
         private fun sendJoin(ws: WebSocket) {
             val uid = pendingUnitId.replace("\\", "\\\\").replace("\"", "\\\"")
             val ch = channelLabel.replace("\\", "\\\\").replace("\"", "\\\"")
+            // Scan sockets are listen-only — advertise decode caps so the
+            // server's join logging accurately reflects what this client can
+            // hear. The relay never asks a scan socket to TX.
+            val caps = codecRegistry.decodableCodecs()
+                .joinToString(",") { "\"${it.wireId}\"" }
             val json =
-                """{"type":"join","unit_id":"$uid","channel":"$ch","client":"android_scan"}"""
+                """{"type":"join","unit_id":"$uid","channel":"$ch","client":"android_scan","caps":[$caps]}"""
             try {
                 ws.send(json)
             } catch (_: Exception) {
@@ -310,18 +328,25 @@ class ScanVoiceListenTransport(
         }
 
         private fun dispatchInboundVoice(payload: ByteArray) {
-            if (payload.size == 13 &&
-                payload[0] == imbeWsMagic[0] &&
-                payload[1] == imbeWsMagic[1]
-            ) {
-                if (!P25ImbeNative.isAvailable && !P25ImbeNative.tryLoadLibrary()) {
+            if (payload.size >= 2) {
+                val decoder = codecRegistry.decoderForMagic(payload[0], payload[1])
+                if (decoder != null) {
+                    if (decoder.codec == VoiceCodec.IMBE &&
+                        !P25ImbeNative.isAvailable &&
+                        !P25ImbeNative.tryLoadLibrary()
+                    ) {
+                        return
+                    }
+                    if (!decoder.isReady) return
+                    val samples = decoder.decodeFrame(payload) ?: return
+                    val pcm16 = when (decoder.nativeSampleRate) {
+                        8000 -> applyPostDecodeOrDup(channelLabel, samples)
+                        16000 -> shortLeMonoBytes(samples)
+                        else -> shortLeMonoBytes(samples)
+                    }
+                    inbound.writePcmFromScan(channelLabel, pcm16)
                     return
                 }
-                val codeword = payload.copyOfRange(2, 13)
-                val pcm8k160 = P25ImbeNative.decodeCodeword11(codeword) ?: return
-                val pcm16 = applyPostDecodeOrDup(channelLabel, pcm8k160)
-                inbound.writePcmFromScan(channelLabel, pcm16)
-                return
             }
             inbound.writePcmFromScan(channelLabel, payload)
         }

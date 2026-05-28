@@ -37,9 +37,21 @@ final class VoiceAudio {
     private var capturing = false
     private var captureSessionId: UInt64 = 0
 
+    /// Software jitter buffer + PLC between decoded PCM and the player. The
+    /// relay forwards frames the instant they arrive over WebSocket (no
+    /// smoothing on either side) — without this buffer, network jitter
+    /// drains the player and produces hard cutouts. See InboundJitterBuffer
+    /// for the algorithm.
+    private lazy var jitterBuffer: InboundJitterBuffer =
+        InboundJitterBuffer(player: player, playerFormat: processingFormat)
+
     init() {
         engine.attach(player)
         engine.connect(player, to: engine.mainMixerNode, format: processingFormat)
+    }
+
+    deinit {
+        jitterBuffer.release()
     }
 
     /// Activates the audio session and starts the engine. Must be called after
@@ -64,6 +76,7 @@ final class VoiceAudio {
 
     func stop() {
         stopCapture()
+        jitterBuffer.stop()
         if player.isPlaying { player.stop() }
         if engine.isRunning { engine.stop() }
         AudioSessionManager.deactivate()
@@ -156,21 +169,13 @@ final class VoiceAudio {
     // MARK: - playback (incoming PCM → speaker)
 
     /// Schedules a PCM16 (mono, 16 kHz, little-endian) buffer for playback.
+    /// Hands off to the software jitter buffer + PLC rather than scheduling
+    /// directly to AVAudioPlayerNode, so bursty inbound arrival (the relay
+    /// forwards frames the instant they arrive over WebSocket, with no
+    /// smoothing) is paced out at a steady cadence and isolated network
+    /// stalls produce a short fade-to-silence via PLC instead of a hard cutout.
     func enqueueIncoming(_ pcm16: Data) {
         guard !pcm16.isEmpty, pcm16.count % 2 == 0 else { return }
-        let frames = AVAudioFrameCount(pcm16.count / 2)
-        guard let buffer = AVAudioPCMBuffer(pcmFormat: processingFormat, frameCapacity: frames) else { return }
-        buffer.frameLength = frames
-
-        // Convert Int16 → Float32 in [-1, 1].
-        guard let floatChannel = buffer.floatChannelData?[0] else { return }
-        pcm16.withUnsafeBytes { raw in
-            let int16Ptr = raw.bindMemory(to: Int16.self)
-            for i in 0..<Int(frames) {
-                floatChannel[i] = Float(int16Ptr[i]) / 32_768.0
-            }
-        }
-
-        player.scheduleBuffer(buffer, completionHandler: nil)
+        jitterBuffer.enqueue(pcm16)
     }
 }

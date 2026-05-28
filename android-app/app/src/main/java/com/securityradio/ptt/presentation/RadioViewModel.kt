@@ -297,6 +297,10 @@ class RadioViewModel(
                     // Internal uplink-mode signal (AI dispatch wants clear PCM); the transport acts
                     // on it directly, so there's no operator-facing banner to show.
                     is VoiceControlEvent.AiDispatchPcm -> null
+                    // Channel codec changed (admin flipped IMBE/Codec2/Opus). The transport
+                    // already swapped its TX encoder; no operator-facing banner — the change
+                    // is informational and the talker hears identical audio either way.
+                    is VoiceControlEvent.CodecChanged -> null
                 }
                 if (hint != null) {
                     _uiState.update { it.copy(statusMessage = hint) }

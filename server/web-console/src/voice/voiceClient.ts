@@ -4,8 +4,17 @@
 import { api, getToken, type Permission } from "../api";
 import { ImbeTxConditioner } from "./imbeTxConditioner";
 import { imbeDecode, imbeEncode, imbeReady, initImbe } from "./imbeVocoder";
+import { OpusWebDecoder } from "./opusDecoder";
+import { OpusWebEncoder, opusEncoderAvailable } from "./opusEncoder";
 import { PostDecodeProcessor, type PostDecodeConfig } from "./postDecodeChain";
 import { loadMarker1033Pcm } from "./marker1033";
+import {
+  DEFAULT_VOICE_CODEC,
+  computeWebEncodeCaps,
+  detectFrameCodec,
+  isVoiceCodec,
+  type VoiceCodec,
+} from "./voiceCodecRegistry";
 
 export type VoiceState = "idle" | "connecting" | "listening" | "transmitting" | "error" | "closed";
 
@@ -18,6 +27,11 @@ export interface VoiceCallbacks {
   onBusy: (holderUnit: string | null) => void;
   /** Fired when a dispatcher live-moves this unit to another channel (Live Channel Control). */
   onMove?: (toChannel: string, by: string | null) => void;
+  /** Fired when the admin flips the channel's transmit codec, so the UI can
+   *  surface "Channel switched to Opus" or similar. The web client itself
+   *  only encodes IMBE today, so a switch to Codec2/Opus is purely
+   *  informational and the registry's fallback keeps IMBE on TX. */
+  onCodecChange?: (codec: VoiceCodec) => void;
 }
 
 const TARGET_RATE = 16000;
@@ -185,6 +199,11 @@ export class VoiceChannelClient {
   private ws: WebSocket | null = null;
   private state: VoiceState = "idle";
   private permission: Permission = "listen_only";
+  /** Codec the channel asked us to TX with. The web client only encodes
+   *  IMBE today, but tracking the value lets the UI surface it and avoids
+   *  the "raw PCM" cluster warning when a peer's Codec2/Opus frames
+   *  arrive — those frames are now identified by the registry. */
+  private currentTxCodec: VoiceCodec = DEFAULT_VOICE_CODEC;
 
   private playCtx: AudioContext | null = null;
   private playGain: GainNode | null = null;
@@ -244,14 +263,83 @@ export class VoiceChannelClient {
   private warnedClearTx = false;
   /** Already warned once that a peer is shipping continuous raw PCM (voice fallback). */
   private warnedClearRx = false;
+  /** Codecs we have already warned about being unsupported in this client. */
+  private warnedUnsupportedCodecs: Set<VoiceCodec> = new Set();
+
+  /** Lazy Opus decoder (WebCodecs AudioDecoder). Constructed on the first
+   *  inbound Opus frame so a browser that never receives Opus never spends
+   *  the AudioDecoder configuration cost. Closed on disconnect to release
+   *  the WebCodecs context. */
+  private opusDecoder: OpusWebDecoder | null = null;
+
+  /** Lazy Opus encoder (WebCodecs AudioEncoder). Constructed on the first
+   *  outbound Opus frame so a console that always TXes on IMBE never pays
+   *  the AudioEncoder configuration cost. The output callback writes
+   *  directly to the WebSocket — feed-and-forget on the TX path. */
+  private opusEncoder: OpusWebEncoder | null = null;
   /** Timestamps of recent raw PCM frames received — used to distinguish a sustained
    *  voice talk-spurt (many frames in quick succession) from a one-shot marker tone or
    *  tone-out (a single big PCM message). Only the warn-burst window of samples is kept. */
   private clearRxFrameTimes: number[] = [];
 
+  private warnUnsupportedCodecOnce(codec: VoiceCodec): void {
+    if (this.warnedUnsupportedCodecs.has(codec)) return;
+    this.warnedUnsupportedCodecs.add(codec);
+    console.warn(
+      `[voice] received ${codec} frame on "${this.channelName}" — web client cannot decode this codec yet. ` +
+        `Audio from this channel will be silent until the ${codec} decoder ships.`,
+    );
+  }
+
+  /** Lazily constructs the Opus decoder on the first inbound Opus frame.
+   *  WebCodecs construction is cheap on supported browsers and a no-op
+   *  fallback (isReady=false) on unsupported ones, so the cost is paid
+   *  once per channel session that actually receives Opus. */
+  private ensureOpusDecoder(): OpusWebDecoder | null {
+    if (this.opusDecoder) return this.opusDecoder;
+    const dec = new OpusWebDecoder((pcm) => this.schedulePcm(pcm));
+    if (!dec.isReady()) {
+      // Construction failed (no WebCodecs / no Opus support). Cache the
+      // failed decoder anyway so we don't reconstruct on every frame.
+      this.opusDecoder = dec;
+      return null;
+    }
+    this.opusDecoder = dec;
+    return dec;
+  }
+
+  /** Lazily constructs the Opus encoder on the first outbound Opus frame.
+   *  Encoded chunks ship straight to the WebSocket from the output
+   *  callback — voiceClient hands the PCM in, the wire send happens
+   *  inside the callback. Returns null if the browser can't encode Opus
+   *  (caller falls back to IMBE). */
+  private ensureOpusEncoder(): OpusWebEncoder | null {
+    if (this.opusEncoder) return this.opusEncoder;
+    const enc = new OpusWebEncoder((framed) => {
+      const ws = this.ws;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(framed);
+      }
+    });
+    if (!enc.isReady()) {
+      this.opusEncoder = enc;
+      return null;
+    }
+    this.opusEncoder = enc;
+    return enc;
+  }
+
   constructor(channelName: string, callbacks: VoiceCallbacks) {
     this.channelName = channelName;
     this.callbacks = callbacks;
+  }
+
+  /** Codec the channel is currently asking us to transmit with. Updated by
+   *  the joined reply and by codec_change pushes. The web client only
+   *  encodes IMBE today regardless of this value — exposed for UI display
+   *  and for future TX-side codec selection. */
+  get transmitCodec(): VoiceCodec {
+    return this.currentTxCodec;
   }
 
   get currentPermission(): Permission {
@@ -465,7 +553,15 @@ export class VoiceChannelClient {
 
     ws.onopen = () => {
       ws.send(
-        JSON.stringify({ type: "join", unit_id: "WEB", channel: this.channelName, client: consolePlatform() }),
+        JSON.stringify({
+          type: "join",
+          unit_id: "WEB",
+          channel: this.channelName,
+          client: consolePlatform(),
+          // Caps are computed at every join so a browser that gained
+          // WebCodecs support since the last connection picks it up.
+          caps: computeWebEncodeCaps(opusEncoderAvailable()),
+        }),
       );
       void loadMarker1033Pcm().catch(() => undefined);
     };
@@ -499,6 +595,7 @@ export class VoiceChannelClient {
       ai_dispatch_listen_pcm?: boolean;
       record_listen_pcm?: boolean;
       enabled?: boolean;
+      codec?: string;
     };
     try {
       msg = JSON.parse(text);
@@ -514,7 +611,22 @@ export class VoiceChannelClient {
       if (msg.ai_dispatch_listen_pcm === true) {
         this.setAiDispatchListenPcm(true);
       }
+      if (isVoiceCodec(msg.codec)) {
+        this.currentTxCodec = msg.codec;
+      } else {
+        this.currentTxCodec = DEFAULT_VOICE_CODEC;
+      }
       this.setState("listening");
+    } else if (msg.type === "codec_change") {
+      // Admin flipped this channel's codec while we were connected. The
+      // web client only encodes IMBE today, so the registry's fallback
+      // keeps us transmitting on IMBE regardless; this just lets the UI
+      // surface the change and stops us logging "raw PCM" warnings when a
+      // peer's Codec2/Opus frames arrive on the new codec.
+      if (isVoiceCodec(msg.codec)) {
+        this.currentTxCodec = msg.codec;
+        this.callbacks.onCodecChange?.(msg.codec);
+      }
     } else if (msg.type === "ai_dispatch_pcm") {
       this.setAiDispatchListenPcm(msg.enabled === true);
     } else if (msg.type === "busy") {
@@ -552,8 +664,11 @@ export class VoiceChannelClient {
     }
     this.markInbound();
     const bytes = new Uint8Array(buffer);
-    // P25 IMBE digital-voice frame: 2-byte marker + 11-byte codeword.
-    if (bytes.byteLength === 13 && bytes[0] === IMBE_MAGIC_0 && bytes[1] === IMBE_MAGIC_1) {
+
+    // Codec dispatch: detect by leading magic bytes so a channel can mix
+    // codecs mid-session without any client-side signaling.
+    const codec = detectFrameCodec(bytes);
+    if (codec === "imbe") {
       const pcm8k = imbeDecode(bytes.subarray(2));
       if (pcm8k) {
         // When the agency pushed post-decode shaping (presence / saturation
@@ -568,6 +683,27 @@ export class VoiceChannelClient {
           this.schedulePcm(upsample8kTo16k(pcm8k));
         }
       }
+      return;
+    }
+    if (codec === "opus") {
+      // WebCodecs decode is async; the decoder's output callback feeds
+      // schedulePcm directly. If the browser lacks WebCodecs Opus support,
+      // OpusWebDecoder reports isReady=false and we fall through to the
+      // one-shot "unsupported codec" warning.
+      const dec = this.ensureOpusDecoder();
+      if (dec && dec.isReady()) {
+        dec.decodeFrame(bytes.subarray(2));
+      } else {
+        this.warnUnsupportedCodecOnce(codec);
+      }
+      return;
+    }
+    if (codec === "codec2_3200") {
+      // Recognised vocoded frame for a codec the web client doesn't decode
+      // yet. Drop the frame (don't feed the speaker the encoded bytes as
+      // PCM) and log once per codec per channel session so the
+      // troubleshooting trail is clear.
+      this.warnUnsupportedCodecOnce(codec);
       return;
     }
     // A sustained burst of raw PCM (multiple frames within ~200 ms) means a peer's IMBE
@@ -714,26 +850,45 @@ export class VoiceChannelClient {
         return;
       }
       const pcmBuf = event.data;
-      if (this.digitalTx && imbeReady()) {
-        // On-air: P25 IMBE. Recording / AI may still need clear PCM on a sideband.
+      if (this.digitalTx) {
+        // Mic conditioning runs codec-agnostic (matches IMBE/Opus on iOS/Android).
         const pcm = new Int16Array(pcmBuf);
         this.txConditioner.process(pcm, this.bypassMicProcessing);
-        for (const frame of encodeImbeFrames(pcm)) {
-          ws.send(frame);
-        }
+
+        // Sideband for recorder / AI dispatch — always ships regardless of
+        // codec so a vocoded talk-spurt is still transcribable.
         if (this.listenPcmSidebandRequired()) {
           ws.send(wrapListenPcm(pcmBuf));
         }
-      } else {
-        if (!this.warnedClearTx) {
-          this.warnedClearTx = true;
-          const reason = !this.digitalTx ? "HQ/analog mode selected" : "IMBE WASM not ready";
-          console.warn(
-            `[voice] transmitting raw PCM on "${this.channelName}" (${reason}) — peers will hear clear audio, not vocoded.`,
-          );
+
+        // Codec dispatch on TX: Opus when the channel asked for it AND
+        // WebCodecs is available, otherwise IMBE. Anything that fails to
+        // encode falls back to clear PCM at the bottom.
+        if (this.currentTxCodec === "opus") {
+          const enc = this.ensureOpusEncoder();
+          if (enc && enc.isReady()) {
+            // Encoded chunks ship from the OpusWebEncoder output callback,
+            // wired in ensureOpusEncoder to call ws.send directly.
+            enc.encodeFrame(pcm);
+            return;
+          }
+          // Opus asked for but unavailable — fall through to IMBE.
         }
-        ws.send(pcmBuf);
+        if (imbeReady()) {
+          for (const frame of encodeImbeFrames(pcm)) {
+            ws.send(frame);
+          }
+          return;
+        }
       }
+      if (!this.warnedClearTx) {
+        this.warnedClearTx = true;
+        const reason = !this.digitalTx ? "HQ/analog mode selected" : "no vocoder encoder ready";
+        console.warn(
+          `[voice] transmitting raw PCM on "${this.channelName}" (${reason}) — peers will hear clear audio, not vocoded.`,
+        );
+      }
+      ws.send(pcmBuf);
     };
     this.capSource.connect(this.capNode);
     // A silent sink keeps the worklet pulled without echoing the mic locally.
@@ -762,6 +917,13 @@ export class VoiceChannelClient {
     }
     // capSource.disconnect() already detached the analyser; just drop the ref.
     this.capAnalyser = null;
+    // Drain any in-flight frames inside the Opus encoder so the tail of
+    // this talk-spurt actually makes it on the air rather than being
+    // stranded inside the WebCodecs pipeline. Best-effort; the flush is
+    // async, the WebSocket may close before it completes.
+    if (this.opusEncoder) {
+      this.opusEncoder.flush();
+    }
     if (this.state !== "closed" && this.state !== "error") {
       this.setState("listening");
     }
@@ -906,6 +1068,14 @@ export class VoiceChannelClient {
     }
     this.playGain = null;
     this.playAnalyser = null;
+    if (this.opusDecoder) {
+      this.opusDecoder.close();
+      this.opusDecoder = null;
+    }
+    if (this.opusEncoder) {
+      this.opusEncoder.close();
+      this.opusEncoder = null;
+    }
     const ws = this.ws;
     this.ws = null;
     if (ws) {

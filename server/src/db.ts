@@ -125,6 +125,10 @@ export async function ensureSchema(): Promise<void> {
   await p.query(
     `ALTER TABLE radio_channels ADD COLUMN IF NOT EXISTS agency_id INT REFERENCES agencies(id) ON DELETE CASCADE;`,
   );
+  // Voice codec the channel uses for transmissions. Validated against the
+  // VOICE_CODECS list in voiceCodecs.ts when read; existing rows backfill to
+  // 'imbe' so the relay stays bit-compatible with pre-multi-codec clients.
+  await p.query(`ALTER TABLE radio_channels ADD COLUMN IF NOT EXISTS codec TEXT NOT NULL DEFAULT 'imbe';`);
 
   await p.query(`
     CREATE TABLE IF NOT EXISTS users (

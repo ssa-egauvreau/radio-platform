@@ -3,6 +3,7 @@ import type { PoolClient } from "pg";
 import { getPool, requirePool, DEFAULT_AGENCY_SLUG } from "./db.js";
 import { hashPassword, type Role } from "./auth.js";
 import { EMERGENCY_CHANNEL_NAME_SQL_REGEX } from "./emergencyChannels.js";
+import { coerceVoiceCodec, type VoiceCodec } from "./voiceCodecs.js";
 
 export type Permission = "talk_priority" | "talk" | "listen_only";
 
@@ -269,6 +270,7 @@ export interface ChannelRow {
   sort_order: number;
   color: string | null;
   zone: string | null;
+  codec: VoiceCodec;
 }
 
 export interface MembershipRow {
@@ -283,6 +285,19 @@ export interface UserChannelRow {
   permission: Permission;
   color: string | null;
   zone: string | null;
+  codec: VoiceCodec;
+}
+
+/** Raw channel row shape as it comes off pg before codec coercion. */
+type ChannelRowRaw = Omit<ChannelRow, "codec"> & { codec: string };
+type UserChannelRowRaw = Omit<UserChannelRow, "codec"> & { codec: string };
+
+function asChannelRow(raw: ChannelRowRaw): ChannelRow {
+  return { ...raw, codec: coerceVoiceCodec(raw.codec) };
+}
+
+function asUserChannelRow(raw: UserChannelRowRaw): UserChannelRow {
+  return { ...raw, codec: coerceVoiceCodec(raw.codec) };
 }
 
 export interface AuditRow {
@@ -422,29 +437,29 @@ export async function countActiveAdmins(agencyId: number): Promise<number> {
 // --- channels ------------------------------------------------------------
 
 export async function listChannels(agencyId: number): Promise<ChannelRow[]> {
-  const res = await requirePool().query<ChannelRow>(
-    `SELECT id, name, sort_order, color, zone FROM radio_channels
+  const res = await requirePool().query<ChannelRowRaw>(
+    `SELECT id, name, sort_order, color, zone, codec FROM radio_channels
      WHERE agency_id = $1
      ORDER BY zone NULLS FIRST, sort_order ASC, id ASC;`,
     [agencyId],
   );
-  return res.rows;
+  return res.rows.map(asChannelRow);
 }
 
 export async function createChannel(agencyId: number, name: string): Promise<ChannelRow> {
-  const res = await requirePool().query<ChannelRow>(
+  const res = await requirePool().query<ChannelRowRaw>(
     `INSERT INTO radio_channels (agency_id, name, sort_order)
      VALUES ($1, $2, COALESCE((SELECT MAX(sort_order) + 1 FROM radio_channels WHERE agency_id = $1), 1))
-     RETURNING id, name, sort_order, color, zone;`,
+     RETURNING id, name, sort_order, color, zone, codec;`,
     [agencyId, name.trim()],
   );
-  return res.rows[0]!;
+  return asChannelRow(res.rows[0]!);
 }
 
 export async function updateChannel(
   id: number,
   agencyId: number,
-  patch: { name?: string; color?: string | null; zone?: string | null },
+  patch: { name?: string; color?: string | null; zone?: string | null; codec?: VoiceCodec },
 ): Promise<ChannelRow | null> {
   const sets: string[] = [];
   const vals: unknown[] = [];
@@ -452,16 +467,17 @@ export async function updateChannel(
   if (patch.name !== undefined) { sets.push(`name = $${i++}`); vals.push(patch.name.trim()); }
   if (patch.color !== undefined) { sets.push(`color = $${i++}`); vals.push(patch.color); }
   if (patch.zone !== undefined) { sets.push(`zone = $${i++}`); vals.push(patch.zone); }
+  if (patch.codec !== undefined) { sets.push(`codec = $${i++}`); vals.push(patch.codec); }
   if (sets.length === 0) {
     return getChannelById(id, agencyId);
   }
   vals.push(id, agencyId);
-  const res = await requirePool().query<ChannelRow>(
+  const res = await requirePool().query<ChannelRowRaw>(
     `UPDATE radio_channels SET ${sets.join(", ")} WHERE id = $${i++} AND agency_id = $${i}
-     RETURNING id, name, sort_order, color, zone;`,
+     RETURNING id, name, sort_order, color, zone, codec;`,
     vals,
   );
-  return res.rows[0] ?? null;
+  return res.rows[0] ? asChannelRow(res.rows[0]) : null;
 }
 
 export async function deleteChannel(id: number, agencyId: number): Promise<boolean> {
@@ -508,21 +524,21 @@ export async function deleteEmergencyChannel(
 }
 
 export async function getChannelById(id: number, agencyId: number): Promise<ChannelRow | null> {
-  const res = await requirePool().query<ChannelRow>(
-    `SELECT id, name, sort_order, color, zone FROM radio_channels WHERE id = $1 AND agency_id = $2;`,
+  const res = await requirePool().query<ChannelRowRaw>(
+    `SELECT id, name, sort_order, color, zone, codec FROM radio_channels WHERE id = $1 AND agency_id = $2;`,
     [id, agencyId],
   );
-  return res.rows[0] ?? null;
+  return res.rows[0] ? asChannelRow(res.rows[0]) : null;
 }
 
 /** Case-insensitive channel lookup within an agency (used by the voice relay on join). */
 export async function getChannelByName(agencyId: number, name: string): Promise<ChannelRow | null> {
-  const res = await requirePool().query<ChannelRow>(
-    `SELECT id, name, sort_order, color, zone FROM radio_channels
+  const res = await requirePool().query<ChannelRowRaw>(
+    `SELECT id, name, sort_order, color, zone, codec FROM radio_channels
      WHERE agency_id = $1 AND lower(name) = lower($2);`,
     [agencyId, name.trim()],
   );
-  return res.rows[0] ?? null;
+  return res.rows[0] ? asChannelRow(res.rows[0]) : null;
 }
 
 // --- simulcast channels --------------------------------------------------
@@ -822,15 +838,15 @@ export async function listMemberships(agencyId: number): Promise<MembershipRow[]
 }
 
 export async function listChannelsForUser(userId: number): Promise<UserChannelRow[]> {
-  const res = await requirePool().query<UserChannelRow>(
-    `SELECT c.id, c.name, c.color, c.zone, m.permission
+  const res = await requirePool().query<UserChannelRowRaw>(
+    `SELECT c.id, c.name, c.color, c.zone, c.codec, m.permission
      FROM channel_members m
      JOIN radio_channels c ON c.id = m.channel_id
      WHERE m.user_id = $1
      ORDER BY c.zone NULLS FIRST, c.sort_order ASC, c.id ASC;`,
     [userId],
   );
-  return res.rows;
+  return res.rows.map(asUserChannelRow);
 }
 
 export async function setMembership(userId: number, channelId: number, permission: Permission): Promise<void> {
