@@ -184,7 +184,6 @@ class AppUpdater(
      * a manual trigger can show "no update pending" feedback instead of
      * silently doing nothing.
      */
-    @androidx.annotation.MainThread
     fun forceRetryPendingInstall(): Boolean {
         val notice = peekPendingUpdateNotice() ?: return false
         val apk = File(File(context.cacheDir, "updates"), "update.apk")
