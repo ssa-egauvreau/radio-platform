@@ -1,0 +1,66 @@
+name: Server PR check
+
+# Pull-request validation for the Node server + Vite web console. The
+# existing release path doesn't have a PR-level CI check, so server /
+# web-console regressions today only surface in production. This
+# workflow runs the server unit tests, type-checks both packages, and
+# performs the production-shape web-console build (catches Vite/build
+# errors that `tsc --noEmit` misses).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/**'
+      - '.github/workflows/server-pr.yml'
+  pull_request:
+    paths:
+      - 'server/**'
+      - '.github/workflows/server-pr.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: server-pr-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: server tests + web-console build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            server/web-console/package-lock.json
+
+      - name: Install server deps
+        working-directory: server
+        run: npm ci --no-audit --no-fund
+
+      - name: Install web-console deps
+        working-directory: server/web-console
+        run: npm ci --no-audit --no-fund
+
+      - name: Server type-check
+        working-directory: server
+        run: npx tsc -p tsconfig.json --noEmit
+
+      - name: Server tests
+        working-directory: server
+        run: npm test
+
+      - name: Web-console type-check
+        working-directory: server/web-console
+        run: npm run typecheck
+
+      - name: Web-console build (production)
+        working-directory: server/web-console
+        run: npm run build
