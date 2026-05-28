@@ -58,11 +58,14 @@ export function isVoiceCodec(value: unknown): value is VoiceCodec {
   );
 }
 
-/** Codecs the web console can currently encode (TX). IMBE only today;
- *  the existing TX path is synchronous and the WebCodecs AudioEncoder is
- *  async, so adding Opus TX requires reshaping the worklet message
- *  handler — deliberate follow-up. */
-export const WEB_ENCODE_CAPS: readonly VoiceCodec[] = ["imbe"];
+/** Codecs the web console can currently encode (TX). IMBE always; Opus
+ *  when the browser exposes WebCodecs `AudioEncoder`. Computed at every
+ *  join so a browser that updated mid-session picks the new capability up
+ *  on the next reconnect. See voiceClient.ts for the actual codec
+ *  dispatch on the TX path. */
+export function computeWebEncodeCaps(opusAvailable: boolean): readonly VoiceCodec[] {
+  return opusAvailable ? ["imbe", "opus"] : ["imbe"];
+}
 
 /** Codecs the web console can currently decode (RX). IMBE always; Opus
  *  via WebCodecs AudioDecoder when the browser supports it. The Opus
