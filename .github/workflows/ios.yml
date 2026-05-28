@@ -9,6 +9,8 @@ on:
   pull_request:
     paths:
       - 'ios-app/**'
+      - 'android-app/app/src/main/cpp/codec2/**'
+      - 'android-app/app/src/main/cpp/codec2_generated/**'
       - '.github/workflows/ios.yml'
   workflow_dispatch:
 
@@ -24,6 +26,12 @@ jobs:
         working-directory: ios-app
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The iOS project pulls libcodec2 (and its dvmvocoder neighbor)
+          # straight from android-app/app/src/main/cpp/; libcodec2 is a
+          # git submodule that must be present for the Xcode build to
+          # compile codec2.c and friends.
+          submodules: recursive
 
       - name: Install XcodeGen
         run: brew install xcodegen

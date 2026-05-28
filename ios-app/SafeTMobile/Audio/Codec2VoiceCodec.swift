@@ -1,57 +1,141 @@
 import Foundation
+import os
 
-/// Codec2 3200 bps encoder + decoder — placeholder.
+/// Codec2 3200 bps encoder + decoder, wrapping the libcodec2 C API
+/// (LGPL-2.1) via the Swift bridging header. libcodec2 is shared with
+/// the Android NDK build — the iOS Xcode target compiles the same
+/// slim vocoder source subset from android-app/app/src/main/cpp/codec2.
 ///
-/// Reports `isReady` = false until the libcodec2 build lands. The registry
-/// falls back to IMBE on TX while Codec2 is unavailable, and inbound Codec2
-/// frames drop with a log instead of being played as garbage at the speaker.
+/// Mode 3200 was picked because:
+///  - 20 ms frames (160 samples @ 8 kHz) match IMBE's cadence, so the
+///    transport's existing 20 ms accumulator works unchanged.
+///  - 3200 bps sounds substantially better than the lower-bitrate
+///    Codec2 modes while preserving the "digital trunked radio"
+///    character (close to AMBE+2 full-rate by ear).
 ///
-/// Why this is still a stub: libcodec2 is a C library (~50 source files)
-/// from Rowetel; vendoring its source into the repo is best done as its own
-/// commit with the build wiring (Package.swift / Xcode target, bridging
-/// header) so the diff stays reviewable.
+/// Wire format: 2-byte magic (0xC2 0x01) + 8-byte codec2 codeword.
+/// Both encode and decode run at 8 kHz; the transport's existing
+/// post-decode chain handles the 8 kHz → 16 kHz upsample.
 ///
-/// Vendoring + build plan:
-///
-///   1. Add libcodec2 sources at `ios-app/Vendor/codec2/src/` from
-///      https://github.com/drowe67/codec2 (BSD-3-Clause; vendor `src/`,
-///      `unittest/codec2.h` headers, and the minimum generated codebook
-///      files).
-///
-///   2. Extend the project source globs in `project.yml` to include the
-///      C files, with `-fno-strict-aliasing` if any of them warn under
-///      Xcode 16:
-///        - path: Vendor/codec2/src
-///          includes: ["**/*.c"]
-///          compilerFlags: "-DHAVE_CONFIG_H"
-///
-///   3. Expose the C API in `SafeTMobile-Bridging-Header.h`:
-///        #include "Vendor/codec2/src/codec2.h"
-///
-///   4. Replace the bodies of `Codec2Encoder` / `Codec2Decoder` below with
-///      calls into the bridged C API (`codec2_create(CODEC2_MODE_3200)`,
-///      `codec2_encode(...)`, `codec2_decode(...)`).
-///
-/// Notes for whoever lands this:
-///  - 3200 bps mode emits 64 bits per 40 ms frame. Keep one Codec2 payload
-///    per WebSocket message to mirror IMBE's cadence; the relay forwards by
-///    magic so any payload length following 0xC2 0x01 is valid.
-///  - downsample 16 kHz capture → 8 kHz via the same average-pair path
-///    `P25ImbeNative.Frames.downsampleAvg16kToImbe` uses.
-///  - upsample 8 kHz decode → 16 kHz via the same duplicate path, or run
-///    through the agency post-decode chain if shaping is set.
+/// Falls back to IMBE via the registry if codec2_create returns null
+/// (rare — usually means the libcodec2 source didn't compile in,
+/// which surfaces as a link error at build time, not at runtime).
+
+private let CODEC2_FRAME_SAMPLES = 160      // 20 ms @ 8 kHz
+private let CODEC2_FRAME_BYTES   = 8        // 64 bits per frame
 
 final class Codec2Encoder: VoiceEncoder {
     let codec: VoiceCodec = .codec2_3200
-    var isReady: Bool { false }
 
-    func encodeFrame(_ pcm16kLe640: Data) -> Data? { nil }
+    private let logger = Logger(subsystem: "com.safetptt.mobile", category: "codec2")
+    private let lock = NSLock()
+    private var state: OpaquePointer?
+
+    init() {
+        guard let s = codec2_create(Int32(CODEC2_MODE_3200)) else {
+            logger.warning("codec2_create returned nil — Codec2 unavailable, falling back to IMBE on TX")
+            self.state = nil
+            return
+        }
+        // Sanity-check the mode's frame layout matches what our wire
+        // framing assumes. If a future libcodec2 release changes mode
+        // 3200 we want to fail at init rather than corrupt the wire.
+        if codec2_samples_per_frame(s) != Int32(CODEC2_FRAME_SAMPLES) ||
+           codec2_bytes_per_frame(s)   != Int32(CODEC2_FRAME_BYTES) {
+            logger.warning("Codec2 mode 3200 frame layout mismatch — disabling encoder")
+            codec2_destroy(s)
+            self.state = nil
+            return
+        }
+        self.state = s
+    }
+
+    deinit {
+        if let s = state { codec2_destroy(s) }
+    }
+
+    var isReady: Bool { state != nil }
+
+    func encodeFrame(_ pcm16kLe640: Data) -> Data? {
+        guard let s = state else { return nil }
+        guard pcm16kLe640.count >= P25ImbeNative.Frames.pcm16kFrameBytes else { return nil }
+        // Same 16 → 8 kHz path IMBE uses; mode 3200 also runs at 8 kHz.
+        guard var pcm8k = P25ImbeNative.Frames.downsampleAvg16kToImbe(frame16k: pcm16kLe640) else {
+            return nil
+        }
+        var codeword = [UInt8](repeating: 0, count: CODEC2_FRAME_BYTES)
+
+        lock.lock(); defer { lock.unlock() }
+        pcm8k.withUnsafeMutableBufferPointer { sp in
+            codeword.withUnsafeMutableBufferPointer { cp in
+                if let cpBase = cp.baseAddress, let spBase = sp.baseAddress {
+                    codec2_encode(s, cpBase, spBase)
+                }
+            }
+        }
+
+        var framed = Data(capacity: 2 + CODEC2_FRAME_BYTES)
+        framed.append(codec.magic0)
+        framed.append(codec.magic1)
+        framed.append(contentsOf: codeword)
+        return framed
+    }
 }
 
 final class Codec2Decoder: VoiceDecoder {
     let codec: VoiceCodec = .codec2_3200
-    var isReady: Bool { false }
     let nativeSampleRate: Int = 8000
 
-    func decodeFrame(_ framedBytes: Data) -> [Int16]? { nil }
+    private let logger = Logger(subsystem: "com.safetptt.mobile", category: "codec2")
+    private let lock = NSLock()
+    private var state: OpaquePointer?
+
+    init() {
+        guard let s = codec2_create(Int32(CODEC2_MODE_3200)) else {
+            logger.warning("codec2_create returned nil — Codec2 unavailable; inbound frames will drop")
+            self.state = nil
+            return
+        }
+        if codec2_samples_per_frame(s) != Int32(CODEC2_FRAME_SAMPLES) ||
+           codec2_bytes_per_frame(s)   != Int32(CODEC2_FRAME_BYTES) {
+            logger.warning("Codec2 mode 3200 frame layout mismatch — disabling decoder")
+            codec2_destroy(s)
+            self.state = nil
+            return
+        }
+        self.state = s
+    }
+
+    deinit {
+        if let s = state { codec2_destroy(s) }
+    }
+
+    var isReady: Bool { state != nil }
+
+    func decodeFrame(_ framedBytes: Data) -> [Int16]? {
+        guard let s = state else { return nil }
+        // Magic (2 bytes) + codec2_3200 codeword (8 bytes) = 10 bytes.
+        guard framedBytes.count == 2 + CODEC2_FRAME_BYTES else { return nil }
+        let firstByte = framedBytes[framedBytes.startIndex]
+        let secondByte = framedBytes[framedBytes.startIndex + 1]
+        guard firstByte == codec.magic0, secondByte == codec.magic1 else { return nil }
+
+        var codeword = [UInt8](repeating: 0, count: CODEC2_FRAME_BYTES)
+        framedBytes.copyBytes(
+            to: &codeword,
+            from: (framedBytes.startIndex + 2)..<(framedBytes.startIndex + 2 + CODEC2_FRAME_BYTES)
+        )
+
+        var samples = [Int16](repeating: 0, count: CODEC2_FRAME_SAMPLES)
+
+        lock.lock(); defer { lock.unlock() }
+        samples.withUnsafeMutableBufferPointer { sp in
+            codeword.withUnsafeMutableBufferPointer { cp in
+                if let spBase = sp.baseAddress, let cpBase = cp.baseAddress {
+                    codec2_decode(s, spBase, cpBase)
+                }
+            }
+        }
+        return samples
+    }
 }

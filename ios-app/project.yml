@@ -38,6 +38,35 @@ targets:
       - path: ../android-app/app/src/main/cpp/dvmvocoder/vocoder
         includes:
           - "**/*.c"
+      # libcodec2 mode 3200 — the slim source subset matches the Android
+      # NDK build at app/src/main/cpp/CMakeLists.txt. Adding the full src/
+      # tree would pull in FreeDV / OFDM / FSK / LDPC implementations that
+      # have undefined symbols when standalone; enumerate explicitly.
+      - path: ../android-app/app/src/main/cpp/codec2/src
+        includes:
+          - codec2.c
+          - codec2_fft.c
+          - kiss_fft.c
+          - kiss_fftr.c
+          - sine.c
+          - phase.c
+          - quantise.c
+          - lpc.c
+          - lsp.c
+          - nlp.c
+          - postfilter.c
+          - pack.c
+          - interp.c
+          - mbest.c
+          - newamp1.c
+          - dump.c
+        compilerFlags: "-DFLOATING_POINT -DVAR_ARRAYS"
+      # Pre-generated codebook arrays + the static codec2/version.h stub.
+      # See cpp/codec2_generated/README.md for the regenerate recipe.
+      - path: ../android-app/app/src/main/cpp/codec2_generated
+        includes:
+          - "*.c"
+        compilerFlags: "-DFLOATING_POINT -DVAR_ARRAYS"
     configFiles:
       Debug: Local.xcconfig
       Release: Local.xcconfig
@@ -51,6 +80,12 @@ targets:
         HEADER_SEARCH_PATHS:
           - $(SRCROOT)/../android-app/app/src/main/cpp/dvmvocoder/vocoder
           - $(SRCROOT)/../android-app/app/src/main/cpp/dvmvocoder/vocoder/imbe
+          - $(SRCROOT)/../android-app/app/src/main/cpp/codec2/src
+          # codec2_generated holds the vendored codebook arrays AND the
+          # static `codec2/version.h` — codec2.h includes it as
+          # <codec2/version.h>, so this directory has to be on the angle-
+          # bracket search path.
+          - $(SRCROOT)/../android-app/app/src/main/cpp/codec2_generated
         OTHER_LDFLAGS: "-lc++"
     info:
       path: SafeTMobile/Info.plist

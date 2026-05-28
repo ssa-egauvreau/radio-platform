@@ -85,30 +85,20 @@ if(EXISTS "${CODEC2_DIR}/src/codec2.h")
     )
 
     add_library(codec2 STATIC ${CODEC2_SRC})
-    target_include_directories(codec2 PUBLIC "${CODEC2_DIR}/src")
+    target_include_directories(codec2 PUBLIC
+        "${CODEC2_DIR}/src"
+        # codec2_generated holds the vendored codebook arrays AND a
+        # static `codec2/version.h` that codec2.h includes via
+        # angle brackets — `<codec2/version.h>` therefore resolves to
+        # codec2_generated/codec2/version.h.
+        "${CODEC2_GEN_DIR}"
+    )
     # Match the upstream feature defines so the source compiles with the
     # same code paths it does in the standalone build.
     target_compile_definitions(codec2 PRIVATE
         FLOATING_POINT
         VAR_ARRAYS
-        CODEC2_VERSION_MAJOR=1
-        CODEC2_VERSION_MINOR=2
-        CODEC2_VERSION_PATCH=0
     )
-    # libcodec2 doesn't ship a `<codec2/version.h>` in the source tree —
-    # the upstream CMakeLists generates it. Stub one out so codec2.h's
-    # include resolves without us having to run codec2's own configure.
-    set(CODEC2_GENERATED_DIR "${CMAKE_CURRENT_BINARY_DIR}/codec2-generated")
-    file(MAKE_DIRECTORY "${CODEC2_GENERATED_DIR}/codec2")
-    file(WRITE "${CODEC2_GENERATED_DIR}/codec2/version.h"
-        "#ifndef CODEC2_VERSION_H\n"
-        "#define CODEC2_VERSION_H\n"
-        "#define CODEC2_VERSION_MAJOR 1\n"
-        "#define CODEC2_VERSION_MINOR 2\n"
-        "#define CODEC2_VERSION_PATCH 0\n"
-        "#endif\n"
-    )
-    target_include_directories(codec2 PUBLIC "${CODEC2_GENERATED_DIR}")
 
     set_target_properties(codec2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
     set(HAVE_CODEC2 TRUE)

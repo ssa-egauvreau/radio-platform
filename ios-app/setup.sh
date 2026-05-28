@@ -19,5 +19,14 @@ if ! command -v xcodegen >/dev/null 2>&1; then
   exit 1
 fi
 
+# The iOS project pulls libcodec2 sources straight from
+# ../android-app/app/src/main/cpp/codec2, which is a git submodule. If a
+# developer cloned without --recursive, fetch it now so xcodegen can
+# resolve the source file paths.
+if [ -f ../.gitmodules ] && [ ! -f ../android-app/app/src/main/cpp/codec2/src/codec2.h ]; then
+  echo "Initialising libcodec2 submodule…"
+  (cd .. && git submodule update --init --recursive)
+fi
+
 xcodegen generate
 echo "Project regenerated. Open SafeTMobile.xcodeproj in Xcode."
