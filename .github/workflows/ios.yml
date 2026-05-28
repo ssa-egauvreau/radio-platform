@@ -14,6 +14,14 @@ on:
       - '.github/workflows/ios.yml'
   workflow_dispatch:
 
+permissions:
+  contents: read
+  # So the failure-excerpt step below can post the relevant xcodebuild log
+  # lines as a PR comment when the build fails — GitHub Actions logs are
+  # auth-gated and reviewers without sign-in (or automated agents) can't
+  # otherwise diagnose iOS PR failures.
+  pull-requests: write
+
 jobs:
   test:
     name: Build and test (iOS Simulator)
@@ -59,6 +67,9 @@ jobs:
       - name: Run xcodebuild test
         run: |
           set -o pipefail
+          # Tee the output so the failure-excerpt step can read it without
+          # downloading the xcresult bundle. The result bundle is still
+          # uploaded as an artifact for deeper inspection.
           xcodebuild test \
             -project SafeTMobile.xcodeproj \
             -scheme SafeTMobile \
@@ -68,7 +79,7 @@ jobs:
             -test-iterations 2 \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-            ONLY_ACTIVE_ARCH=YES
+            ONLY_ACTIVE_ARCH=YES 2>&1 | tee xcodebuild.log
 
       - name: Upload test results
         if: always()
@@ -76,3 +87,70 @@ jobs:
         with:
           name: TestResults
           path: ios-app/TestResults.xcresult
+
+      - name: Upload xcodebuild log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: ios-app/xcodebuild.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      - name: Post failure excerpt to PR
+        # Mirror the Android workflow's self-diagnosing step. GitHub
+        # Actions logs are auth-gated; drop the relevant xcodebuild lines
+        # into a PR comment on failure so reviewers can diagnose iOS
+        # build issues from the PR feed.
+        if: failure() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'ios-app/xcodebuild.log';
+            if (!fs.existsSync(path)) {
+              return;
+            }
+            const text = fs.readFileSync(path, 'utf-8');
+            const lines = text.split('\n');
+            const patterns = [
+              /^.*error:\s/i,
+              /^.*\.swift:\d+:\d+: error:/,
+              /^.*\.[chm]p?p?:\d+:\d+: error:/,
+              /Undefined symbols/,
+              /^ld: /,
+              /^Error: /,
+              /\*\* (BUILD|TEST) FAILED \*\*/,
+              /Testing failed:/,
+              /xcodebuild: error:/,
+            ];
+            let anchor = -1;
+            for (const re of patterns) {
+              const idx = lines.findIndex((l) => re.test(l));
+              if (idx >= 0) {
+                anchor = idx;
+                break;
+              }
+            }
+            if (anchor < 0) {
+              anchor = Math.max(0, lines.length - 80);
+            }
+            const start = Math.max(0, anchor - 10);
+            const end = Math.min(lines.length, anchor + 70);
+            const excerpt = lines.slice(start, end).join('\n');
+            const truncated = excerpt.length > 60000
+              ? excerpt.slice(-60000)
+              : excerpt;
+            const body =
+              `### iOS PR check failed\n\n` +
+              `Excerpt around the first error in \`xcodebuild.log\` ` +
+              `(lines ${start + 1}–${end}):\n\n` +
+              "```\n" +
+              truncated +
+              "\n```";
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
