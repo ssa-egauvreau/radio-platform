@@ -1,16 +1,18 @@
 name: Android PR check
 
-# Compile-only validation for pull requests that touch the Android app.
-# Catches Kotlin/Gradle errors before merge — the existing android-apk.yml
-# workflow only runs on push to main and needs release signing secrets,
-# so without this PR check, an Android compile error wouldn't show up
-# until after the merge had landed.
+# Pull-request validation for the Android app. Covers the JVM Kotlin
+# compile AND the NDK native build — both are needed because:
 #
-# No keystore, no NDK build, no APK upload — just the JVM-side compile
-# (`compileDebugKotlin`) which catches everything the audio-quality PR
-# is likely to break (codec wiring, Gradle deps, Kotlin syntax). A
-# follow-up could add the native build + UI tests; this keeps the PR
-# fast.
+#   - Without the JVM compile, Kotlin/Gradle errors aren't caught until
+#     the release workflow runs on push to main (which needs signing
+#     secrets and publishes the APK to OTA, so a failure there is loud).
+#
+#   - Without the NDK build, native code (dvmvocoder + the libcodec2
+#     submodule under cpp/codec2) only gets compiled by the release
+#     workflow — too late.
+#
+# Doesn't run lint, tests, or assemble the APK; the release workflow on
+# main does that with the keystore.
 
 on:
   push:
@@ -32,10 +34,15 @@ concurrency:
 
 jobs:
   compile:
-    name: compileDebugKotlin
+    name: Kotlin + native (debug)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # libcodec2 is vendored as a git submodule under
+          # android-app/app/src/main/cpp/codec2 — must be present for the
+          # NDK build to succeed.
+          submodules: recursive
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -46,12 +53,11 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install platform + build-tools
-        # Skipping NDK / CMake here — the JVM compile path covers every
-        # file the audio-quality PR touches, and pulling NDK doubles the
-        # CI runtime. The release workflow on main still does the full
-        # native build before publishing.
-        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+      - name: Install platform + build-tools + NDK + CMake
+        # NDK + CMake versions match the release workflow (android-apk.yml)
+        # so the PR check builds the native code with the same toolchain
+        # that actually ships.
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.22.1"
 
       - name: Cache Gradle
         uses: actions/cache@v4
@@ -66,15 +72,16 @@ jobs:
       - name: Configure local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > android-app/local.properties
 
-      - name: Compile Kotlin (debug)
+      - name: Compile Kotlin + native (debug)
         working-directory: android-app
-        # Tee the gradle output to a file so the artifact-upload step below
-        # can ship the full log even on failure — the GitHub Actions log
-        # viewer is auth-gated, so capturing the build output lets reviewers
-        # diagnose Kotlin errors without browser sign-in.
+        # `assembleDebug` runs compileDebugKotlin AND triggers the
+        # externalNativeBuild step (CMake → NDK → libcodec2 + JNI bridge
+        # + securityradiovocoder.so). Tee the output so the artifact
+        # upload below carries the full log even on failure — the
+        # GitHub Actions log viewer is auth-gated.
         run: |
           set -o pipefail
-          ./gradlew compileDebugKotlin --no-daemon --stacktrace --info 2>&1 | tee gradle-output.log
+          ./gradlew assembleDebug --no-daemon --stacktrace --info 2>&1 | tee gradle-output.log
 
       - name: Upload gradle log
         if: always()
