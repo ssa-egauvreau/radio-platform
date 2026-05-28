@@ -54,12 +54,27 @@ export interface Agency {
   channel_count?: number;
 }
 
+/**
+ * Voice codecs the platform supports on the wire. Kept in sync with
+ * server/src/voiceCodecs.ts and android-app/.../VoiceCodec.kt.
+ */
+export const VOICE_CODECS = ["imbe", "codec2_3200", "opus"] as const;
+export type VoiceCodec = (typeof VOICE_CODECS)[number];
+
+/** Human-readable label for the admin UI dropdown / channel rows. */
+export const VOICE_CODEC_LABEL: Record<VoiceCodec, string> = {
+  imbe: "IMBE (P25, default)",
+  codec2_3200: "Codec2 3200",
+  opus: "Opus (wideband)",
+};
+
 export interface Channel {
   id: number;
   name: string;
   sort_order: number;
   color: string | null;
   zone: string | null;
+  codec: VoiceCodec;
 }
 
 export interface Membership {
@@ -74,6 +89,7 @@ export interface UserChannel {
   permission: Permission;
   color: string | null;
   zone: string | null;
+  codec: VoiceCodec;
   /** True for a simulcast channel — keying it transmits on several real channels. */
   simulcast?: boolean;
   /** Per-channel AI dispatcher (dispatch console only). */
@@ -660,8 +676,10 @@ export const api = {
 
   listChannels: () => request<{ channels: Channel[] }>("GET", "/v1/admin/channels"),
   createChannel: (name: string) => request<{ channel: Channel }>("POST", "/v1/admin/channels", { name }),
-  updateChannel: (id: number, patch: { name?: string; color?: string | null; zone?: string | null }) =>
-    request<{ channel: Channel }>("PATCH", `/v1/admin/channels/${id}`, patch),
+  updateChannel: (
+    id: number,
+    patch: { name?: string; color?: string | null; zone?: string | null; codec?: VoiceCodec },
+  ) => request<{ channel: Channel }>("PATCH", `/v1/admin/channels/${id}`, patch),
   deleteChannel: (id: number) => request<{ ok: boolean }>("DELETE", `/v1/admin/channels/${id}`),
 
   listMemberships: () => request<{ memberships: Membership[] }>("GET", "/v1/admin/memberships"),

@@ -1,5 +1,12 @@
 import { useEffect, useState, type FormEvent } from "react";
-import { api, describeError, type Channel } from "../../api";
+import {
+  api,
+  describeError,
+  VOICE_CODECS,
+  VOICE_CODEC_LABEL,
+  type Channel,
+  type VoiceCodec,
+} from "../../api";
 
 export function ChannelsPanel() {
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -110,6 +117,7 @@ export function ChannelsPanel() {
               <th>Name</th>
               <th>Color</th>
               <th>Zone</th>
+              <th>Codec</th>
               <th />
             </tr>
           </thead>
@@ -147,6 +155,24 @@ export function ChannelsPanel() {
                       }
                     }}
                   />
+                </td>
+                <td>
+                  <select
+                    value={channel.codec}
+                    onChange={(e) => {
+                      const next = e.target.value as VoiceCodec;
+                      if (next !== channel.codec) {
+                        void patch(channel, { codec: next });
+                      }
+                    }}
+                    title="Voice codec used to transmit on this channel. Connected clients receive a codec_change push immediately."
+                  >
+                    {VOICE_CODECS.map((c) => (
+                      <option key={c} value={c}>
+                        {VOICE_CODEC_LABEL[c]}
+                      </option>
+                    ))}
+                  </select>
                 </td>
                 <td>
                   <div className="cell-actions">
