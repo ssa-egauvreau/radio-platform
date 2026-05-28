@@ -42,6 +42,17 @@ set_target_properties(libdvmvocoder PROPERTIES
 set(CODEC2_DIR "${CMAKE_CURRENT_LIST_DIR}/codec2")
 
 if(EXISTS "${CODEC2_DIR}/src/codec2.h")
+    # libcodec2 ships codebook *.txt files plus a `generate_codebook` C
+    # tool that emits the corresponding *.c arrays at build time. That
+    # works for a native build but is painful under Android NDK cross-
+    # compile (it'd need ExternalProject_Add to build the host helper
+    # before the NDK build can proceed). We side-step the whole dance by
+    # vendoring the generated codebook *.c outputs alongside this
+    # CMakeLists — produced once by running `generate_codebook` against
+    # libcodec2 1.2.0's codebook/*.txt fixtures. Regenerate if the
+    # submodule ref ever bumps; see cpp/codec2_generated/README.md.
+    set(CODEC2_GEN_DIR "${CMAKE_CURRENT_LIST_DIR}/codec2_generated")
+
     set(CODEC2_SRC
         "${CODEC2_DIR}/src/codec2.c"
         "${CODEC2_DIR}/src/codec2_fft.c"
@@ -60,16 +71,16 @@ if(EXISTS "${CODEC2_DIR}/src/codec2.h")
         "${CODEC2_DIR}/src/newamp1.c"
         # newamp2.c does not exist in libcodec2 1.2.0 — only newamp2.h, which
         # codec2.c includes but doesn't actually call functions from. The
-        # newamp2 codebook tables below ARE referenced as extern data, so
-        # they stay.
-        "${CODEC2_DIR}/src/codebook.c"
-        "${CODEC2_DIR}/src/codebookd.c"
-        "${CODEC2_DIR}/src/codebookjmv.c"
-        "${CODEC2_DIR}/src/codebookge.c"
-        "${CODEC2_DIR}/src/codebooknewamp1.c"
-        "${CODEC2_DIR}/src/codebooknewamp1_energy.c"
-        "${CODEC2_DIR}/src/codebooknewamp2.c"
-        "${CODEC2_DIR}/src/codebooknewamp2_energy.c"
+        # newamp2 codebook tables in CODEC2_GEN_DIR ARE referenced as extern
+        # data, so they stay.
+        "${CODEC2_GEN_DIR}/codebook.c"
+        "${CODEC2_GEN_DIR}/codebookd.c"
+        "${CODEC2_GEN_DIR}/codebookjmv.c"
+        "${CODEC2_GEN_DIR}/codebookge.c"
+        "${CODEC2_GEN_DIR}/codebooknewamp1.c"
+        "${CODEC2_GEN_DIR}/codebooknewamp1_energy.c"
+        "${CODEC2_GEN_DIR}/codebooknewamp2.c"
+        "${CODEC2_GEN_DIR}/codebooknewamp2_energy.c"
         "${CODEC2_DIR}/src/dump.c"
     )
 
