@@ -118,11 +118,12 @@ final class OpusEncoder: VoiceEncoder {
 
         // Opus packets at 20 kbps wideband fit comfortably under 256 B; 512 B
         // is generous headroom for upper-bound packets at FEC redundancy.
-        guard let outputBuffer = AVAudioCompressedBuffer(
+        // AVAudioCompressedBuffer's initializer is non-failable on iOS.
+        let outputBuffer = AVAudioCompressedBuffer(
             format: opusFormat,
             packetCapacity: 1,
             maximumPacketSize: 512
-        ) else { return nil }
+        )
 
         var error: NSError?
         var supplied = false
@@ -198,11 +199,11 @@ final class OpusDecoder: VoiceDecoder {
         lock.lock(); defer { lock.unlock() }
         guard let converter else { return nil }
 
-        guard let compressedBuffer = AVAudioCompressedBuffer(
+        let compressedBuffer = AVAudioCompressedBuffer(
             format: opusFormat,
             packetCapacity: 1,
             maximumPacketSize: payloadSize
-        ) else { return nil }
+        )
         compressedBuffer.byteLength = UInt32(payloadSize)
         compressedBuffer.packetCount = 1
         payload.withUnsafeBytes { raw in
