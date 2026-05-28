@@ -4,6 +4,7 @@
 import { api, getToken, type Permission } from "../api";
 import { ImbeTxConditioner } from "./imbeTxConditioner";
 import { imbeDecode, imbeEncode, imbeReady, initImbe } from "./imbeVocoder";
+import { codec2Decode, codec2Encode, codec2Ready, initCodec2 } from "./codec2Vocoder";
 import { OpusWebDecoder } from "./opusDecoder";
 import { OpusWebEncoder, opusEncoderAvailable } from "./opusEncoder";
 import { PostDecodeProcessor, type PostDecodeConfig } from "./postDecodeChain";
@@ -507,6 +508,7 @@ export class VoiceChannelClient {
   connect(): void {
     this.setState("connecting");
     void initImbe(); // load the IMBE vocoder in the background for digital RX
+    void initCodec2(); // libcodec2 WASM — ~270 KB, lazy single-shot load
     // Reset client-side audio policy to defaults at the start of every
     // connect so a stale value from a previous session can't leak into the
     // first PTT before refreshAudioConfig settles.
@@ -699,11 +701,26 @@ export class VoiceChannelClient {
       return;
     }
     if (codec === "codec2_3200") {
-      // Recognised vocoded frame for a codec the web client doesn't decode
-      // yet. Drop the frame (don't feed the speaker the encoded bytes as
-      // PCM) and log once per codec per channel session so the
-      // troubleshooting trail is clear.
-      this.warnUnsupportedCodecOnce(codec);
+      if (!codec2Ready()) {
+        // The WASM module is loaded lazily on `joined`; if a Codec2 frame
+        // arrives before init resolves, kick off the load and drop this
+        // one. Following frames at the channel's 20 ms cadence catch up
+        // once the module is in memory.
+        void initCodec2();
+        this.warnUnsupportedCodecOnce(codec);
+        return;
+      }
+      const pcm8k = codec2Decode(bytes.subarray(2));
+      if (pcm8k) {
+        // Same 8 → 16 kHz path IMBE uses: through the agency post-decode
+        // chain when configured, otherwise the legacy duplicate upsample.
+        if (this.postDecodeProcessor) {
+          const shaped = this.postDecodeProcessor.process(pcm8k);
+          this.schedulePcm(shaped, { sampleRate: this.postDecodeProcessor.rate() });
+        } else {
+          this.schedulePcm(upsample8kTo16k(pcm8k));
+        }
+      }
       return;
     }
     // A sustained burst of raw PCM (multiple frames within ~200 ms) means a peer's IMBE
@@ -861,9 +878,9 @@ export class VoiceChannelClient {
           ws.send(wrapListenPcm(pcmBuf));
         }
 
-        // Codec dispatch on TX: Opus when the channel asked for it AND
-        // WebCodecs is available, otherwise IMBE. Anything that fails to
-        // encode falls back to clear PCM at the bottom.
+        // Codec dispatch on TX. In order: Opus (if WebCodecs available),
+        // Codec2 (if WASM loaded), IMBE (the legacy default). Anything
+        // that fails to encode falls through to clear PCM at the bottom.
         if (this.currentTxCodec === "opus") {
           const enc = this.ensureOpusEncoder();
           if (enc && enc.isReady()) {
@@ -873,6 +890,29 @@ export class VoiceChannelClient {
             return;
           }
           // Opus asked for but unavailable — fall through to IMBE.
+        }
+        if (this.currentTxCodec === "codec2_3200") {
+          if (codec2Ready()) {
+            // libcodec2 mode 3200: 16 kHz → 8 kHz, 160 samples → 8-byte
+            // codeword. Wire frame = 2-byte magic + 8-byte codeword = 10 bytes.
+            const pcm8k = new Int16Array(pcm.length >> 1);
+            for (let i = 0; i < pcm8k.length; i++) {
+              pcm8k[i] = (pcm[2 * i] + pcm[2 * i + 1]) >> 1;
+            }
+            for (let off = 0; off + 160 <= pcm8k.length; off += 160) {
+              const codeword = codec2Encode(pcm8k.subarray(off, off + 160));
+              if (!codeword) continue;
+              const frame = new Uint8Array(2 + codeword.length);
+              frame[0] = 0xc2;
+              frame[1] = 0x01;
+              frame.set(codeword, 2);
+              ws.send(frame.buffer);
+            }
+            return;
+          }
+          // Codec2 asked for but WASM not yet loaded — kick off the load
+          // for next time and fall through to IMBE for this frame.
+          void initCodec2();
         }
         if (imbeReady()) {
           for (const frame of encodeImbeFrames(pcm)) {

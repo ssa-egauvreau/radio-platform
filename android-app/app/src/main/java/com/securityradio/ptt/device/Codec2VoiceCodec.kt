@@ -1,69 +1,66 @@
 package com.securityradio.ptt.device
 
 /**
- * Codec2 3200 bps encoder + decoder — placeholder.
+ * Codec2 3200 bps encoder + decoder, wrapping [Codec2Native] (libcodec2
+ * via JNI) in the [VoiceEncoder] / [VoiceDecoder] interfaces so it slots
+ * into [VoiceCodecRegistry] alongside IMBE and Opus.
  *
- * Reports [isReady] = false until the libcodec2 native build lands. The
- * registry falls back to IMBE on TX while Codec2 is unavailable, and
- * inbound Codec2 frames drop with a log instead of being played as
+ * Mode 3200 was picked over the lower-bitrate Codec2 modes because:
+ *  - 20 ms frames (160 samples @ 8 kHz) match IMBE's cadence, so the
+ *    transport's existing 20 ms PCM accumulator works unchanged.
+ *  - 3200 bps sounds substantially better than 2400 bps for speech
+ *    while still preserving the "digital trunked radio" character
+ *    operators expect (close to AMBE+2 full-rate by ear).
+ *
+ * Wire format: 2-byte magic (0xC2 0x01) + 8-byte codec2 codeword =
+ * 10 bytes per 20 ms frame. Slightly smaller on the wire than IMBE
+ * (13 bytes per 20 ms frame), so per-talker bandwidth drops by ~23 %.
+ *
+ * Both encode and decode operate at 8 kHz; the transport's existing
+ * [PostDecodeChain] handles the 8 kHz → 16 kHz upsample (or the legacy
+ * sample-duplicate fast path), and the encoder consumes 16 kHz capture
+ * via the same `downsampleAvg16kToImbe` path IMBE uses.
+ *
+ * Falls back to IMBE on TX (via the registry) if `libsecurityradiovocoder`
+ * fails to load codec2 — e.g. the submodule wasn't initialised at build
+ * time, or codec2_create returned null. RX behavior mirrors: inbound
+ * Codec2 frames drop with a one-shot log instead of being played as
  * garbage at the speaker.
- *
- * Why this is still a stub: libcodec2 is a C library (~50 source files)
- * from Rowetel; vendoring its source into the repo is best done as its
- * own commit with the build wiring (CMakeLists, JNI bridge) so the diff
- * stays reviewable. Once that lands, replace the bodies below with real
- * calls into `Codec2Native`.
- *
- * Vendoring + build plan:
- *
- *   1. Add libcodec2 sources at
- *      `android-app/app/src/main/cpp/codec2/src/`
- *      from https://github.com/drowe67/codec2 (BSD-3-Clause; vendor
- *      the `src/`, `unittest/codec2.h` headers, and the minimum
- *      generated codebook files).
- *
- *   2. Add a CMake target alongside `dvmvocoder` in
- *      `android-app/app/src/main/cpp/CMakeLists.txt`:
- *        add_library(codec2 STATIC <list of c sources>)
- *        target_include_directories(codec2 PUBLIC codec2/src codec2/unittest)
- *        target_link_libraries(securityradiovocoder codec2)
- *
- *   3. Create a JNI bridge `cpp/codec2bridge.cpp` exposing:
- *        - `codec2_init(int mode)` → opaque handle
- *        - `codec2_encode(handle, int16_t* pcm8k, uint8_t* out)`
- *        - `codec2_decode(handle, uint8_t* bits, int16_t* pcm8k)`
- *        - `codec2_free(handle)`
- *      mode = CODEC2_MODE_3200 from `codec2.h`; produces 8 bytes per
- *      40 ms frame (so each WebSocket message holds 2 codewords if we
- *      keep the 20 ms cadence, or we step the relay to 40 ms framing —
- *      decide before wiring).
- *
- *   4. Add a `Codec2Native` Kotlin singleton mirroring [P25ImbeNative],
- *      and replace the bodies of [Codec2Encoder] / [Codec2Decoder]
- *      below with calls into it.
- *
- * Notes for whoever lands this:
- *  - 3200 bps mode emits 64 bits per 40 ms frame. The wire framing here
- *    is one Codec2 payload per WebSocket message; the relay forwards by
- *    magic, so any payload length following 0xC2 0x01 is valid. Keep
- *    Codec2 payloads as one frame per message to mirror IMBE's cadence.
- *  - downsample from 16 kHz capture to 8 kHz via the same average-pair
- *    path [P25ImbeNative.Frames.downsampleAvg16kToImbe] uses.
- *  - upsample from 8 kHz decode to 16 kHz via the same duplicate path,
- *    or run through [PostDecodeChain] if the agency has shaping set.
  */
 
 class Codec2Encoder : VoiceEncoder {
     override val codec: VoiceCodec = VoiceCodec.CODEC2_3200
-    override val isReady: Boolean get() = false
 
-    override fun encodeFrame(pcm16kLe640: ByteArray): ByteArray? = null
+    override val isReady: Boolean
+        get() = Codec2Native.isAvailable || Codec2Native.tryLoadLibrary()
+
+    override fun encodeFrame(pcm16kLe640: ByteArray): ByteArray? {
+        if (!isReady) return null
+        if (pcm16kLe640.size < P25ImbeNative.Frames.PCM_16K_FRAME_BYTES) return null
+        // Same 16 → 8 kHz path IMBE uses; mode 3200 also runs at 8 kHz.
+        val pcm8k160 = P25ImbeNative.Frames.downsampleAvg16kToImbe(pcm16kLe640)
+        val codeword = Codec2Native.encodeFrame(pcm8k160) ?: return null
+        val packet = ByteArray(2 + codeword.size)
+        packet[0] = codec.magic0
+        packet[1] = codec.magic1
+        System.arraycopy(codeword, 0, packet, 2, codeword.size)
+        return packet
+    }
 }
 
 class Codec2Decoder : VoiceDecoder {
     override val codec: VoiceCodec = VoiceCodec.CODEC2_3200
-    override val isReady: Boolean get() = false
     override val nativeSampleRate: Int = 8000
 
-    override fun decodeFrame(framedBytes: ByteArray): ShortArray? = null
+    override val isReady: Boolean
+        get() = Codec2Native.isAvailable || Codec2Native.tryLoadLibrary()
+
+    override fun decodeFrame(framedBytes: ByteArray): ShortArray? {
+        if (!isReady) return null
+        // Magic (2 bytes) + codec2_3200 codeword (8 bytes) = 10 bytes.
+        if (framedBytes.size != 10) return null
+        if (framedBytes[0] != codec.magic0 || framedBytes[1] != codec.magic1) return null
+        val codeword = framedBytes.copyOfRange(2, 10)
+        return Codec2Native.decodeCodeword8(codeword)
+    }
 }

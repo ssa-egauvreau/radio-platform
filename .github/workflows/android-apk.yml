@@ -24,6 +24,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # libcodec2 is vendored as a git submodule under
+          # android-app/app/src/main/cpp/codec2 — must be present for the
+          # NDK build to compile the Codec2 JNI bridge.
+          submodules: recursive
 
       - name: Require signing secrets
         env:

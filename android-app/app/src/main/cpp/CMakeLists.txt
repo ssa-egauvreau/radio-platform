@@ -25,13 +25,108 @@ set_target_properties(libdvmvocoder PROPERTIES
     CXX_STANDARD_REQUIRED ON
 )
 
+#
+# libcodec2 — David Rowe's open-source low-bitrate speech codec (LGPL-2.1).
+# Vendored as a git submodule at cpp/codec2 (pinned to tag 1.2.0). We build
+# only the vocoder subset we need (mode 3200 in particular) as a static
+# library that links into `securityradiovocoder.so`.
+#
+# Why not use upstream's CMakeLists via add_subdirectory: upstream pulls
+# in FreeDV / OFDM / FSK / LDPC / LPCnet / demo executables, none of which
+# apply to an Android NDK build, and its demo/ subdir adds host-only
+# executables that don't cross-compile cleanly. The slim file list below
+# is what mode 3200 actually depends on — verified by the JNI bridge
+# compiling and linking without unresolved symbols on the NDK build.
+#
+
+set(CODEC2_DIR "${CMAKE_CURRENT_LIST_DIR}/codec2")
+
+if(EXISTS "${CODEC2_DIR}/src/codec2.h")
+    # libcodec2 ships codebook *.txt files plus a `generate_codebook` C
+    # tool that emits the corresponding *.c arrays at build time. That
+    # works for a native build but is painful under Android NDK cross-
+    # compile (it'd need ExternalProject_Add to build the host helper
+    # before the NDK build can proceed). We side-step the whole dance by
+    # vendoring the generated codebook *.c outputs alongside this
+    # CMakeLists — produced once by running `generate_codebook` against
+    # libcodec2 1.2.0's codebook/*.txt fixtures. Regenerate if the
+    # submodule ref ever bumps; see cpp/codec2_generated/README.md.
+    set(CODEC2_GEN_DIR "${CMAKE_CURRENT_LIST_DIR}/codec2_generated")
+
+    set(CODEC2_SRC
+        "${CODEC2_DIR}/src/codec2.c"
+        "${CODEC2_DIR}/src/codec2_fft.c"
+        "${CODEC2_DIR}/src/kiss_fft.c"
+        "${CODEC2_DIR}/src/kiss_fftr.c"
+        "${CODEC2_DIR}/src/sine.c"
+        "${CODEC2_DIR}/src/phase.c"
+        "${CODEC2_DIR}/src/quantise.c"
+        "${CODEC2_DIR}/src/lpc.c"
+        "${CODEC2_DIR}/src/lsp.c"
+        "${CODEC2_DIR}/src/nlp.c"
+        "${CODEC2_DIR}/src/postfilter.c"
+        "${CODEC2_DIR}/src/pack.c"
+        "${CODEC2_DIR}/src/interp.c"
+        "${CODEC2_DIR}/src/mbest.c"
+        "${CODEC2_DIR}/src/newamp1.c"
+        # newamp2.c does not exist in libcodec2 1.2.0 — only newamp2.h, which
+        # codec2.c includes but doesn't actually call functions from. The
+        # newamp2 codebook tables in CODEC2_GEN_DIR ARE referenced as extern
+        # data, so they stay.
+        "${CODEC2_GEN_DIR}/codebook.c"
+        "${CODEC2_GEN_DIR}/codebookd.c"
+        "${CODEC2_GEN_DIR}/codebookjmv.c"
+        "${CODEC2_GEN_DIR}/codebookge.c"
+        "${CODEC2_GEN_DIR}/codebooknewamp1.c"
+        "${CODEC2_GEN_DIR}/codebooknewamp1_energy.c"
+        "${CODEC2_GEN_DIR}/codebooknewamp2.c"
+        "${CODEC2_GEN_DIR}/codebooknewamp2_energy.c"
+        "${CODEC2_DIR}/src/dump.c"
+    )
+
+    add_library(codec2 STATIC ${CODEC2_SRC})
+    target_include_directories(codec2 PUBLIC
+        "${CODEC2_DIR}/src"
+        # codec2_generated holds the vendored codebook arrays AND a
+        # static `codec2/version.h` that codec2.h includes via
+        # angle brackets — `<codec2/version.h>` therefore resolves to
+        # codec2_generated/codec2/version.h.
+        "${CODEC2_GEN_DIR}"
+    )
+    # Match the upstream feature defines so the source compiles with the
+    # same code paths it does in the standalone build.
+    target_compile_definitions(codec2 PRIVATE
+        FLOATING_POINT
+        VAR_ARRAYS
+    )
+
+    set_target_properties(codec2 PROPERTIES POSITION_INDEPENDENT_CODE ON)
+    set(HAVE_CODEC2 TRUE)
+else()
+    # Submodule not initialised — Codec2 stays at the stub fallback in
+    # Codec2VoiceCodec.kt. The build still succeeds with IMBE-only audio.
+    set(HAVE_CODEC2 FALSE)
+    message(STATUS "libcodec2 submodule not present at ${CODEC2_DIR}/src — Codec2 native support will be disabled. Run `git submodule update --init --recursive` to enable.")
+endif()
+
 find_library(android_log_lib log)
 find_library(cpp_shared NAMES c++_shared)
 
-add_library(securityradiovocoder SHARED "${CMAKE_CURRENT_LIST_DIR}/p25_jni.cpp")
+set(JNI_SOURCES "${CMAKE_CURRENT_LIST_DIR}/p25_jni.cpp")
+if(HAVE_CODEC2)
+    list(APPEND JNI_SOURCES "${CMAKE_CURRENT_LIST_DIR}/codec2_jni.cpp")
+endif()
+
+add_library(securityradiovocoder SHARED ${JNI_SOURCES})
 target_compile_options(securityradiovocoder PRIVATE -Wall)
 
 target_include_directories(securityradiovocoder PRIVATE "${VOCODER_SRC_DIR}")
+
+if(HAVE_CODEC2)
+    target_include_directories(securityradiovocoder PRIVATE "${CODEC2_DIR}/src")
+    target_link_libraries(securityradiovocoder PRIVATE codec2)
+    target_compile_definitions(securityradiovocoder PRIVATE HAVE_CODEC2=1)
+endif()
 
 # Required for Android 15+ devices / emulators with 16 KB memory pages (ELF LOAD alignment).
 target_link_options(securityradiovocoder PRIVATE

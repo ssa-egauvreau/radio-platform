@@ -9,14 +9,10 @@
  * IMBE keeps its existing 0xF5 0xAB so older clients that predate this
  * registry stay on-wire compatible without any change.
  *
- * Codec2 and Opus magic bytes are reserved here so the web console can:
- *  - recognise inbound frames in those codecs and drop them with a clear
- *    log instead of feeding them into the speaker as raw PCM noise;
- *  - parse the `codec` field on the joined reply / `codec_change` push
- *    and surface it in the UI.
- *
- * Real Codec2 + Opus encode/decode lands in a follow-up PR when the
- * corresponding WASM modules are vendored.
+ * All three codecs (IMBE, Codec2 3200, Opus) are wired end-to-end on the
+ * web console: IMBE via the bundled WASM vocoder, Codec2 via the
+ * libcodec2 WASM build at vendor/codec2Module.js, and Opus via the
+ * browser's built-in WebCodecs.
  */
 
 export const VOICE_CODECS = ["imbe", "codec2_3200", "opus"] as const;
@@ -58,18 +54,27 @@ export function isVoiceCodec(value: unknown): value is VoiceCodec {
   );
 }
 
-/** Codecs the web console can currently encode (TX). IMBE always; Opus
- *  when the browser exposes WebCodecs `AudioEncoder`. Computed at every
- *  join so a browser that updated mid-session picks the new capability up
- *  on the next reconnect. See voiceClient.ts for the actual codec
- *  dispatch on the TX path. */
+/** Codecs the web console can currently encode (TX). IMBE always.
+ *  Codec2 always (the libcodec2 WASM is small and loads lazily; the
+ *  encoder gates on codec2Ready() at use time so a not-yet-loaded
+ *  module falls back to IMBE rather than failing the join). Opus
+ *  when the browser exposes WebCodecs `AudioEncoder` — feature
+ *  detection is the parameter here because some older browsers
+ *  ship without WebCodecs. */
 export function computeWebEncodeCaps(opusAvailable: boolean): readonly VoiceCodec[] {
-  return opusAvailable ? ["imbe", "opus"] : ["imbe"];
+  return opusAvailable
+    ? ["imbe", "codec2_3200", "opus"]
+    : ["imbe", "codec2_3200"];
 }
 
-/** Codecs the web console can currently decode (RX). IMBE always; Opus
- *  via WebCodecs AudioDecoder when the browser supports it. The Opus
- *  capability is advertised optimistically because the decoder degrades
- *  gracefully (isReady=false → frames drop with a one-shot log) on
- *  browsers that don't ship WebCodecs Opus, rather than crashing. */
-export const WEB_DECODE_CAPS: readonly VoiceCodec[] = ["imbe", "opus"];
+/** Codecs the web console can currently decode (RX). IMBE always;
+ *  Codec2 via the libcodec2 WASM; Opus via WebCodecs AudioDecoder
+ *  when the browser supports it. All three are advertised optimistically
+ *  because each one degrades gracefully at use time (isReady=false →
+ *  frames drop with a one-shot log) on browsers that don't ship the
+ *  required runtime, rather than crashing. */
+export const WEB_DECODE_CAPS: readonly VoiceCodec[] = [
+  "imbe",
+  "codec2_3200",
+  "opus",
+];
