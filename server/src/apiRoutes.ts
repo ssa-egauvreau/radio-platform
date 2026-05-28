@@ -19,9 +19,11 @@ import {
   withRosterMoveLock,
   peekVoiceTransmittingUnit,
   sendMoveCommand,
+  notifyChannelCodec,
   type PresenceStatus,
   type RosterMember,
 } from "./voiceRelay.js";
+import { isVoiceCodec, type VoiceCodec } from "./voiceCodecs.js";
 import { getBridgeStatus } from "./bridgeWorker.js";
 import {
   AGENCY_ROLES,
@@ -1055,7 +1057,12 @@ export function createApiRouter(): Router {
     try {
       const agencyId = req.authUser!.agencyId!;
       const id = Number(req.params.id);
-      const patch: { name?: string; color?: string | null; zone?: string | null } = {};
+      const patch: {
+        name?: string;
+        color?: string | null;
+        zone?: string | null;
+        codec?: VoiceCodec;
+      } = {};
       if (req.body?.name !== undefined) {
         const name = String(req.body.name).trim();
         if (!name) {
@@ -1075,10 +1082,24 @@ export function createApiRouter(): Router {
       if (req.body?.zone !== undefined) {
         patch.zone = req.body.zone ? String(req.body.zone).trim() : null;
       }
+      if (req.body?.codec !== undefined) {
+        if (!isVoiceCodec(req.body.codec)) {
+          res.status(400).json({ error: "bad_codec" });
+          return;
+        }
+        patch.codec = req.body.codec;
+      }
       const channel = await updateChannel(id, agencyId, patch);
       if (!channel) {
         res.status(404).json({ error: "not_found" });
         return;
+      }
+      // Push the codec change to every voice socket on this channel so connected
+      // clients flush their TX encoder and swap mid-session rather than waiting
+      // for a reconnect. Safe to call unconditionally — the relay no-ops if the
+      // value matches what each client already has.
+      if (patch.codec !== undefined) {
+        notifyChannelCodec(agencyId, channel.name, patch.codec);
       }
       await writeAudit({
         agencyId,
