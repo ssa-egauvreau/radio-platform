@@ -682,7 +682,7 @@ export function createApiRouter(): Router {
         res.status(404).json({ error: "not_found" });
         return;
       }
-      const patch: { name?: string; disabled?: boolean; radioKey?: string } = {};
+      const patch: { name?: string; disabled?: boolean; radioKey?: string; defaultCodec?: VoiceCodec } = {};
       if (req.body?.name !== undefined) {
         const name = String(req.body.name).trim();
         if (!name) {
@@ -696,6 +696,13 @@ export function createApiRouter(): Router {
       }
       if (req.body?.regenerateRadioKey === true) {
         patch.radioKey = generateRadioKey();
+      }
+      if (req.body?.defaultCodec !== undefined) {
+        if (!isVoiceCodec(req.body.defaultCodec)) {
+          res.status(400).json({ error: "bad_codec" });
+          return;
+        }
+        patch.defaultCodec = req.body.defaultCodec;
       }
       const agency = await updateAgency(id, patch);
       // Disabling the agency or rotating its radio key revokes access — drop any
@@ -1808,6 +1815,77 @@ export function createApiRouter(): Router {
         ip: clientIp(req),
       });
       res.json({ ok: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * GET /admin/agency — current agency settings the admin role can read
+   * (default codec for new channels, etc.). Sister of the owner-only
+   * PATCH /owner/agencies/:id endpoint, scoped to the caller's own agency.
+   */
+  router.get("/admin/agency", requireAdmin, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const agency = await getAgencyById(agencyId);
+      if (!agency) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      // Only return the fields an agency admin should see — the radio
+      // key + disabled flag stay owner-only.
+      res.json({
+        agency: {
+          id: agency.id,
+          name: agency.name,
+          slug: agency.slug,
+          defaultCodec: agency.default_codec,
+        },
+      });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  /**
+   * PATCH /admin/agency — let an agency admin change their own agency's
+   * default codec (applied to newly-created channels). Mirrors the
+   * channel PATCH validation pattern from PR #210.
+   */
+  router.patch("/admin/agency", requireAdmin, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const patch: { defaultCodec?: VoiceCodec } = {};
+      if (req.body?.defaultCodec !== undefined) {
+        if (!isVoiceCodec(req.body.defaultCodec)) {
+          res.status(400).json({ error: "bad_codec" });
+          return;
+        }
+        patch.defaultCodec = req.body.defaultCodec;
+      }
+      const agency = await updateAgency(agencyId, patch);
+      if (!agency) {
+        res.status(404).json({ error: "not_found" });
+        return;
+      }
+      await writeAudit({
+        agencyId,
+        actorUserId: req.authUser!.id,
+        actorName: req.authUser!.username,
+        action: "agency_settings_update",
+        target: agency.name,
+        detail: { fields: Object.keys(patch) },
+        ip: clientIp(req),
+      });
+      res.json({
+        agency: {
+          id: agency.id,
+          name: agency.name,
+          slug: agency.slug,
+          defaultCodec: agency.default_codec,
+        },
+      });
     } catch (error) {
       fail(res, error);
     }

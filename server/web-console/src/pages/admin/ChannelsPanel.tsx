@@ -14,11 +14,18 @@ export function ChannelsPanel() {
   const [loading, setLoading] = useState(true);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
+  const [defaultCodec, setDefaultCodec] = useState<VoiceCodec | null>(null);
 
   async function reload() {
     try {
-      const res = await api.listChannels();
-      setChannels(res.channels);
+      const [chRes, agRes] = await Promise.all([
+        api.listChannels(),
+        api.getAdminAgency().catch(() => null),
+      ]);
+      setChannels(chRes.channels);
+      if (agRes) {
+        setDefaultCodec(agRes.agency.defaultCodec);
+      }
       setError(null);
     } catch (err) {
       setError(describeError(err));
@@ -30,6 +37,19 @@ export function ChannelsPanel() {
   useEffect(() => {
     void reload();
   }, []);
+
+  async function changeDefaultCodec(next: VoiceCodec) {
+    if (next === defaultCodec) return;
+    setError(null);
+    const prior = defaultCodec;
+    setDefaultCodec(next); // optimistic — falls back to prior on error
+    try {
+      await api.setAgencyDefaultCodec(next);
+    } catch (err) {
+      setDefaultCodec(prior);
+      setError(describeError(err));
+    }
+  }
 
   async function onCreate(event: FormEvent) {
     event.preventDefault();
@@ -98,6 +118,21 @@ export function ChannelsPanel() {
           <div className="field">
             <label>Name</label>
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Green 4" required />
+          </div>
+          <div className="field">
+            <label>Default codec for new channels</label>
+            <select
+              value={defaultCodec ?? "imbe"}
+              disabled={defaultCodec === null}
+              onChange={(e) => void changeDefaultCodec(e.target.value as VoiceCodec)}
+              title="Applied to channels created from this page. Existing channels keep their per-channel codec — change those individually in the table below."
+            >
+              {VOICE_CODECS.map((c) => (
+                <option key={c} value={c}>
+                  {VOICE_CODEC_LABEL[c]}
+                </option>
+              ))}
+            </select>
           </div>
           <button className="btn primary" type="submit" disabled={creating}>
             {creating ? "Adding…" : "Add channel"}

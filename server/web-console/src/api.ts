@@ -676,6 +676,14 @@ export const api = {
 
   listChannels: () => request<{ channels: Channel[] }>("GET", "/v1/admin/channels"),
   createChannel: (name: string) => request<{ channel: Channel }>("POST", "/v1/admin/channels", { name }),
+  getAdminAgency: () =>
+    request<{
+      agency: { id: number; name: string; slug: string; defaultCodec: VoiceCodec };
+    }>("GET", "/v1/admin/agency"),
+  setAgencyDefaultCodec: (codec: VoiceCodec) =>
+    request<{
+      agency: { id: number; name: string; slug: string; defaultCodec: VoiceCodec };
+    }>("PATCH", "/v1/admin/agency", { defaultCodec: codec }),
   updateChannel: (
     id: number,
     patch: { name?: string; color?: string | null; zone?: string | null; codec?: VoiceCodec },

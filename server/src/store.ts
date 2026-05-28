@@ -45,6 +45,10 @@ export interface AgencyRow {
   radio_key: string | null;
   disabled: boolean;
   created_at: string;
+  /** Codec applied to new channels created in this agency. Existing
+   *  channels keep whatever codec they were set to — the default only
+   *  kicks in on POST /admin/channels and on agency seed. */
+  default_codec: VoiceCodec;
 }
 
 export interface AgencySummary extends AgencyRow {
@@ -52,7 +56,13 @@ export interface AgencySummary extends AgencyRow {
   channel_count: number;
 }
 
-const AGENCY_COLS = "id, name, slug, radio_key, disabled, created_at";
+const AGENCY_COLS = "id, name, slug, radio_key, disabled, created_at, default_codec";
+
+type AgencyRowRaw = Omit<AgencyRow, "default_codec"> & { default_codec: string };
+
+function asAgencyRow(raw: AgencyRowRaw): AgencyRow {
+  return { ...raw, default_codec: coerceVoiceCodec(raw.default_codec) };
+}
 
 /** A URL-safe shared key handsets present to bind to their agency. */
 export function generateRadioKey(): string {
@@ -91,24 +101,25 @@ export async function uniqueAgencySlug(name: string): Promise<string> {
 }
 
 export async function listAgencies(): Promise<AgencySummary[]> {
-  const res = await requirePool().query<AgencySummary>(
-    `SELECT a.id, a.name, a.slug, a.radio_key, a.disabled, a.created_at,
+  type Raw = Omit<AgencySummary, "default_codec"> & { default_codec: string };
+  const res = await requirePool().query<Raw>(
+    `SELECT a.id, a.name, a.slug, a.radio_key, a.disabled, a.created_at, a.default_codec,
             (SELECT COUNT(*)::int FROM users u WHERE u.agency_id = a.id) AS user_count,
             (SELECT COUNT(*)::int FROM radio_channels c WHERE c.agency_id = a.id) AS channel_count
        FROM agencies a
       ORDER BY a.name ASC;`,
   );
-  return res.rows;
+  return res.rows.map((r) => ({ ...r, default_codec: coerceVoiceCodec(r.default_codec) }));
 }
 
 export async function getAgencyById(id: number): Promise<AgencyRow | null> {
-  const res = await requirePool().query<AgencyRow>(`SELECT ${AGENCY_COLS} FROM agencies WHERE id = $1;`, [id]);
-  return res.rows[0] ?? null;
+  const res = await requirePool().query<AgencyRowRaw>(`SELECT ${AGENCY_COLS} FROM agencies WHERE id = $1;`, [id]);
+  return res.rows[0] ? asAgencyRow(res.rows[0]) : null;
 }
 
 export async function getAgencyBySlug(slug: string): Promise<AgencyRow | null> {
-  const res = await requirePool().query<AgencyRow>(`SELECT ${AGENCY_COLS} FROM agencies WHERE slug = $1;`, [slug]);
-  return res.rows[0] ?? null;
+  const res = await requirePool().query<AgencyRowRaw>(`SELECT ${AGENCY_COLS} FROM agencies WHERE slug = $1;`, [slug]);
+  return res.rows[0] ? asAgencyRow(res.rows[0]) : null;
 }
 
 /** Resolves the agency a handset belongs to from the radio key it presents. */
@@ -116,11 +127,11 @@ export async function getAgencyByRadioKey(key: string): Promise<AgencyRow | null
   if (!key.trim()) {
     return null;
   }
-  const res = await requirePool().query<AgencyRow>(
+  const res = await requirePool().query<AgencyRowRaw>(
     `SELECT ${AGENCY_COLS} FROM agencies WHERE radio_key = $1 AND disabled = FALSE;`,
     [key.trim()],
   );
-  return res.rows[0] ?? null;
+  return res.rows[0] ? asAgencyRow(res.rows[0]) : null;
 }
 
 /**
@@ -198,7 +209,7 @@ export async function createAgencyWithAdmin(input: {
 
 export async function updateAgency(
   id: number,
-  patch: { name?: string; disabled?: boolean; radioKey?: string },
+  patch: { name?: string; disabled?: boolean; radioKey?: string; defaultCodec?: VoiceCodec },
 ): Promise<AgencyRow | null> {
   const sets: string[] = [];
   const vals: unknown[] = [];
@@ -206,15 +217,16 @@ export async function updateAgency(
   if (patch.name !== undefined) { sets.push(`name = $${i++}`); vals.push(patch.name.trim()); }
   if (patch.disabled !== undefined) { sets.push(`disabled = $${i++}`); vals.push(patch.disabled); }
   if (patch.radioKey !== undefined) { sets.push(`radio_key = $${i++}`); vals.push(patch.radioKey); }
+  if (patch.defaultCodec !== undefined) { sets.push(`default_codec = $${i++}`); vals.push(patch.defaultCodec); }
   if (sets.length === 0) {
     return getAgencyById(id);
   }
   vals.push(id);
-  const res = await requirePool().query<AgencyRow>(
+  const res = await requirePool().query<AgencyRowRaw>(
     `UPDATE agencies SET ${sets.join(", ")} WHERE id = $${i} RETURNING ${AGENCY_COLS};`,
     vals,
   );
-  return res.rows[0] ?? null;
+  return res.rows[0] ? asAgencyRow(res.rows[0]) : null;
 }
 
 export async function deleteAgency(id: number): Promise<boolean> {
@@ -447,9 +459,18 @@ export async function listChannels(agencyId: number): Promise<ChannelRow[]> {
 }
 
 export async function createChannel(agencyId: number, name: string): Promise<ChannelRow> {
+  // New channels inherit the agency's default_codec. The COALESCE guards
+  // against an agency row missing the column (only the legacy default
+  // tenant ever lacked it after the ALTER TABLE ... ADD COLUMN IF NOT
+  // EXISTS backfill, but cheap insurance).
   const res = await requirePool().query<ChannelRowRaw>(
-    `INSERT INTO radio_channels (agency_id, name, sort_order)
-     VALUES ($1, $2, COALESCE((SELECT MAX(sort_order) + 1 FROM radio_channels WHERE agency_id = $1), 1))
+    `INSERT INTO radio_channels (agency_id, name, sort_order, codec)
+     VALUES (
+       $1,
+       $2,
+       COALESCE((SELECT MAX(sort_order) + 1 FROM radio_channels WHERE agency_id = $1), 1),
+       COALESCE((SELECT default_codec FROM agencies WHERE id = $1), 'imbe')
+     )
      RETURNING id, name, sort_order, color, zone, codec;`,
     [agencyId, name.trim()],
   );
