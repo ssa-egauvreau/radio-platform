@@ -61,8 +61,20 @@ class AppUpdater(
     sealed class UpdateProgress {
         data object Idle : UpdateProgress()
         data class Available(val versionName: String) : UpdateProgress()
-        data class Downloading(val versionName: String) : UpdateProgress()
+        /** Bytes already on disk + total expected (the latter is null when the
+         *  server response had no Content-Length header). UI formats as MB and,
+         *  when total is known, a percentage. Emitted every ~250 ms during the
+         *  download so the banner ticks visibly. */
+        data class Downloading(
+            val versionName: String,
+            val bytesDownloaded: Long = 0L,
+            val totalBytes: Long? = null,
+        ) : UpdateProgress()
         data class Downloaded(val notice: UpdateNotice) : UpdateProgress()
+        /** Re-firing the Android system installer for an APK that was already
+         *  downloaded on a previous launch. The accessibility-service auto-
+         *  confirm runs the same way as a fresh install. */
+        data class Installing(val versionName: String) : UpdateProgress()
         /** A manual "check for updates" found that this build is already current. */
         data object UpToDate : UpdateProgress()
         /** A manual "check for updates" could not confirm the current published version. */
@@ -135,6 +147,12 @@ class AppUpdater(
      * — a device reboot (the boot receiver relaunches the app) or the operator first opening the app
      * — always checks, regardless of the throttle. Later launches in the same process (e.g. an
      * Activity recreate) fall back to the throttled check so we don't poll on every config change.
+     *
+     * If a previously-downloaded APK is still pending (the accessibility
+     * auto-confirm missed the system installer dialog on the prior run, or
+     * the operator power-cycled in between), retry the install immediately
+     * on this launch BEFORE the server poll so the "off and on again"
+     * recovery the operator already tried actually does what they expect.
      */
     fun checkOnLaunch() {
         val forceThisLaunch = synchronized(this) {
@@ -145,7 +163,51 @@ class AppUpdater(
                 true
             }
         }
+        forceRetryPendingInstall()
         checkAndInstallAsync(force = forceThisLaunch, manual = false)
+    }
+
+    /**
+     * Re-fire the Android system installer for an APK already downloaded on
+     * a previous run. Safe to call repeatedly — no-ops when there's no
+     * pending APK on disk, when this process is already at or above the
+     * pending version, or when the install-unknown-apps grant is missing.
+     *
+     * Used in two places:
+     *  - [checkOnLaunch] retries automatically so a power-cycle by the
+     *    operator finishes the install they expected.
+     *  - A hardware-key handler ([HardwareAction.FORCE_INSTALL_UPDATE])
+     *    lets the operator force the installer dialog from the radio
+     *    screen when the auto-flow stalls.
+     *
+     * Returns true if an installer intent was fired, false otherwise — so
+     * a manual trigger can show "no update pending" feedback instead of
+     * silently doing nothing.
+     */
+    fun forceRetryPendingInstall(): Boolean {
+        val notice = peekPendingUpdateNotice() ?: return false
+        val apk = File(File(context.cacheDir, "updates"), "update.apk")
+        if (!apk.exists() || apk.length() == 0L) {
+            // The APK file was wiped (cache cleared, app re-installed) but
+            // prefs still claim a pending version. Drop the stale marker so
+            // the next server poll re-downloads cleanly.
+            clearPendingUpdate()
+            return false
+        }
+        if (!canInstall()) {
+            Log.w(TAG, "forceRetryPendingInstall: install-unknown-apps not granted; skipping")
+            return false
+        }
+        notifyProgress(UpdateProgress.Installing(notice.versionName))
+        AppUpdateInstallGate.arm()
+        return try {
+            launchInstall(apk)
+            true
+        } catch (e: Exception) {
+            AppUpdateInstallGate.disarm()
+            Log.w(TAG, "forceRetryPendingInstall: install launch failed", e)
+            false
+        }
     }
 
     private fun runCheck(force: Boolean, manual: Boolean) {
@@ -172,7 +234,9 @@ class AppUpdater(
             }
             notifyProgress(UpdateProgress.Available(available.versionName))
             notifyProgress(UpdateProgress.Downloading(available.versionName))
-            val apk = downloadAndVerify(available) ?: run {
+            val apk = downloadAndVerify(available) { bytes, total ->
+                notifyProgress(UpdateProgress.Downloading(available.versionName, bytes, total))
+            } ?: run {
                 notifyProgress(UpdateProgress.Idle)
                 return
             }
@@ -241,7 +305,10 @@ class AppUpdater(
         }
     }
 
-    private fun downloadAndVerify(available: Available): File? {
+    private fun downloadAndVerify(
+        available: Available,
+        onProgress: ((bytesDownloaded: Long, totalBytes: Long?) -> Unit)? = null,
+    ): File? {
         val fullUrl = resolveApkUrl(available.apkUrl) ?: return null
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
         val out = File(dir, "update.apk")
@@ -249,9 +316,16 @@ class AppUpdater(
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return null
             val body = response.body ?: return null
+            // OkHttp gives -1 when the server didn't send Content-Length; coerce
+            // to null so the progress payload can carry "unknown total" rather
+            // than a fake "100 %" baseline.
+            val totalRaw = body.contentLength()
+            val total: Long? = if (totalRaw > 0) totalRaw else null
             // Stream straight to disk — never hold the whole APK in RAM on constrained radios.
             body.byteStream().use { input ->
-                out.outputStream().use { output -> input.copyTo(output) }
+                out.outputStream().use { output ->
+                    copyWithProgress(input, output, total, onProgress)
+                }
             }
         }
         val actual = sha256Hex(out)
@@ -261,6 +335,34 @@ class AppUpdater(
             return null
         }
         return out
+    }
+
+    /** Copy with periodic progress emission. Throttled to ~250 ms so the LCD
+     *  banner ticks visibly without spamming the UI thread on a fast wifi link. */
+    private fun copyWithProgress(
+        input: java.io.InputStream,
+        output: java.io.OutputStream,
+        total: Long?,
+        onProgress: ((bytesDownloaded: Long, totalBytes: Long?) -> Unit)?,
+    ) {
+        val buffer = ByteArray(8192)
+        var copied = 0L
+        var lastNotifyMs = 0L
+        // Initial 0 % so the banner switches from "DOWNLOADING…" to "DOWNLOADING 0 %" fast.
+        onProgress?.invoke(0L, total)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            output.write(buffer, 0, read)
+            copied += read
+            val now = System.currentTimeMillis()
+            if (onProgress != null && now - lastNotifyMs >= PROGRESS_THROTTLE_MS) {
+                onProgress(copied, total)
+                lastNotifyMs = now
+            }
+        }
+        // Final emission so the UI lands on "DOWNLOADING 100 %" before flipping to Downloaded.
+        onProgress?.invoke(copied, total)
     }
 
     /** Absolute URLs pass through; a server-relative path resolves against the API host. */
@@ -329,5 +431,8 @@ class AppUpdater(
         const val KEY_PENDING_VERSION_NAME = "pending_version_name"
         /** Minimum time between server version polls (launch + foreground periodic checks). */
         const val CHECK_INTERVAL_MS = 30L * 60 * 1000
+        /** Throttle on Downloading progress emissions — keeps the UI thread from
+         *  being flooded on a fast wifi link while still ticking visibly. */
+        const val PROGRESS_THROTTLE_MS = 250L
     }
 }

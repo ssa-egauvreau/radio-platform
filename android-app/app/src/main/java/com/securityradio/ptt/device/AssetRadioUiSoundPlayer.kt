@@ -6,6 +6,7 @@ import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.media.MediaPlayer
+import android.media.ToneGenerator
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
@@ -235,6 +236,19 @@ class AssetRadioUiSoundPlayer(
             runCatching { player.release() }
         }
         abandonEmergencyFocus()
+    }
+
+    override fun playUpdateInstalled() {
+        main.post {
+            try {
+                val tg = ToneGenerator(AudioManager.STREAM_MUSIC, UPDATE_INSTALLED_TONE_VOLUME)
+                tg.startTone(ToneGenerator.TONE_PROP_ACK, UPDATE_INSTALLED_TONE_MS)
+                main.postDelayed({ tg.release() }, (UPDATE_INSTALLED_TONE_MS + 200).toLong())
+            } catch (_: RuntimeException) {
+                // ToneGenerator throws on emulators / OEMs without the proprietary tone bank.
+                // Falling back silently is better than crashing the post-install boot path.
+            }
+        }
     }
 
     override fun playVolumeCheck() {
@@ -750,6 +764,10 @@ class AssetRadioUiSoundPlayer(
         const val GAPLESS_LOOP_START_MS = 12L
         /** Crossfade window: start the standby player this many ms before the active clip ends. */
         const val GAPLESS_LOOP_LEAD_MS = 72L
+        /** ToneGenerator ack — 0–100 volume scale; loud enough on a noisy radio without ducking media. */
+        const val UPDATE_INSTALLED_TONE_VOLUME = 90
+        /** Hold the proprietary ack for the full chirp so it does not get cut off mid-second-note. */
+        const val UPDATE_INSTALLED_TONE_MS = 500
         private const val WAV_HEADER_READ_MAX_BYTES = 512 * 1024
         private val RIFF_MAGIC = "RIFF".toByteArray(Charsets.US_ASCII)
         private val WAVE_MAGIC = "WAVE".toByteArray(Charsets.US_ASCII)

@@ -12,4 +12,9 @@ enum class HardwareAction(val label: String) {
     VOLUME_CHECK("Volume Check"),
     /** Cycle LCD day / night / auto theme. */
     TOGGLE_DAY_NIGHT("Day / Night"),
+    /** Force the Android system installer to fire for a previously-downloaded
+     *  OTA update. Useful when the accessibility auto-confirm missed the
+     *  install dialog on the original download. Safe no-op when no update
+     *  is pending — the radio just plays the "nothing happened" tone. */
+    FORCE_INSTALL_UPDATE("Force Install Update"),
 }

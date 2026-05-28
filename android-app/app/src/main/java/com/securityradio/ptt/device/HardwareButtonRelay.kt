@@ -48,4 +48,7 @@ sealed interface HardwareButtonEvent {
     data object VolumeCheckTapped : HardwareButtonEvent
     data object ToggleDayNightPressed : HardwareButtonEvent
     data object ToggleDayNightReleased : HardwareButtonEvent
+    /** Operator-mapped "force install pending OTA update" key. Single press;
+     *  no Released counterpart because the action fires on key-down. */
+    data object ForceInstallUpdatePressed : HardwareButtonEvent
 }

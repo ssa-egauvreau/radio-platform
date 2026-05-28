@@ -28,6 +28,10 @@ interface RadioUiSoundPlayer {
     /** Stops a lost-link alert mid-play; also called when connectivity returns. */
     fun stopBusyAlert()
     fun playEmergencyAlert()
+    /** Positive 2-tone "success" chirp for the post-OTA-install confirmation banner. Deliberately
+     *  unlike [playChannelSwitch] / [playTalkPermitThen] so the operator can tell that the sound
+     *  means "update finished", not "you're keyed up". */
+    fun playUpdateInstalled()
     /** One-shot beep at the current volume level (legacy / screen). */
     fun playVolumeCheck()
     /** Loop volume-check WAV while the hardware key is held (IRC590 key 232). */

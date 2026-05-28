@@ -141,6 +141,13 @@ data class RadioUiState(
      * "DOWNLOADING UPDATE — DO NOT TURN OFF DEVICE" banner.
      */
     val updateInstalling: Boolean = false,
+    /**
+     * Set on the first launch after a verified OTA install completes; carries the
+     * version name (e.g. "1.2.3"). Drives a green full-screen "UPDATE INSTALLED
+     * SUCCESSFULLY" overlay that persists until any hardware button is pressed
+     * (or the overlay is tapped). Cleared back to null after dismissal.
+     */
+    val updateInstalledNotice: String? = null,
 
     /** Non-blank while the last RX is replaying; holds the "who was talking" caption. */
     val replayBanner: String,

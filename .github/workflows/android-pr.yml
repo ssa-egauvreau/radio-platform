@@ -116,6 +116,12 @@ jobs:
             // to most generic (Gradle FAILED tags). Picks the FIRST hit so
             // we anchor on the actual failure, not its downstream cascade.
             const patterns = [
+              // Kotlin compiler error prefix — emitted as
+              // `e: file:///…/Foo.kt:42:5 Unresolved reference: bar`
+              // (NB: not "error:") and is the most common Android failure
+              // mode this workflow needs to surface. Match this FIRST so
+              // we never anchor on the downstream Gradle exception cascade.
+              /^e:\s/,
               /^.*error:\s/i,
               /^FAILED:/,
               /^CMake Error/,
