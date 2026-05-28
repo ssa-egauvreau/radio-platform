@@ -78,14 +78,21 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: SafeTMobile/SafeTMobile-Bridging-Header.h
         CLANG_CXX_LANGUAGE_STANDARD: "c++17"
         HEADER_SEARCH_PATHS:
-          - $(SRCROOT)/../android-app/app/src/main/cpp/dvmvocoder/vocoder
-          - $(SRCROOT)/../android-app/app/src/main/cpp/dvmvocoder/vocoder/imbe
+          # ORDER MATTERS: codec2's `defines.h` must be found before
+          # dvmvocoder's. The generated codebook *.c files in
+          # codec2_generated/ do `#include "defines.h"` with no local
+          # defines.h alongside them, so the search falls through to
+          # HEADER_SEARCH_PATHS. dvmvocoder's defines.h is a C++ header
+          # (#includes <cstdint>); pointing a C compile at it produces
+          # "'cstdint' file not found" because cstdint is C++-only.
           - $(SRCROOT)/../android-app/app/src/main/cpp/codec2/src
           # codec2_generated holds the vendored codebook arrays AND the
           # static `codec2/version.h` — codec2.h includes it as
           # <codec2/version.h>, so this directory has to be on the angle-
           # bracket search path.
           - $(SRCROOT)/../android-app/app/src/main/cpp/codec2_generated
+          - $(SRCROOT)/../android-app/app/src/main/cpp/dvmvocoder/vocoder
+          - $(SRCROOT)/../android-app/app/src/main/cpp/dvmvocoder/vocoder/imbe
         OTHER_LDFLAGS: "-lc++"
     info:
       path: SafeTMobile/Info.plist
