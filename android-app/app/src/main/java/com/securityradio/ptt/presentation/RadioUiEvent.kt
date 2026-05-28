@@ -56,6 +56,9 @@ sealed interface RadioUiEvent {
     data object OpenGpsSettings : RadioUiEvent
     data object RequestIgnoreBatteryOptimizations : RadioUiEvent
     data object DismissSetupDialog : RadioUiEvent
+    /** Tap-anywhere dismissal for the post-OTA-install success overlay. Hardware
+     *  button presses already dismiss it implicitly via the relay collector. */
+    data object DismissUpdateInstalledNotice : RadioUiEvent
 
 
     data object ToggleVoiceAnnounceChannelTune : RadioUiEvent

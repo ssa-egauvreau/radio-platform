@@ -216,15 +216,12 @@ class RadioViewModel(
                 mp22UsePhysicalDisplay = radioPreferences.isMp22UsePhysicalDisplay(),
             )
         }
-        // If a downloaded update finished installing (this build caught up), chime + confirm once.
+        // First launch after a verified OTA install: play the distinctive 2-tone ack (NOT the PTT
+        // permit tone — that sounded like keying up) and raise a persistent green overlay that
+        // operators dismiss by pressing any hardware button or tapping the overlay.
         appUpdater.takeInstalledUpdateNotice()?.let { installed ->
-            soundPlayer.playTalkPermitThen({})
-            val msg = "UPDATED TO v${installed.versionName} — INSTALL COMPLETE"
-            _uiState.update { it.copy(statusMessage = msg) }
-            viewModelScope.launch {
-                delay(VERSION_BANNER_MS)
-                _uiState.update { if (it.statusMessage == msg) it.copy(statusMessage = "") else it }
-            }
+            soundPlayer.playUpdateInstalled()
+            _uiState.update { it.copy(updateInstalledNotice = installed.versionName) }
         }
         refreshAppUpdateBanner()
         appUpdater.setProgressListener { progress -> onAppUpdateProgress(progress) }
@@ -315,6 +312,11 @@ class RadioViewModel(
         }
         viewModelScope.launch {
             HardwareButtonRelay.events.collect { event ->
+                // "Push any button to close" — clear the post-install banner BEFORE routing the
+                // event so the press also performs its normal action (PTT, channel up, etc.).
+                if (_uiState.value.updateInstalledNotice != null) {
+                    _uiState.update { it.copy(updateInstalledNotice = null) }
+                }
                 enqueueBackgroundWakeIfNeeded("hardware_action")
                 when (event) {
                     HardwareButtonEvent.PttPressed -> onPttPressed()
@@ -911,6 +913,9 @@ class RadioViewModel(
             }
             RadioUiEvent.DismissSetupDialog -> {
                 _uiState.update { it.copy(setupDialogDismissed = true) }
+            }
+            RadioUiEvent.DismissUpdateInstalledNotice -> {
+                _uiState.update { it.copy(updateInstalledNotice = null) }
             }
             is RadioUiEvent.SelectSettingsTab -> {
                 val targetIndex = event.index.coerceIn(0, 3)

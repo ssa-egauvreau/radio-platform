@@ -270,6 +270,44 @@ fun RadioScreen(
                         .background(handsetEmergencyFlashColor.copy(alpha = 0.68f)),
                 )
             }
+            state.updateInstalledNotice?.let { version ->
+                // Persistent post-install confirmation overlay. Z-ordered above the regular UI so
+                // operators see it regardless of which profile / screen they're on. Cleared by any
+                // hardware-key press (via RadioViewModel) or by tapping the overlay.
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .zIndex(51f)
+                        .background(palette.statusGreen)
+                        .clickable { onEvent(RadioUiEvent.DismissUpdateInstalledNotice) }
+                        .padding(28.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        Text(
+                            text = "UPDATE INSTALLED SUCCESSFULLY",
+                            style = styles.channel.copy(fontWeight = FontWeight.Bold),
+                            color = Color.Black,
+                            textAlign = TextAlign.Center,
+                        )
+                        Text(
+                            text = "v$version",
+                            style = styles.zone.copy(fontWeight = FontWeight.Bold),
+                            color = Color.Black,
+                            textAlign = TextAlign.Center,
+                        )
+                        Text(
+                            text = "PUSH ANY BUTTON TO CLOSE THIS MESSAGE",
+                            style = styles.status,
+                            color = Color.Black.copy(alpha = 0.8f),
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+            }
             if (layout.universalCockpit) {
                 LcdUniversalCockpit(
                     state = state,
