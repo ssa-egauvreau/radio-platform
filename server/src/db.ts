@@ -112,6 +112,10 @@ export async function ensureSchema(): Promise<void> {
   // Optional agency-branding logo, uploaded by an agency admin.
   await p.query(`ALTER TABLE agencies ADD COLUMN IF NOT EXISTS logo BYTEA;`);
   await p.query(`ALTER TABLE agencies ADD COLUMN IF NOT EXISTS logo_mime TEXT;`);
+  // Default voice codec applied to newly-created channels for this agency.
+  // Validated against the VOICE_CODECS list in voiceCodecs.ts; existing
+  // rows backfill to 'imbe' so behaviour stays identical to pre-multi-codec.
+  await p.query(`ALTER TABLE agencies ADD COLUMN IF NOT EXISTS default_codec TEXT NOT NULL DEFAULT 'imbe';`);
 
   await p.query(`
     CREATE TABLE IF NOT EXISTS radio_channels (
