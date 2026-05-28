@@ -68,4 +68,19 @@ jobs:
 
       - name: Compile Kotlin (debug)
         working-directory: android-app
-        run: ./gradlew compileDebugKotlin --no-daemon --stacktrace
+        # Tee the gradle output to a file so the artifact-upload step below
+        # can ship the full log even on failure — the GitHub Actions log
+        # viewer is auth-gated, so capturing the build output lets reviewers
+        # diagnose Kotlin errors without browser sign-in.
+        run: |
+          set -o pipefail
+          ./gradlew compileDebugKotlin --no-daemon --stacktrace --info 2>&1 | tee gradle-output.log
+
+      - name: Upload gradle log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gradle-output
+          path: android-app/gradle-output.log
+          if-no-files-found: warn
+          retention-days: 7
