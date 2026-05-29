@@ -10,11 +10,13 @@ struct SafeTMobileApp: App {
         #endif
         return AuthSession()
     }()
+    @StateObject private var settings = SettingsStore.shared
 
     var body: some Scene {
         WindowGroup {
             RootView()
                 .environmentObject(session)
+                .environmentObject(settings)
                 .preferredColorScheme(.dark)
         }
     }
