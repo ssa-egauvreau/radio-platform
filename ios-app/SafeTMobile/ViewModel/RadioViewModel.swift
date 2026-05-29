@@ -98,7 +98,7 @@ final class RadioViewModel: ObservableObject {
             queue: nil
         ) { [weak self] note in
             let action = (note.userInfo?["action"] as? String) ?? ""
-            Task { @MainActor [weak self] in
+            Task { @MainActor in
                 guard let self else { return }
                 if action == "press" { self.handle(.pttPressed) }
                 else if action == "release" { self.handle(.pttReleased) }
@@ -123,6 +123,9 @@ final class RadioViewModel: ObservableObject {
             voiceTransport.disconnect()
             scanTransport.disconnect()
             voiceAudio.stop()
+            if #available(iOS 16.2, *) {
+                RadioLiveActivityController.shared.end()
+            }
         }
     }
 
@@ -159,6 +162,9 @@ final class RadioViewModel: ObservableObject {
             uiState.channelCatalog = channelNames
             uiState.connectionStartedAt = Date()
             uiState.isReconnecting = false
+            if #available(iOS 16.2, *), let channel = channelNames.indices.contains(channelIndex) ? channelNames[channelIndex] : channelNames.first {
+                RadioLiveActivityController.shared.start(channel: channel)
+            }
             // Drop any scan entries that no longer exist in the catalog so the
             // picker / transport never tries to listen to a removed channel.
             let validKeys = Set(channelNames.map { $0.lowercased() })
@@ -233,7 +239,16 @@ final class RadioViewModel: ObservableObject {
             self.uiState.isReconnecting = true
         }
         voiceTransport.onReceivingChange = { [weak self] receiving in
-            self?.uiState.isReceivingAudio = receiving
+            guard let self else { return }
+            self.uiState.isReceivingAudio = receiving
+            if #available(iOS 16.2, *) {
+                if receiving {
+                    let callsign = self.uiState.activeTalkUnitId.isEmpty ? nil : self.uiState.activeTalkUnitId
+                    RadioLiveActivityController.shared.update(callsign: callsign, stateLabel: "RX")
+                } else if !self.uiState.isTransmitting {
+                    RadioLiveActivityController.shared.update(callsign: nil, stateLabel: "IDLE")
+                }
+            }
         }
         voiceTransport.onBusy = { [weak self] holder in
             guard let self, self.uiState.isPttPressed else { return }
@@ -300,6 +315,9 @@ final class RadioViewModel: ObservableObject {
             sounds.play(.pttPermit)
             uiState.statusMessage = P25ImbeNative.isAvailable ? "ON AIR · IMBE" : "ON AIR · CLEAR PCM"
             uiState.isTransmitting = true
+            if #available(iOS 16.2, *) {
+                RadioLiveActivityController.shared.update(callsign: uiState.localShortUnitId, stateLabel: "TX")
+            }
             guard let captureSessionId = voiceAudio.startCapture() else {
                 uiState.isTransmitting = false
                 enterBusy("VOICE UNAVAILABLE")
@@ -343,6 +361,9 @@ final class RadioViewModel: ObservableObject {
         // stale PCM/IMBE data into the next transmission.
         voiceTransport.stopUplinkCapture()
         uiState.statusMessage = "RX IDLE"
+        if #available(iOS 16.2, *) {
+            RadioLiveActivityController.shared.update(callsign: nil, stateLabel: "IDLE")
+        }
     }
 
     // MARK: - emergency / GPS
