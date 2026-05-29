@@ -64,11 +64,11 @@ import { getCachedAuth, setCachedAuth } from "./sessionCache.js";
 export const VOICE_WS_PATH = "/v1/voice/stream";
 
 /**
- * TTL after last relay frame before "off air".
- * Keep comfortably above worst-case framing/poll gaps so `/v1/air` does not flap between polls
- * (Android polls ~250–400ms) or between sparse IMBE frames / encode skips.
+ * TTL after last relay frame before "off air" when the talker did not send `release_air`.
+ * Keep above Android's fast RX poll (~400ms while someone is shown on air) and sparse
+ * vocoder frame gaps; clients should send `release_air` on PTT release for immediate clear.
  */
-const VOICE_AIR_TTL_MS = 2000;
+const VOICE_AIR_TTL_MS = 900;
 
 /**
  * In-process secret the bridge worker presents on its loopback voice sockets.
@@ -606,6 +606,33 @@ export function __setVoiceRosterRecordForTest(record: VoiceRosterTestRecord): vo
 export function __resetVoiceRosterForTest(): void {
   voiceRoster.clear();
   voiceAirByChannel.clear();
+}
+
+/** Test-only: seed a channel air slot as if a talker were live. @internal */
+export function __claimVoiceAirForTest(opts: {
+  agencyId: number;
+  channel: string;
+  ws: WebSocket;
+  unitId: string;
+  displayName?: string | null;
+}): void {
+  const chNorm = normalizedChannel(opts.channel);
+  const key = channelKey(opts.agencyId, chNorm);
+  voiceAirByChannel.set(key, {
+    ws: opts.ws,
+    unitUpper: opts.unitId.trim().toUpperCase(),
+    displayName: opts.displayName?.trim() || null,
+    lastPcmMs: Date.now(),
+    priority: false,
+    yields: false,
+  });
+}
+
+/** Test-only: handle a control frame the same way the relay socket would. @internal */
+export function __handleVoiceControlForTest(ws: WebSocket, type: string): void {
+  if (type === "release_air") {
+    releaseAir(ws);
+  }
 }
 
 /**
@@ -1198,6 +1225,11 @@ export function attachVoiceRelay(
           // 10-33 marker: the next PCM frame(s) are alert audio only, not keyed voice.
           if (json.type === "marker_tone") {
             meta.markerToneUntilMs = Date.now() + 30_000;
+            return;
+          }
+          // PTT released — drop `/v1/air` immediately instead of waiting for TTL.
+          if (json.type === "release_air") {
+            releaseAir(ws);
             return;
           }
           return;

@@ -168,8 +168,13 @@ export class OpusWebEncoder {
    *  so the tail of a talk-spurt doesn't get stranded inside the encoder
    *  pipeline. */
   flush(): void {
-    if (!this.encoder) return;
-    void this.encoder.flush().catch((err) => {
+    void this.flushAsync();
+  }
+
+  /** Await encoder drain — used before `release_air` on PTT release. */
+  flushAsync(): Promise<void> {
+    if (!this.encoder) return Promise.resolve();
+    return this.encoder.flush().catch((err) => {
       console.warn("[opus] flush failed", err);
     });
   }

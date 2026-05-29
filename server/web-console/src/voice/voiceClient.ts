@@ -1069,13 +1069,28 @@ export class VoiceChannelClient {
     this.capAnalyser = null;
     // Drain any in-flight frames inside the Opus encoder so the tail of
     // this talk-spurt actually makes it on the air rather than being
-    // stranded inside the WebCodecs pipeline. Best-effort; the flush is
-    // async, the WebSocket may close before it completes.
+    // stranded inside the WebCodecs pipeline, then drop `/v1/air` so peers
+    // do not show us as still talking for the relay TTL.
     if (this.opusEncoder) {
-      this.opusEncoder.flush();
+      void this.opusEncoder.flushAsync().finally(() => this.sendReleaseAir());
+    } else {
+      this.sendReleaseAir();
     }
     if (this.state !== "closed" && this.state !== "error") {
       this.setState("listening");
+    }
+  }
+
+  /** Tell the relay to clear our half-duplex air slot immediately on PTT release. */
+  private sendReleaseAir(): void {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    try {
+      ws.send(JSON.stringify({ type: "release_air" }));
+    } catch {
+      /* socket dropped */
     }
   }
 

@@ -1475,6 +1475,7 @@ class RadioViewModel(
                     if (useBusy) {
                         soundPlayer.stopTalkPermitLoop()
                         pttMicCapture.stopCapture()
+                        voiceRelay.releaseTransmitHold()
                         pttMicLiveThisHold = false
                         if (online) {
                             soundPlayer.startBusyLoop()
@@ -1590,6 +1591,7 @@ class RadioViewModel(
         pttToneJob?.cancel()
         pttToneJob = null
         pttMicCapture.stopCapture()
+        voiceRelay.releaseTransmitHold()
         soundPlayer.stopTalkPermitLoop()
         soundPlayer.stopBusyLoop()
         val granted = _uiState.value.micPermissionGranted
@@ -2109,7 +2111,12 @@ class RadioViewModel(
 
     private suspend fun pollTalkHints() {
         while (currentCoroutineContext().isActive) {
-            delay(TALK_ACTIVITY_POLL_MS)
+            val snapBefore = _uiState.value
+            val fastPoll =
+                snapBefore.rxAttributedLine.isNotEmpty() ||
+                    snapBefore.activeTalkUnitId.isNotEmpty() ||
+                    snapBefore.isPttPressed
+            delay(if (fastPoll) TALK_ACTIVITY_FAST_POLL_MS else TALK_ACTIVITY_POLL_MS)
             if (_uiState.value.networkLabel == "OFFLINE") {
                 if (_uiState.value.rxAttributedLine.isNotEmpty() ||
                     _uiState.value.activeTalkUnitId.isNotEmpty()
@@ -2319,10 +2326,8 @@ class RadioViewModel(
         if (tuned.isEmpty() || tuned == "----") return ""
         val main = dto.main
         if (main != null && main.active && channelNamesMatch(main.channel, tuned)) {
-            // The relay keeps the slot occupied for VOICE_AIR_TTL_MS (~2s) after
-            // our last frame, so a freshly released local TX echoes back as the
-            // current talker for a beat. Suppress it so the UI returns to idle
-            // chrome instead of flashing into the blue RX overlay.
+            // Without `release_air` on PTT release the relay can still show us on
+            // air briefly via TTL; suppress local echo either way.
             if (isLocalUnitTalker(s, main)) return ""
             return formatTalker(main, "RX")
         }
@@ -2397,6 +2402,8 @@ class RadioViewModel(
         const val AIR_POLL_MS = 250L
         const val AIR_AUDIO_STABLE_POLLS = 1
         const val TALK_ACTIVITY_POLL_MS = 1200L
+        /** Faster refresh while someone appears on air (clears stale talker sooner). */
+        const val TALK_ACTIVITY_FAST_POLL_MS = 400L
         const val WAKE_DEBOUNCE_MS = 700L
         const val PRESENCE_POLL_MS = 12_000L
         const val INBOX_POLL_MS = 2_000L

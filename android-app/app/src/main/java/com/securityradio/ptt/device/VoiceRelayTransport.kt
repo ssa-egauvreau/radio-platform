@@ -382,6 +382,20 @@ class VoiceRelayTransport(
     }
 
     /**
+     * PTT released — tell the relay to clear `/v1/air` immediately instead of
+     * waiting for the post-frame TTL (peers were seeing ~2–3s of stale "talking").
+     */
+    fun releaseTransmitHold() {
+        discardPendingUplinkTail()
+        val ws = webSocketRef.get() ?: return
+        if (!socketReady.get()) return
+        try {
+            ws.send("""{"type":"release_air"}""")
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
      * @param channelLabel current tuner label (must match REST channel names)
      */
     fun updateVoiceTarget(unitIdUpper: String, channelLabel: String, networkOnline: Boolean) {

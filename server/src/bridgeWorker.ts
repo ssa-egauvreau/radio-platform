@@ -202,6 +202,7 @@ function runBridge(bridge: AgencyBridgeRow): RunningBridge {
           }
         });
 
+        let gateWasOpen = false;
         child.stdout.on("data", (chunk: Buffer) => {
           carry = carry.length === 0 ? chunk : Buffer.concat([carry, chunk]);
           while (carry.length >= FRAME_BYTES) {
@@ -224,7 +225,14 @@ function runBridge(bridge: AgencyBridgeRow): RunningBridge {
               } catch {
                 /* socket dropped — the close handler will tear down */
               }
+            } else if (gateWasOpen && !gateOpen && ws.readyState === WebSocket.OPEN) {
+              try {
+                ws.send(JSON.stringify({ type: "release_air" }));
+              } catch {
+                /* socket dropped */
+              }
             }
+            gateWasOpen = gateOpen;
           }
         });
       };
