@@ -67,6 +67,57 @@ targets:
         includes:
           - "*.c"
         compilerFlags: "-DFLOATING_POINT -DVAR_ARRAYS"
+      # libopus — xiph reference Opus codec (BSD-3-Clause). Vendored as a
+      # submodule at cpp/opus pinned to v1.5.2 and shared with the Android
+      # NDK build at app/src/main/cpp/CMakeLists.txt and the Emscripten
+      # build at server/web-console/cpp/build-opus.sh. Keep the file lists
+      # in sync across all three build systems when the submodule is bumped.
+      # The slim enumeration drops projection/multistream/mapping_matrix
+      # (we are mono), fixed-point SILK (we are floating point), and the
+      # arch-specific SIMD .c files (NEON/SSE/AVX are runtime-detected
+      # inside the float code paths via cpu_support.h; the .c files in
+      # celt/{arm,x86,mips} are stub files that need a matching RTCD
+      # bootstrap which the autotools build wires in, not us).
+      - path: ../android-app/app/src/main/cpp/opus/src
+        includes:
+          - opus.c
+          - opus_decoder.c
+          - opus_encoder.c
+          - extensions.c
+          - repacketizer.c
+          - analysis.c
+          - mlp.c
+          - mlp_data.c
+        compilerFlags: "-DOPUS_BUILD -DUSE_ALLOCA -DVAR_ARRAYS -DHAVE_LRINTF -DPACKAGE_VERSION=\\\"1.5.2\\\""
+      - path: ../android-app/app/src/main/cpp/opus/celt
+        includes:
+          - bands.c
+          - celt.c
+          - celt_encoder.c
+          - celt_decoder.c
+          - cwrs.c
+          - entcode.c
+          - entdec.c
+          - entenc.c
+          - kiss_fft.c
+          - laplace.c
+          - mathops.c
+          - mdct.c
+          - modes.c
+          - pitch.c
+          - celt_lpc.c
+          - quant_bands.c
+          - rate.c
+          - vq.c
+        compilerFlags: "-DOPUS_BUILD -DUSE_ALLOCA -DVAR_ARRAYS -DHAVE_LRINTF -DPACKAGE_VERSION=\\\"1.5.2\\\""
+      - path: ../android-app/app/src/main/cpp/opus/silk
+        includes:
+          - "*.c"
+        compilerFlags: "-DOPUS_BUILD -DUSE_ALLOCA -DVAR_ARRAYS -DHAVE_LRINTF -DPACKAGE_VERSION=\\\"1.5.2\\\""
+      - path: ../android-app/app/src/main/cpp/opus/silk/float
+        includes:
+          - "*.c"
+        compilerFlags: "-DOPUS_BUILD -DUSE_ALLOCA -DVAR_ARRAYS -DHAVE_LRINTF -DPACKAGE_VERSION=\\\"1.5.2\\\""
     configFiles:
       Debug: Local.xcconfig
       Release: Local.xcconfig
@@ -93,6 +144,17 @@ targets:
           - $(SRCROOT)/../android-app/app/src/main/cpp/codec2_generated
           - $(SRCROOT)/../android-app/app/src/main/cpp/dvmvocoder/vocoder
           - $(SRCROOT)/../android-app/app/src/main/cpp/dvmvocoder/vocoder/imbe
+          # libopus headers — must come before the silk subdirs because
+          # several SILK .c files do `#include "opus_types.h"` with no
+          # path qualifier and the resolution falls through to
+          # HEADER_SEARCH_PATHS. opus/include holds the public API
+          # (opus.h, opus_defines.h, opus_types.h); celt/, silk/ and
+          # silk/float/ hold the internal headers each subsystem's .c
+          # files include directly.
+          - $(SRCROOT)/../android-app/app/src/main/cpp/opus/include
+          - $(SRCROOT)/../android-app/app/src/main/cpp/opus/celt
+          - $(SRCROOT)/../android-app/app/src/main/cpp/opus/silk
+          - $(SRCROOT)/../android-app/app/src/main/cpp/opus/silk/float
         OTHER_LDFLAGS: "-lc++"
     info:
       path: SafeTMobile/Info.plist
