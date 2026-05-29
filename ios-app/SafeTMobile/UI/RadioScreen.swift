@@ -116,7 +116,14 @@ struct RadioScreen: View {
                 state: viewModel.uiState,
                 onEvent: { viewModel.handle($0) },
                 onSignOut: {
-                    showingSettings = false
+                    // Drive teardown purely off the auth state: clearing the
+                    // session flips RootView to LoginScreen, which removes this
+                    // RadioScreen (and the settings sheet presented from it)
+                    // wholesale. Do NOT also toggle `showingSettings` here —
+                    // animating the sheet's dismissal in the same pass that the
+                    // presenter is torn down races the two transactions and can
+                    // wedge the modal session, leaving the login screen onscreen
+                    // but uninteractive (the sign-out UI test hangs at "SIGN IN").
                     session.logout()
                 },
                 onClose: { showingSettings = false }

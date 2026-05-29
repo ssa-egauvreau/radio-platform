@@ -119,6 +119,15 @@ jobs:
             // "error: Unable to parse extract.actionsdata" that would
             // otherwise anchor the excerpt away from the real failure.
             const patterns = [
+              // XCTest assertion failures look like
+              //   "RadioScreenUITests.swift:70: error: -[...] XCTAssertTrue failed"
+              // — a SINGLE line number (no column), which distinguishes them
+              // from compile errors (file:line:col:) and from the non-fatal
+              // AppIntentsSSUTraining "error:" noise. Anchor on these first so a
+              // failing test surfaces the actual assertion instead of the
+              // "** TEST FAILED **" banner that prints hundreds of lines later.
+              /\.swift:\d+: error:/,
+              /Assertion Failure:/,
               /\*\* (BUILD|TEST) FAILED \*\*/,
               /Testing failed:/,
               /xcodebuild: error:/,
