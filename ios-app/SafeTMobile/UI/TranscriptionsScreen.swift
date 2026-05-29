@@ -55,13 +55,14 @@ struct TranscriptionsScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            searchBar
             filterBar
             content
         }
         .background(Color.safetBackground.ignoresSafeArea())
         .navigationTitle("TRANSCRIPTS")
         .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $search, prompt: "Search transcripts")
+        .onChange(of: search) { _ in scheduleSearch() }
         .task {
             await refreshAvailableChannels()
             await reload()
@@ -83,30 +84,6 @@ struct TranscriptionsScreen: View {
                 .presentationDetents([.medium])
                 .preferredColorScheme(.dark)
         }
-    }
-
-    private var searchBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.safetTextDim)
-            TextField("Search transcript text", text: $search)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .foregroundColor(.safetText)
-                .onChange(of: search) { _ in scheduleSearch() }
-            if !search.isEmpty {
-                Button {
-                    search = ""
-                    scheduleSearch()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.safetTextDim)
-                }
-            }
-        }
-        .padding(10)
-        .background(Color.safetSurface)
-        .overlay(Rectangle().frame(height: 1).foregroundColor(.safetBorder), alignment: .bottom)
     }
 
     /// Horizontal scrolling row of filter chips. Each chip is tappable and
