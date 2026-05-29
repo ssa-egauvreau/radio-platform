@@ -286,7 +286,7 @@ final class ScanVoiceListenTransport {
             guard !closed, isAlive(channelKey) else { return }
             if reconnectTask != nil { return }
             reconnectAttempts += 1
-            let delaySeconds = min(pow(2.0, Double(reconnectAttempts - 1)), 30.0)
+            let delaySeconds = VoiceTiming.backoffDelaySeconds(attempt: reconnectAttempts, cap: 30)
             let nanoseconds = UInt64(delaySeconds * 1_000_000_000)
             reconnectTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: nanoseconds)

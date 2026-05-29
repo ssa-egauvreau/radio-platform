@@ -339,7 +339,7 @@ final class VoiceTransport {
         guard let channel = currentChannel else { return }
         if reconnectTask != nil { return }
         reconnectAttempts += 1
-        let delaySeconds = min(pow(2.0, Double(reconnectAttempts - 1)), 16.0)
+        let delaySeconds = VoiceTiming.backoffDelaySeconds(attempt: reconnectAttempts, cap: 16)
         onError?("link lost — reconnecting in \(Int(delaySeconds))s")
         let nanoseconds = UInt64(delaySeconds * 1_000_000_000)
         reconnectTask = Task { @MainActor [weak self] in
