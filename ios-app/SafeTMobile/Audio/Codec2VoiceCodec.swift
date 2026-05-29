@@ -48,7 +48,7 @@ final class Codec2Encoder: VoiceEncoder {
         lock.unlock()
     }
 
-    private static func createState(logger: Logger, role: String) -> OpaquePointer? {
+    fileprivate static func createState(logger: Logger, role: String) -> OpaquePointer? {
         guard let s = codec2_create(Int32(CODEC2_MODE_3200)) else {
             logger.warning("codec2_create returned nil — Codec2 \(role) unavailable")
             return nil
