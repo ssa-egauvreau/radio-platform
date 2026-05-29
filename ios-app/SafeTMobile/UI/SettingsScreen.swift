@@ -58,10 +58,19 @@ struct SettingsScreen: View {
     }
 
     private var controlsSection: some View {
-        Section("Controls") {
+        Section {
             Toggle("Large PTT button", isOn: $settings.bigPttButtonEnabled)
                 .tint(.safetGreen)
                 .foregroundColor(.safetText)
+            Toggle("Hardware PTT (Volume Down / Action Button)", isOn: $settings.hardwarePttEnabled)
+                .tint(.safetGreen)
+                .foregroundColor(.safetText)
+        } header: {
+            Text("Controls")
+        } footer: {
+            Text("Volume Down (held) keys the mic while the radio screen is open. On iPhone 15 Pro and later, bind the Action Button to the 'Start PTT' / 'Stop PTT' shortcuts via Settings → Action Button.")
+                .font(.system(size: 11))
+                .foregroundColor(.safetTextDim)
         }
         .listRowBackground(Color.safetSurface)
     }

@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import Foundation
 import os
 
@@ -31,6 +32,9 @@ final class RadioViewModel: ObservableObject {
     private var inboxPrimed = false
     private var voiceStarted = false
     private var pttAirPollTask: Task<Void, Never>?
+    private var hardwarePtt: HardwarePttController?
+    private var hardwarePttCancellable: AnyCancellable?
+    private var remotePttObserver: NSObjectProtocol?
 
     private let clockFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -75,6 +79,31 @@ final class RadioViewModel: ObservableObject {
                 self.scanTransport.retryNow()
             }
         }
+
+        hardwarePtt = HardwarePttController(
+            onPress: { [weak self] in self?.handle(.pttPressed) },
+            onRelease: { [weak self] in self?.handle(.pttReleased) }
+        )
+        let store = SettingsStore.shared
+        if store.hardwarePttEnabled { hardwarePtt?.enable() }
+        hardwarePttCancellable = store.$hardwarePttEnabled
+            .receive(on: RunLoop.main)
+            .sink { [weak self] enabled in
+                if enabled { self?.hardwarePtt?.enable() } else { self?.hardwarePtt?.disable() }
+            }
+
+        remotePttObserver = NotificationCenter.default.addObserver(
+            forName: .safetPttRemote,
+            object: nil,
+            queue: nil
+        ) { [weak self] note in
+            let action = (note.userInfo?["action"] as? String) ?? ""
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                if action == "press" { self.handle(.pttPressed) }
+                else if action == "release" { self.handle(.pttReleased) }
+            }
+        }
         scanTransport.onScanRx = { [weak self] channel in
             self?.handleScanRx(channel: channel)
         }
@@ -87,6 +116,9 @@ final class RadioViewModel: ObservableObject {
     }
 
     deinit {
+        if let observer = remotePttObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
         Task { @MainActor [voiceTransport, voiceAudio, scanTransport] in
             voiceTransport.disconnect()
             scanTransport.disconnect()
