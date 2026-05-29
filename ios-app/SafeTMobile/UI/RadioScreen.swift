@@ -121,6 +121,14 @@ struct RadioScreen: View {
                 },
                 onClose: { showingSettings = false }
             )
+            // Re-inject the SettingsStore explicitly on the sheet
+            // content. Environment objects usually propagate across
+            // sheet presentations, but the explicit injection is the
+            // robust path — without it, an env-object lookup failure
+            // inside SettingsScreen.controlsSection crashes the app
+            // when the user taps SETTINGS.
+            .environmentObject(settings)
+            .environmentObject(session)
         }
     }
 
