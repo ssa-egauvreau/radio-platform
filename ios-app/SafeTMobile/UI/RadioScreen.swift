@@ -15,6 +15,11 @@ struct RadioScreen: View {
     @State private var showingTranscripts = false
     @State private var showingSettings = false
     @State private var micStatus: AVAudioSession.RecordPermission = Self.initialMicStatus()
+    /// SF Symbol name reflecting whichever AVAudioSession output the OS has
+    /// actually picked right now (not just the saved preference). Updated on
+    /// appear and on AVAudioSession.routeChangeNotification so plugging in
+    /// BT headphones flips the glyph live.
+    @State private var liveRouteIcon: String = "speaker.wave.2"
 
     /// Construct the view-model lazily inside the StateObject autoclosure so
     /// SwiftUI retains the instance across re-renders. Building the view-model
@@ -195,18 +200,44 @@ struct RadioScreen: View {
                 Button {
                     settings.audioRoute = route
                     AudioSessionManager.applyRoute(route)
+                    refreshLiveRouteIcon()
                 } label: {
                     Label(route.label, systemImage: route.icon)
                 }
             }
         } label: {
-            Image(systemName: settings.audioRoute.icon)
+            Image(systemName: liveRouteIcon)
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(.safetTextDim)
                 .frame(width: 24, height: 24)
         }
+        .onAppear { refreshLiveRouteIcon() }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
+            refreshLiveRouteIcon()
+        }
         .accessibilityLabel("Audio route")
         .accessibilityValue(settings.audioRoute.label)
+    }
+
+    /// Maps the AVAudioSession's currently selected output port to an SF
+    /// Symbol so the status-strip glyph reflects what the OS is actually
+    /// playing through, not just the saved preference. Falls through to the
+    /// generic speaker icon for ports we haven't categorised.
+    private func refreshLiveRouteIcon() {
+        let session = AVAudioSession.sharedInstance()
+        let port = session.currentRoute.outputs.first?.portType
+        switch port {
+        case .some(.headphones):
+            liveRouteIcon = "headphones"
+        case .some(.bluetoothA2DP), .some(.bluetoothHFP), .some(.bluetoothLE):
+            liveRouteIcon = "headphones"
+        case .some(.builtInSpeaker):
+            liveRouteIcon = "speaker.wave.2"
+        case .some(.builtInReceiver):
+            liveRouteIcon = "ear"
+        default:
+            liveRouteIcon = "speaker.wave.2"
+        }
     }
 
     private func operatorStrip(_ state: RadioUiState) -> some View {

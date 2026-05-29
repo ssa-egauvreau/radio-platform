@@ -82,6 +82,30 @@ struct MapKitMap: UIViewRepresentable {
         abs(a.span.longitudeDelta - b.span.longitudeDelta) < epsilon
     }
 
+    /// Returns the tightest region containing every coordinate, with the
+    /// span grown by `padding` (1.0 = no padding, 1.4 = ~40% padding so
+    /// markers don't sit flush against the viewport edge). Returns nil for
+    /// empty input.
+    fileprivate static func boundingRegion(
+        for coordinates: [CLLocationCoordinate2D],
+        padding: Double = 1.0
+    ) -> MKCoordinateRegion? {
+        guard !coordinates.isEmpty else { return nil }
+        let lats = coordinates.map(\.latitude)
+        let lons = coordinates.map(\.longitude)
+        guard let minLat = lats.min(), let maxLat = lats.max(),
+              let minLon = lons.min(), let maxLon = lons.max() else { return nil }
+        let center = CLLocationCoordinate2D(
+            latitude: (minLat + maxLat) / 2,
+            longitude: (minLon + maxLon) / 2
+        )
+        let span = MKCoordinateSpan(
+            latitudeDelta: max((maxLat - minLat) * padding, 0.005),
+            longitudeDelta: max((maxLon - minLon) * padding, 0.005)
+        )
+        return MKCoordinateRegion(center: center, span: span)
+    }
+
     final class Coordinator: NSObject, MKMapViewDelegate {
         var parent: MapKitMap
         /// Suppresses the delegate's region-did-change → binding write loop
@@ -110,6 +134,22 @@ struct MapKitMap: UIViewRepresentable {
         }
 
         func mapView(_ mapView: MKMapView, didSelect view: MKAnnotationView) {
+            // Tapping a cluster used to be a silent no-op — MKMapView fires
+            // didSelect for the synthetic MKClusterAnnotation but neither
+            // zoom nor expand happens by default. Zoom in until the cluster
+            // disperses so operators can pick an individual unit.
+            if let cluster = view.annotation as? MKClusterAnnotation {
+                let coords = cluster.memberAnnotations.map(\.coordinate)
+                let target = MapKitMap.boundingRegion(for: coords, padding: 1.4) ?? mapView.region
+                parent.selectedUnit = nil
+                // Drop the cluster selection synchronously so a second tap
+                // immediately re-fires didSelect (otherwise MKMapView treats
+                // the cluster as still selected and swallows the tap).
+                mapView.deselectAnnotation(cluster, animated: false)
+                isProgrammaticRegionChange = true
+                mapView.setRegion(target, animated: true)
+                return
+            }
             if let unit = view.annotation as? UnitAnnotation {
                 parent.selectedUnit = unit.unitId
             }
@@ -139,7 +179,12 @@ struct MapKitMap: UIViewRepresentable {
 
 final class UnitAnnotation: NSObject, MKAnnotation {
     let unitId: String
-    dynamic var coordinate: CLLocationCoordinate2D
+    // `@objc dynamic` is required for MKMapView's KVO on `coordinate` to
+    // fire — without it Swift's `dynamic` alone doesn't expose the
+    // property to the Objective-C runtime, so marker moves jump instead
+    // of animating, and Swift 5.9 warns "Variable is not eligible for
+    // KVO".
+    @objc dynamic var coordinate: CLLocationCoordinate2D
     var title: String?
     var subtitle: String?
 

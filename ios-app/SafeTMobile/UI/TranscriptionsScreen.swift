@@ -317,25 +317,40 @@ struct TranscriptionsScreen: View {
                 .tint(.safetText)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let error, transmissions.isEmpty {
-            VStack(spacing: 12) {
-                Text("CAN'T LOAD TRANSCRIPTS")
-                    .font(.system(size: 12, weight: .heavy))
-                    .foregroundColor(.safetRed)
-                Text(error)
-                    .font(.system(size: 11))
-                    .foregroundColor(.safetTextDim)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-                Button("RETRY") { Task { await reload() } }
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(.safetText)
+            // Wrap in ScrollView + .refreshable so a failed first load can be
+            // retried with a pull-down without the operator having to hunt
+            // for the RETRY button. Mirrors UnitsScreen's empty-state.
+            ScrollView {
+                VStack(spacing: 12) {
+                    Spacer(minLength: 80)
+                    Text("CAN'T LOAD TRANSCRIPTS")
+                        .font(.system(size: 12, weight: .heavy))
+                        .foregroundColor(.safetRed)
+                    Text(error)
+                        .font(.system(size: 11))
+                        .foregroundColor(.safetTextDim)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                    Button("RETRY") { Task { await reload() } }
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.safetText)
+                    Spacer(minLength: 80)
+                }
+                .frame(maxWidth: .infinity, minHeight: 400)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .refreshable { await reload() }
         } else if transmissions.isEmpty {
-            Text(search.isEmpty ? "NO RECENT TRANSMISSIONS" : "NO MATCHES")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.safetTextDim)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ScrollView {
+                VStack {
+                    Spacer(minLength: 80)
+                    Text(search.isEmpty ? "NO RECENT TRANSMISSIONS" : "NO MATCHES")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.safetTextDim)
+                    Spacer(minLength: 80)
+                }
+                .frame(maxWidth: .infinity, minHeight: 400)
+            }
+            .refreshable { await reload() }
         } else {
             list
         }

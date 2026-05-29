@@ -11,8 +11,13 @@ struct BigPttButton: View {
     @State private var localPressed = false
     @State private var animating = false
 
-    private let heavyHaptic = UIImpactFeedbackGenerator(style: .heavy)
-    private let mediumHaptic = UIImpactFeedbackGenerator(style: .medium)
+    // Haptic generators must survive view rebuilds — when stored as plain
+    // `let` properties they are reconstructed (and the `prepare()` warm-up
+    // dropped) on every body invocation, producing noticeably laggy taps
+    // under SwiftUI re-render churn. @State holds the instance in
+    // persistent storage tied to the view's identity.
+    @State private var heavyHaptic = UIImpactFeedbackGenerator(style: .heavy)
+    @State private var mediumHaptic = UIImpactFeedbackGenerator(style: .medium)
 
     var body: some View {
         ZStack {
@@ -49,6 +54,12 @@ struct BigPttButton: View {
                     }
                 }
                 .onEnded { _ in
+                    // SwiftUI fires .onEnded for the trailing edge of every
+                    // gesture even when .onChanged never set localPressed
+                    // (e.g. cancelled gesture handed off to a parent). Guard
+                    // here so we never raise a release the VM didn't see a
+                    // matching press for.
+                    guard localPressed else { return }
                     localPressed = false
                     mediumHaptic.impactOccurred()
                     onRelease()
@@ -57,6 +68,15 @@ struct BigPttButton: View {
         .onAppear {
             heavyHaptic.prepare()
             mediumHaptic.prepare()
+        }
+        .onDisappear {
+            // If the button is yanked off-screen while the user is still
+            // holding (e.g. sheet swipe-dismiss, view rebuild), synthesize a
+            // release so the VM doesn't latch on-air forever.
+            if localPressed {
+                localPressed = false
+                onRelease()
+            }
         }
         .accessibilityElement()
         .accessibilityLabel("Push to talk")
