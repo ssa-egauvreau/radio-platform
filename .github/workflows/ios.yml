@@ -113,16 +113,21 @@ jobs:
             }
             const text = fs.readFileSync(path, 'utf-8');
             const lines = text.split('\n');
+            // Most specific / definitely-fatal first. Generic `error:`
+            // is last because Xcode's AppIntentsSSUTraining and other
+            // build phases log non-fatal lines like
+            // "error: Unable to parse extract.actionsdata" that would
+            // otherwise anchor the excerpt away from the real failure.
             const patterns = [
-              /^.*error:\s/i,
-              /^.*\.swift:\d+:\d+: error:/,
-              /^.*\.[chm]p?p?:\d+:\d+: error:/,
-              /Undefined symbols/,
-              /^ld: /,
-              /^Error: /,
               /\*\* (BUILD|TEST) FAILED \*\*/,
               /Testing failed:/,
               /xcodebuild: error:/,
+              /Undefined symbols/,
+              /^ld: /,
+              /^.*\.swift:\d+:\d+: error:/,
+              /^.*\.[chm]p?p?:\d+:\d+: error:/,
+              /^Error: /,
+              /^.*error:\s/i,
             ];
             let anchor = -1;
             for (const re of patterns) {
