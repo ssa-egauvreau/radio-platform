@@ -7,13 +7,19 @@ import UIKit
 struct RadioScreen: View {
     @StateObject var viewModel: RadioViewModel
     @EnvironmentObject private var session: AuthSession
+    @EnvironmentObject private var settings: SettingsStore
     @State private var pttDown = false
     @State private var showingDispatch = false
     @State private var showingMap = false
     @State private var showingUnits = false
     @State private var showingTranscripts = false
     @State private var showingSettings = false
-    @State private var micStatus: AVAudioSession.RecordPermission = AVAudioSession.sharedInstance().recordPermission
+    @State private var micStatus: AVAudioSession.RecordPermission = Self.initialMicStatus()
+
+    private static func initialMicStatus() -> AVAudioSession.RecordPermission {
+        if ProcessInfo.processInfo.arguments.contains("-uitest-logged-in") { return .granted }
+        return AVAudioSession.sharedInstance().recordPermission
+    }
 
     var body: some View {
         Group {
@@ -24,9 +30,9 @@ struct RadioScreen: View {
             @unknown default: radioShell
             }
         }
-        .onAppear { micStatus = AVAudioSession.sharedInstance().recordPermission }
+        .onAppear { micStatus = Self.initialMicStatus() }
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
-            micStatus = AVAudioSession.sharedInstance().recordPermission
+            micStatus = Self.initialMicStatus()
         }
     }
 
@@ -42,9 +48,24 @@ struct RadioScreen: View {
                 channelRow(state)
                 Spacer(minLength: 12)
                 emergencyButton(state)
-                pttBar(state)
+                if settings.bigPttButtonEnabled {
+                    EmptyView()
+                } else {
+                    pttBar(state)
+                }
             }
             .padding(16)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if settings.bigPttButtonEnabled {
+                BigPttButton(
+                    isPressed: state.isTransmitting || state.isPttPressed,
+                    onPress: { viewModel.handle(.pttPressed) },
+                    onRelease: { viewModel.handle(.pttReleased) }
+                )
+                .padding(.trailing, 20)
+                .padding(.bottom, 24)
+            }
         }
         .sheet(isPresented: $showingDispatch) { sheetWrap("DISPATCH", isPresented: $showingDispatch) {
             if let token = session.token {

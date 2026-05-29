@@ -9,12 +9,14 @@ struct SettingsScreen: View {
     let onSignOut: () -> Void
     let onClose: () -> Void
 
+    @EnvironmentObject private var settings: SettingsStore
     @State private var confirmingSignOut = false
 
     var body: some View {
         NavigationStack {
             List {
                 accountSection
+                controlsSection
                 scanSection
                 gpsSection
                 aboutSection
@@ -51,6 +53,15 @@ struct SettingsScreen: View {
             if !state.agencyName.isEmpty {
                 row("Agency", state.agencyName)
             }
+        }
+        .listRowBackground(Color.safetSurface)
+    }
+
+    private var controlsSection: some View {
+        Section("Controls") {
+            Toggle("Large PTT button", isOn: $settings.bigPttButtonEnabled)
+                .tint(.safetGreen)
+                .foregroundColor(.safetText)
         }
         .listRowBackground(Color.safetSurface)
     }
