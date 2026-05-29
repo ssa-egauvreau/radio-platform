@@ -8,6 +8,7 @@ import { enqueueTranscription } from "./transcribe.js";
 import { isAiDispatchChannelCached } from "./aiDispatch/channelCache.js";
 import { createImbeDecoder } from "./imbeServerCodec.js";
 import { createCodec2Decoder } from "./codec2ServerCodec.js";
+import { createOpusDecoder } from "./opusServerCodec.js";
 import { detectFrameCodec, type VoiceCodec } from "./voiceCodecs.js";
 
 const SAMPLE_RATE = 16000;
@@ -27,11 +28,8 @@ interface VoiceStreamDecoder {
   free(): void;
 }
 
-/** Codecs the server can decode for the recorder. Opus arrives via the
- *  clear-PCM sideband on the recording path today (no node-side Opus
- *  decoder lib in tree yet); a vocoded Opus frame is dropped rather than
- *  written into the WAV as raw bytes. */
-const SERVER_DECODABLE: ReadonlySet<VoiceCodec> = new Set(["imbe", "codec2_3200"]);
+/** Codecs the server can decode when the clear-PCM sideband is absent. */
+const SERVER_DECODABLE: ReadonlySet<VoiceCodec> = new Set(["imbe", "codec2_3200", "opus"]);
 
 /** Factory map keyed by codec — the per-recording decoder is allocated
  *  lazily on the first vocoded frame of each talk-spurt so a channel
@@ -39,7 +37,7 @@ const SERVER_DECODABLE: ReadonlySet<VoiceCodec> = new Set(["imbe", "codec2_3200"
 const DECODER_FACTORIES: Record<VoiceCodec, (() => VoiceStreamDecoder | null) | null> = {
   imbe: createImbeDecoder,
   codec2_3200: createCodec2Decoder,
-  opus: null,
+  opus: createOpusDecoder,
 };
 
 /** Log "no server decoder for X" once per codec per process to avoid spam. */
@@ -166,7 +164,7 @@ export function recordFrame(attr: FrameAttribution, payload: Buffer): void {
         warnedNoDecoder.add(codec);
         console.warn(
           `Recorder has no server-side decoder for ${codec}; dropping vocoded frames on this channel ` +
-            `(transmissions still record via the clear-PCM sideband).`,
+            `(when available, transmissions record via the clear-PCM sideband).`,
         );
       }
       return;
