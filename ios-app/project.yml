@@ -200,6 +200,10 @@ targets:
     deploymentTarget: "16.2"
     sources:
       - path: SafeTMobileLiveActivity
+      # Shared attribute type ONLY — do NOT add other directories from
+      # SafeTMobile/ here. RadioLiveActivityController calls
+      # Activity.request(...) which is host-app-only and will not be
+      # available in the widget extension at runtime.
       - path: SafeTMobile/LiveActivity
     settings:
       base:

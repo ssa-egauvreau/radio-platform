@@ -1,3 +1,8 @@
+// SHARED FILE — compiled into BOTH the SafeTMobile app target (for
+// RadioLiveActivityController) and the SafeTMobileLiveActivity extension
+// (for ActivityConfiguration). ActivityKit identifies the type by
+// unqualified name at runtime; the field order and Codable shape must
+// stay identical across the two compiled copies.
 import Foundation
 
 #if canImport(ActivityKit)
