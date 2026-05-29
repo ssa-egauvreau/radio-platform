@@ -1,4 +1,6 @@
+import AVFoundation
 import SwiftUI
+import UIKit
 
 /// The safeT Mobile radio shell — status strip, channel display, controls,
 /// emergency, and a press-and-hold PTT bar.
@@ -11,10 +13,26 @@ struct RadioScreen: View {
     @State private var showingUnits = false
     @State private var showingTranscripts = false
     @State private var showingSettings = false
+    @State private var micStatus: AVAudioSession.RecordPermission = AVAudioSession.sharedInstance().recordPermission
 
     var body: some View {
+        Group {
+            switch micStatus {
+            case .denied: micDeniedCard
+            case .undetermined: micUndeterminedCard
+            case .granted: radioShell
+            @unknown default: radioShell
+            }
+        }
+        .onAppear { micStatus = AVAudioSession.sharedInstance().recordPermission }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            micStatus = AVAudioSession.sharedInstance().recordPermission
+        }
+    }
+
+    private var radioShell: some View {
         let state = viewModel.uiState
-        ZStack {
+        return ZStack {
             Color.safetBackground.ignoresSafeArea()
             VStack(spacing: 12) {
                 statusStrip(state)
@@ -58,6 +76,75 @@ struct RadioScreen: View {
                 },
                 onClose: { showingSettings = false }
             )
+        }
+    }
+
+    @ViewBuilder
+    private var micDeniedCard: some View {
+        ZStack {
+            Color.safetBackground.ignoresSafeArea()
+            VStack(spacing: 16) {
+                Image(systemName: "mic.slash.fill")
+                    .font(.system(size: 48, weight: .bold))
+                    .foregroundColor(.safetRed)
+                Text("MICROPHONE BLOCKED")
+                    .font(.system(size: 16, weight: .heavy))
+                    .foregroundColor(.safetText)
+                Text("safeT can't transmit voice without the mic. Open Settings to allow microphone access.")
+                    .font(.system(size: 13))
+                    .foregroundColor(.safetTextDim)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Text("OPEN SETTINGS")
+                        .font(.system(size: 14, weight: .heavy))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(Color.safetBlue)
+                        .cornerRadius(8)
+                }
+            }
+            .padding(24)
+        }
+    }
+
+    @ViewBuilder
+    private var micUndeterminedCard: some View {
+        ZStack {
+            Color.safetBackground.ignoresSafeArea()
+            VStack(spacing: 16) {
+                Image(systemName: "mic.fill")
+                    .font(.system(size: 48, weight: .bold))
+                    .foregroundColor(.safetSignal)
+                Text("ALLOW MICROPHONE")
+                    .font(.system(size: 16, weight: .heavy))
+                    .foregroundColor(.safetText)
+                Text("safeT needs microphone access to transmit on the radio channel.")
+                    .font(.system(size: 13))
+                    .foregroundColor(.safetTextDim)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Button {
+                    Task {
+                        _ = await AudioSessionManager.requestRecordPermission()
+                        micStatus = AVAudioSession.sharedInstance().recordPermission
+                    }
+                } label: {
+                    Text("ALLOW MICROPHONE")
+                        .font(.system(size: 14, weight: .heavy))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(Color.safetBlue)
+                        .cornerRadius(8)
+                }
+            }
+            .padding(24)
         }
     }
 
