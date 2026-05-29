@@ -92,7 +92,7 @@ struct RadioScreen: View {
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .foregroundColor(.safetText)
             Spacer()
-            networkPill(state.networkLabel)
+            networkPill(state)
         }
     }
 
@@ -165,14 +165,32 @@ struct RadioScreen: View {
         .accessibilityLabel(label)
     }
 
-    private func networkPill(_ label: String) -> some View {
-        let color: Color = label == "ONLINE" ? .safetGreen : (label == "OFFLINE" ? .safetRed : .safetAmber)
-        return Text(label)
-            .font(.system(size: 10, weight: .bold))
-            .foregroundColor(color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .overlay(Capsule().stroke(color.opacity(0.6), lineWidth: 1))
+    @ViewBuilder
+    private func networkPill(_ state: RadioUiState) -> some View {
+        if state.isReconnecting {
+            pillBody(text: "Reconnecting", color: .safetAmber)
+        } else if state.networkLabel == "OFFLINE" {
+            pillBody(text: "Offline", color: .safetRed)
+        } else if let started = state.connectionStartedAt {
+            TimelineView(.periodic(from: started, by: 1)) { context in
+                let secs = max(0, Int(context.date.timeIntervalSince(started)))
+                pillBody(text: "Connected · \(secs)s", color: .safetGreen)
+            }
+        } else {
+            pillBody(text: state.networkLabel, color: .safetAmber)
+        }
+    }
+
+    private func pillBody(text: String, color: Color) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(text)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(color)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .overlay(Capsule().stroke(color.opacity(0.6), lineWidth: 1))
     }
 
     // MARK: - LCD display

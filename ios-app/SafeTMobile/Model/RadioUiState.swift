@@ -49,4 +49,11 @@ struct RadioUiState {
     var activeTalkDisplayName = ""
     /// Dispatcher 10-33 emergency-traffic marker on the tuned channel.
     var channelTen33 = false
+
+    /// Timestamp the current voice link came up; used to render "Connected · Ns"
+    /// in the network pill. Nil when not connected.
+    var connectionStartedAt: Date?
+    /// True after an `onError` and before the next `onJoined` — pill shows
+    /// "Reconnecting" rather than the elapsed-seconds counter.
+    var isReconnecting = false
 }

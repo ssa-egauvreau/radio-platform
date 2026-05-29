@@ -125,6 +125,8 @@ final class RadioViewModel: ObservableObject {
             uiState.channelSyncError = nil
             uiState.networkLabel = "ONLINE"
             uiState.channelCatalog = channelNames
+            uiState.connectionStartedAt = Date()
+            uiState.isReconnecting = false
             // Drop any scan entries that no longer exist in the catalog so the
             // picker / transport never tries to listen to a removed channel.
             let validKeys = Set(channelNames.map { $0.lowercased() })
@@ -143,6 +145,7 @@ final class RadioViewModel: ObservableObject {
             uiState.networkLabel = "OFFLINE"
             uiState.channelSyncError = "Channel sync failed"
             uiState.statusMessage = "SYNC FAILED"
+            uiState.connectionStartedAt = nil
             refreshScanTransport()
         }
     }
@@ -189,9 +192,13 @@ final class RadioViewModel: ObservableObject {
             guard let self else { return }
             self.uiState.canTransmit = joined.permission != .listenOnly
             self.uiState.statusMessage = joined.permission == .listenOnly ? "MONITOR ONLY" : "READY"
+            self.uiState.connectionStartedAt = Date()
+            self.uiState.isReconnecting = false
         }
         voiceTransport.onError = { [weak self] code in
-            self?.uiState.statusMessage = "LINK: \(code.uppercased())"
+            guard let self else { return }
+            self.uiState.statusMessage = "LINK: \(code.uppercased())"
+            self.uiState.isReconnecting = true
         }
         voiceTransport.onReceivingChange = { [weak self] receiving in
             self?.uiState.isReceivingAudio = receiving
