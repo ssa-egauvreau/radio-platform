@@ -37,7 +37,10 @@ final class VoiceLinkTelemetryReporter {
     private static let clientType = "ios"
 
     private let lock = NSLock()
-    private var window = WindowCounters(openedAtMs: Self.nowMs())
+    // Use the explicit class name (not `Self`) here: Swift rejects covariant
+    // `Self` in a stored-property default initializer because the initializer
+    // expression is evaluated before the type is fully formed.
+    private var window = WindowCounters(openedAtMs: VoiceLinkTelemetryReporter.nowMs())
     private var queued: [QueuedWindow] = []
     private var timer: Timer?
     private var inFlight = false
