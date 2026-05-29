@@ -84,6 +84,12 @@ final class VoiceTransport {
     /// `refreshAudioConfig()` on every connect / reconnect so admin
     /// changes pick up without restarting the app.
     private var postDecodeProcessor: PostDecodeChain.Processor?
+    /// Raw post-decode config cached alongside the processor. Drives the
+    /// wideband (Opus) routing decision and the end-of-TX cue synthesis on
+    /// `air_released` — the cue path needs it even when there is no DSP
+    /// processor to build (e.g. a roger-beep-only config). `nil` when no
+    /// shaping/cue is configured.
+    private var postDecodeConfig: PostDecodeChain.Config?
     /// Last inbound voice frame timestamp (seconds, monotonic clock). Used
     /// only to detect a talk-spurt boundary on RX so the post-decode chain
     /// can reset its biquad state before the next talker's first frame.
@@ -245,15 +251,16 @@ final class VoiceTransport {
         let client = RadioApiClient(baseURL: apiBase, token: token)
         do {
             let response = try await client.audioConfig()
+            let nextConfig: PostDecodeChain.Config? = response.config?.postDecode?.toConfig()
             let next: PostDecodeChain.Processor?
-            if let pd = response.config?.postDecode {
-                let cfg = pd.toConfig()
+            if let cfg = nextConfig {
                 next = cfg.isNoOp ? nil : PostDecodeChain.Processor(config: cfg)
             } else {
                 next = nil
             }
             await MainActor.run {
                 self.postDecodeProcessor = next
+                self.postDecodeConfig = nextConfig
                 self.bypassMicProcessing = response.config?.bypassMicProcessing ?? false
                 self.lastInboundVoiceAt = 0
             }
@@ -357,9 +364,12 @@ final class VoiceTransport {
             lastInboundVoiceAt = now
             if newSpurt {
                 decoder.resetForTalkSpurt()
-                if decoder.nativeSampleRate == 8000 {
-                    postDecodeProcessor?.reset()
-                }
+                // Reset the post-decode chain on every talk-spurt boundary,
+                // regardless of codec: the 8 kHz path and the Opus wideband
+                // path share the same biquad / compressor state, so a previous
+                // talker's filter ring must not bleed into the next talker's
+                // first frame on either path.
+                postDecodeProcessor?.reset()
             }
             // Lazy-load IMBE on first frame so peers stay audible even before
             // this radio opens the PTT screen. Other codecs load (or fail to
@@ -388,11 +398,24 @@ final class VoiceTransport {
     /// Brings a decoder's native-rate output to the playback rate (16 kHz mono
     /// PCM-16 LE). 8 kHz output (IMBE, Codec2) runs through the existing
     /// post-decode chain or duplicate-upsample fast path; 16 kHz output (Opus)
-    /// is shipped to the player unchanged since the chain's polyphase upsample
-    /// and presence-bell shaping are tuned for vocoded 8 kHz input.
+    /// runs through the same chain's wideband entry point (no upsample) when the
+    /// agency enabled `wideband`, otherwise plays unshaped.
     private func renderDecoded(_ samples: [Int16], nativeRate: Int) -> Data {
         if nativeRate == 8000 {
             return applyPostDecodeOrDup(samples)
+        }
+        return applyWidebandOrPassthrough(samples)
+    }
+
+    /// Opus (16 kHz) RX shaping: when the agency enabled `wideband` AND a
+    /// processor exists, run the decoded frame through the same
+    /// biquad → compressor → saturation tail as the 8 kHz path but skipping the
+    /// upsample (the input is already 16 kHz). Otherwise play unshaped — today's
+    /// behaviour. Opus frames are not 160 samples; the wideband path is
+    /// length-agnostic.
+    private func applyWidebandOrPassthrough(_ samples: [Int16]) -> Data {
+        if let processor = postDecodeProcessor, postDecodeConfig?.wideband == true {
+            return processor.processWideband(pcm16k: samples)
         }
         return shortLeMonoBytes(samples)
     }
@@ -440,11 +463,30 @@ final class VoiceTransport {
         case "busy":
             let holder = (object["unit_id"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
             onBusy?(holder?.isEmpty == true ? nil : holder)
+        case "air_released":
+            // Another unit on this channel just unkeyed. Synthesize the
+            // close-side end-of-TX cue (roger beep / squelch tail) locally and
+            // inject it into playout. No-op unless the agency enabled at least
+            // one of the cue flags.
+            playEndOfTxCue()
         case "error":
             let code = (object["code"] as? String) ?? "unknown"
             onError?(code)
         default:
             break
+        }
+    }
+
+    /// Build + play the close-side end-of-TX cue when the relay reports another
+    /// unit unkeyed. Pinned + identical to the web / Android cue. No-op unless
+    /// the agency enabled the roger beep and/or squelch tail.
+    private func playEndOfTxCue() {
+        guard let cfg = postDecodeConfig, cfg.rogerBeepEnabled || cfg.squelchTailEnabled else {
+            return
+        }
+        let cue = PostDecodeChain.endOfTxCue(cfg)
+        if !cue.isEmpty {
+            audio.enqueueIncoming(cue)
         }
     }
 
