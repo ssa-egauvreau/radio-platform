@@ -3,6 +3,7 @@
 
 import { api, getToken, type Permission } from "../api";
 import { ImbeTxConditioner } from "./imbeTxConditioner";
+import { voiceLinkTelemetryReporter } from "./voiceLinkTelemetryReporter";
 import { imbeDecode, imbeEncode, imbeReady, initImbe } from "./imbeVocoder";
 import {
   codec2Decode,
@@ -576,6 +577,11 @@ export class VoiceChannelClient {
         }),
       );
       void loadMarker1033Pcm().catch(() => undefined);
+      // Voice-link telemetry: start counting frames as soon as the socket
+      // opens so the dashboard sees this client as "present" within the
+      // first window even before the joined reply lands.
+      voiceLinkTelemetryReporter.setIdentity("WEB", this.channelName);
+      voiceLinkTelemetryReporter.start();
     };
     ws.onmessage = (event: MessageEvent) => {
       if (typeof event.data === "string") {
@@ -695,9 +701,16 @@ export class VoiceChannelClient {
     // Codec dispatch: detect by leading magic bytes so a channel can mix
     // codecs mid-session without any client-side signaling.
     const codec = detectFrameCodec(bytes);
+    // Voice-link telemetry: count every inbound frame + its decoded outcome.
+    // A null return from `detectFrameCodec` means raw PCM (no codec magic) —
+    // the dashboard surfaces that as the `raw_pcm` codec key so an operator
+    // can spot peers whose vocoder failed to engage.
+    const telemetryCodec: string = codec ?? "raw_pcm";
+    voiceLinkTelemetryReporter.recordFrameReceived(telemetryCodec, buffer.byteLength);
     if (codec === "imbe") {
       const pcm8k = imbeDecode(bytes.subarray(2));
       if (pcm8k) {
+        voiceLinkTelemetryReporter.recordFrameDecoded(telemetryCodec);
         // When the agency pushed post-decode shaping (presence / saturation
         // / shelves / polyphase24 upsample) every IMBE frame runs through
         // the chain at the configured output rate. Otherwise fall back to
@@ -709,11 +722,14 @@ export class VoiceChannelClient {
         } else {
           this.schedulePcm(upsample8kTo16k(pcm8k));
         }
+      } else {
+        voiceLinkTelemetryReporter.recordDecodeFailure(telemetryCodec);
       }
       return;
     }
     if (codec === "opus") {
       if (!opusReady()) {
+        voiceLinkTelemetryReporter.recordDecodeFailure(telemetryCodec);
         // The libopus WASM is loaded lazily on `joined`; if an Opus frame
         // arrives before init resolves, kick off the load and drop this
         // one. Following frames at the channel's 20 ms cadence catch up
@@ -724,12 +740,16 @@ export class VoiceChannelClient {
       }
       const pcm = opusDecode(bytes.subarray(2));
       if (pcm) {
+        voiceLinkTelemetryReporter.recordFrameDecoded(telemetryCodec);
         this.playOpusPcm(pcm);
+      } else {
+        voiceLinkTelemetryReporter.recordDecodeFailure(telemetryCodec);
       }
       return;
     }
     if (codec === "codec2_3200") {
       if (!codec2Ready()) {
+        voiceLinkTelemetryReporter.recordDecodeFailure(telemetryCodec);
         // The WASM module is loaded lazily on `joined`; if a Codec2 frame
         // arrives before init resolves, kick off the load and drop this
         // one. Following frames at the channel's 20 ms cadence catch up
@@ -740,6 +760,7 @@ export class VoiceChannelClient {
       }
       const pcm8k = codec2Decode(bytes.subarray(2));
       if (pcm8k) {
+        voiceLinkTelemetryReporter.recordFrameDecoded(telemetryCodec);
         // Same 8 → 16 kHz path IMBE uses: through the agency post-decode
         // chain when configured, otherwise the legacy duplicate upsample.
         if (this.postDecodeProcessor) {
@@ -748,6 +769,8 @@ export class VoiceChannelClient {
         } else {
           this.schedulePcm(upsample8kTo16k(pcm8k));
         }
+      } else {
+        voiceLinkTelemetryReporter.recordDecodeFailure(telemetryCodec);
       }
       return;
     }
@@ -819,6 +842,13 @@ export class VoiceChannelClient {
           resetCodec2DecoderForTalkSpurt();
         }
         this.postDecodeProcessor?.reset();
+        // Voice-link telemetry: a fresh talk-spurt boundary is also a fresh
+        // talk-spurt start from a counters POV — the underrun fill above
+        // doesn't run for the very first frame of a spurt.
+        voiceLinkTelemetryReporter.recordTalkSpurtStart();
+      } else if (this.lastVoiceAt === 0) {
+        // First voice frame ever on this connection — also a talk-spurt start.
+        voiceLinkTelemetryReporter.recordTalkSpurtStart();
       }
 
       // Underrun fill: if the playout queue has drained (playHead is behind
@@ -832,8 +862,16 @@ export class VoiceChannelClient {
           MAX_PLC_FILL_FRAMES,
           Math.max(0, Math.ceil(gapSec / frameSec)),
         );
+        if (gapFrames > 0) {
+          // Voice-link telemetry: one buffer underrun event regardless of
+          // how many concealment frames bridge the gap. The PLC frame count
+          // is logged separately below so the dashboard can show both the
+          // outage rate (underruns) and the smoothing volume (PLC frames).
+          voiceLinkTelemetryReporter.recordBufferUnderrun();
+        }
         for (let i = 0; i < gapFrames; i++) {
           this.scheduleRawPcm(this.synthesizePlcFrame(sampleRate), sampleRate, false);
+          voiceLinkTelemetryReporter.recordPlcSynthesized();
         }
       }
       this.lastVoiceAt = now;
@@ -1266,6 +1304,10 @@ export class VoiceChannelClient {
     this.stopCustomLoops();
     this.stopLocalTones();
     this.unbindAudioResume();
+    // Voice-link telemetry: stop the 30 s POST loop. Counters accumulated
+    // during the just-closed window are flushed on the next start; for a
+    // signed-out user this is a no-op.
+    voiceLinkTelemetryReporter.stop();
     if (this.rxWatchdog !== null) {
       window.clearInterval(this.rxWatchdog);
       this.rxWatchdog = null;

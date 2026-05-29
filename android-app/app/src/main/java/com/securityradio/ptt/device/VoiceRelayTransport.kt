@@ -96,6 +96,9 @@ class VoiceRelayTransport(
     val controlEvents: SharedFlow<VoiceControlEvent> = _controlEvents.asSharedFlow()
 
     private val wsBaseUrl = httpApiBaseUrlToVoiceWebSocketUrl(httpApiBaseUrl)
+    /** Cached HTTP base URL passed to [VoiceLinkTelemetryReporter] so its
+     *  30 s POSTs go to the same backend as this transport. */
+    private val telemetryHttpBaseUrl = httpApiBaseUrl
 
     private val client = OkHttpClient.Builder()
         .pingInterval(25L, TimeUnit.SECONDS)
@@ -299,6 +302,15 @@ class VoiceRelayTransport(
 
         if (payload.size >= 2) {
             val decoder = codecRegistry.decoderForMagic(payload[0], payload[1])
+            // Voice-link telemetry: count every inbound voice frame. The codec
+            // wire id ("imbe" / "codec2_3200" / "opus" / "raw_pcm") feeds the
+            // per-codec breakdown the admin dashboard renders. Decode success
+            // / failure is counted on the success / null branches below.
+            val telemetryCodec = decoder?.codec?.wireId ?: "raw_pcm"
+            VoiceLinkTelemetryReporter.recordFrameReceived(telemetryCodec, payload.size)
+            if (newSpurt) {
+                VoiceLinkTelemetryReporter.recordTalkSpurtStart()
+            }
             if (decoder != null) {
                 if (newSpurt) {
                     decoder.resetForTalkSpurt()
@@ -320,13 +332,16 @@ class VoiceRelayTransport(
                     return
                 }
                 if (!decoder.isReady) {
+                    VoiceLinkTelemetryReporter.recordDecodeFailure()
                     Log.w(TAG, "Inbound ${decoder.codec.wireId} frame dropped — decoder native lib not loaded")
                     return
                 }
                 val samples = decoder.decodeFrame(payload) ?: run {
+                    VoiceLinkTelemetryReporter.recordDecodeFailure()
                     Log.w(TAG, "${decoder.codec.wireId} decode returned null — check peer encoder alignment")
                     return
                 }
+                VoiceLinkTelemetryReporter.recordFrameDecoded(telemetryCodec)
                 val pcm16LittleEndian = renderDecoded(samples, decoder.nativeSampleRate)
                 inbound.writePcmFromMain(pcm16LittleEndian)
                 return
@@ -472,10 +487,26 @@ class VoiceRelayTransport(
                 pendingChannelRaw != "----",
         )
 
+        // Voice-link telemetry: keep the singleton's POST destination + auth
+        // up to date and tell it which (unit, channel) the upcoming windows
+        // are billed to. `configure` is idempotent — re-pointing at the same
+        // URL is cheap.
+        VoiceLinkTelemetryReporter.configure(
+            httpBaseUrl = telemetryHttpBaseUrl,
+            authTokenProvider = authTokenProvider,
+            apiKeyProvider = apiKeyProvider,
+        )
+        VoiceLinkTelemetryReporter.setIdentity(
+            unitId = pendingUnitId.takeIf { it.isNotBlank() },
+            channel = pendingChannelRaw.takeIf { it.isNotBlank() },
+        )
+
         if (!wantOnline.get()) {
+            VoiceLinkTelemetryReporter.stop()
             disconnect()
             return
         }
+        VoiceLinkTelemetryReporter.start()
 
         synchronized(connectionLock) {
             val existing = webSocketRef.get()
@@ -594,6 +625,7 @@ class VoiceRelayTransport(
 
     /** Permanent teardown when discarding transport (normally unused — prefer [disconnect]). */
     fun shutdown() {
+        VoiceLinkTelemetryReporter.stop()
         disconnect()
         reconnectExecutor.shutdownNow()
         inbound.release()

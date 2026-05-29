@@ -12,6 +12,7 @@ import { KnowledgeBasePanel } from "./KnowledgeBasePanel";
 import { DownloadsPanel } from "./DownloadsPanel";
 import { AiTestPanel } from "./AiTestPanel";
 import { AudioLabPanel } from "./AudioLabPanel";
+import { VoiceLinkPanel } from "./VoiceLinkPanel";
 
 type TabId =
   | "users"
@@ -21,6 +22,7 @@ type TabId =
   | "knowledge"
   | "ai-test"
   | "audio-lab"
+  | "link-health"
   | "downloads"
   | "sounds"
   | "soundboard"
@@ -35,6 +37,7 @@ const TABS: { id: TabId; label: string }[] = [
   { id: "knowledge", label: "Knowledge Base" },
   { id: "ai-test", label: "AI Test" },
   { id: "audio-lab", label: "Audio Lab" },
+  { id: "link-health", label: "Link Health" },
   { id: "downloads", label: "Downloads" },
   { id: "sounds", label: "Sounds" },
   { id: "soundboard", label: "Soundboard" },
@@ -69,6 +72,7 @@ export function AdminPage() {
           {tab === "knowledge" && <KnowledgeBasePanel />}
           {tab === "ai-test" && <AiTestPanel />}
           {tab === "audio-lab" && <AudioLabPanel />}
+          {tab === "link-health" && <VoiceLinkPanel />}
           {tab === "downloads" && <DownloadsPanel />}
           {tab === "sounds" && <SoundsPanel />}
           {tab === "soundboard" && <ToneOutsPanel />}

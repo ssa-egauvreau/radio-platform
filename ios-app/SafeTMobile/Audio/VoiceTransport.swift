@@ -116,6 +116,17 @@ final class VoiceTransport {
         reconnectAttempts = 0
         if task == nil { openSocket() }
         sendJoinFrame()
+        // Voice-link telemetry: re-point the singleton at this backend, set
+        // the (unit, channel) identity for the upcoming windows, and start
+        // the 30 s POST loop. Idempotent — configure() and start() are
+        // safe to call multiple times.
+        VoiceLinkTelemetryReporter.shared.configure(
+            baseURL: baseURL,
+            tokenProvider: { [weak self] in self?.token ?? "" },
+            radioKeyProvider: { "" },
+        )
+        VoiceLinkTelemetryReporter.shared.setIdentity(unitId: unitId, channel: channel)
+        VoiceLinkTelemetryReporter.shared.start()
     }
 
     func disconnect() {
@@ -128,6 +139,10 @@ final class VoiceTransport {
         currentChannel = nil
         reconnectAttempts = 0
         stopUplinkCapture()
+        // Voice-link telemetry: stop POSTing on disconnect. Counters in the
+        // in-flight window are carried over to the next start(), so a quick
+        // disconnect / reconnect cycle doesn't lose data.
+        VoiceLinkTelemetryReporter.shared.stop()
     }
 
     func startUplinkCapture(sessionId: UInt64) {
@@ -362,6 +377,12 @@ final class VoiceTransport {
             let now = ProcessInfo.processInfo.systemUptime
             let newSpurt = lastInboundVoiceAt == 0 || (now - lastInboundVoiceAt) > talkSpurtGapSeconds
             lastInboundVoiceAt = now
+            // Voice-link telemetry: count every inbound voice frame + its
+            // decoded outcome below. Decoder codec wire id ("imbe" / "opus"
+            // / "codec2_3200") feeds the per-codec breakdown the admin
+            // dashboard renders.
+            let telemetryCodec = decoder.codec.wireId
+            VoiceLinkTelemetryReporter.shared.recordFrameReceived(codec: telemetryCodec, bytes: payload.count)
             if newSpurt {
                 decoder.resetForTalkSpurt()
                 // Reset the post-decode chain on every talk-spurt boundary,
@@ -370,19 +391,26 @@ final class VoiceTransport {
                 // talker's filter ring must not bleed into the next talker's
                 // first frame on either path.
                 postDecodeProcessor?.reset()
+                VoiceLinkTelemetryReporter.shared.recordTalkSpurtStart()
             }
             // Lazy-load IMBE on first frame so peers stay audible even before
             // this radio opens the PTT screen. Other codecs load (or fail to
             // load) eagerly with their own native libs.
             if decoder.codec == .imbe, !P25ImbeNative.isAvailable, !P25ImbeNative.initialize() {
+                VoiceLinkTelemetryReporter.shared.recordDecodeFailure()
                 logger.warning("IMBE frame discarded — vocoder not loaded")
                 return
             }
             guard decoder.isReady else {
+                VoiceLinkTelemetryReporter.shared.recordDecodeFailure()
                 logger.warning("Inbound \(decoder.codec.wireId, privacy: .public) frame dropped — decoder native lib not loaded")
                 return
             }
-            guard let samples = decoder.decodeFrame(payload) else { return }
+            guard let samples = decoder.decodeFrame(payload) else {
+                VoiceLinkTelemetryReporter.shared.recordDecodeFailure()
+                return
+            }
+            VoiceLinkTelemetryReporter.shared.recordFrameDecoded(codec: telemetryCodec)
             let pcm16 = renderDecoded(samples, nativeRate: decoder.nativeSampleRate)
             lastReceivedAt = Date()
             onReceivingChange?(true)
@@ -390,6 +418,9 @@ final class VoiceTransport {
             return
         }
         // Unknown magic — legacy clear PCM path (soundboard tone-out, etc.).
+        // Telemetry counts these as `raw_pcm` so an operator can spot a peer
+        // whose vocoder failed to engage.
+        VoiceLinkTelemetryReporter.shared.recordFrameReceived(codec: "raw_pcm", bytes: payload.count)
         lastReceivedAt = Date()
         onReceivingChange?(true)
         audio.enqueueIncoming(payload)

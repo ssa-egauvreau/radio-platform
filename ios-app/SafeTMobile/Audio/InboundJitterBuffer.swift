@@ -98,6 +98,10 @@ final class InboundJitterBuffer {
         }
         lastEnqueueAt = now
         queue.append(pcm16)
+        // Voice-link telemetry: track the peak buffer depth this window so
+        // the dashboard can flag a unit driving the queue toward the
+        // maxBufferFrames cap (chronic upstream burstiness).
+        VoiceLinkTelemetryReporter.shared.recordBufferDepth(queue.count)
         // Hard cap on accumulated latency.
         while queue.count > maxBufferFrames {
             queue.removeFirst()
@@ -175,15 +179,32 @@ final class InboundJitterBuffer {
                 return
             }
             let frame: Data
+            // Voice-link telemetry flags: read under the lock so the
+            // counter bumps reflect the exact playout decision below.
+            let wasPlc: Bool
+            let wasUnderrun: Bool
             if !queue.isEmpty {
                 frame = queue.removeFirst()
                 lastGoodFrame = frame
                 plcCount = 0
+                wasPlc = false
+                wasUnderrun = false
             } else {
                 frame = synthesizePlc()
+                // First PLC frame in a contiguous underrun event = one
+                // "buffer underrun"; following PLC frames in the same
+                // event just bump the PLC counter.
+                wasUnderrun = plcCount == 0
+                wasPlc = true
                 plcCount += 1
             }
             lock.unlock()
+            if wasUnderrun {
+                VoiceLinkTelemetryReporter.shared.recordBufferUnderrun()
+            }
+            if wasPlc {
+                VoiceLinkTelemetryReporter.shared.recordPlcSynthesized()
+            }
 
             scheduleFrame(frame)
 

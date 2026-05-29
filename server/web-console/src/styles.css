@@ -8269,3 +8269,59 @@ code.mono {
     align-items: stretch;
   }
 }
+
+/* --- Link Health (VoiceLinkPanel) ----------------------------------------
+   Rows are clickable; the selected row uses the standard accent treatment
+   the audit log uses. Health badges are color-coded green/yellow/red so the
+   dispatcher's eye lands on the bad unit before reading the numbers. */
+table.vlt-units tbody tr.selected {
+  background: var(--row-active, rgba(127, 169, 255, 0.08));
+}
+table.vlt-units tbody tr:hover {
+  background: var(--row-hover, rgba(127, 169, 255, 0.04));
+}
+.vlt-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+.vlt-badge-green {
+  background: rgba(48, 180, 110, 0.16);
+  color: #2db877;
+  border-color: rgba(48, 180, 110, 0.4);
+}
+.vlt-badge-yellow {
+  background: rgba(220, 170, 50, 0.16);
+  color: #d6a838;
+  border-color: rgba(220, 170, 50, 0.4);
+}
+.vlt-badge-red {
+  background: rgba(220, 80, 80, 0.16);
+  color: #d65a5a;
+  border-color: rgba(220, 80, 80, 0.45);
+}
+.vlt-badge-unknown {
+  background: rgba(150, 150, 150, 0.14);
+  color: var(--text-dim);
+  border-color: rgba(150, 150, 150, 0.3);
+}
+.vlt-charts {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+@media (min-width: 800px) {
+  .vlt-charts {
+    grid-template-columns: 1fr 1fr 1fr;
+  }
+}
+.vlt-chart-title {
+  color: var(--text-dim);
+  font-size: 12px;
+  margin-bottom: 6px;
+}

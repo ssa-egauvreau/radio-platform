@@ -439,6 +439,7 @@ test("aggregateWindowsByUnit: sums counters across 100 windows for a single unit
         plc_frames_synthesized: i === 50 ? 8 : 0, // a single underrun spike at i=50
         buffer_underruns: i === 50 ? 1 : 0,
         max_buffer_depth_frames: i % 10 === 0 ? 12 : 6, // taller queue every 10th window
+        codec_breakdown: { imbe: { framesReceived: 50, framesDecoded: 49 } },
       }),
     );
   }
@@ -454,7 +455,9 @@ test("aggregateWindowsByUnit: sums counters across 100 windows for a single unit
   assert.equal(u.bufferUnderruns, 1);
   // max — not sum — of the per-window max buffer depth.
   assert.equal(u.maxBufferDepthFrames, 12);
-  // PLC is rare → should sit at "green" given 8 PLC vs 4900 decoded ≈ 0.16 %.
+  // PLC is rare → 8 PLC vs 4900 decoded ≈ 0.16 % ratio — well under the 5 %
+  // yellow ceiling — but one buffer underrun in the range knocks the badge
+  // from green to yellow per the documented thresholds.
   assert.equal(u.health, "yellow", "1 underrun in 100 windows flips green to yellow");
   // last_seen is the newest window's server_ts (i = 99).
   assert.equal(u.lastSeen, new Date((1_700_000_000 + 99 * 30) * 1000).toISOString());
