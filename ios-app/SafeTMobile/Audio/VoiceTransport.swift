@@ -145,6 +145,18 @@ final class VoiceTransport {
         VoiceLinkTelemetryReporter.shared.stop()
     }
 
+    /// Cancels any pending backoff and reopens the socket immediately. Used by
+    /// the network-path monitor when connectivity returns. No-op when there's
+    /// no channel joined or the socket is already up.
+    func retryNow() {
+        guard task == nil, currentChannel != nil else { return }
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        reconnectAttempts = 0
+        openSocket()
+        sendJoinFrame()
+    }
+
     func startUplinkCapture(sessionId: UInt64) {
         activeCaptureSessionId = sessionId
         resetUplinkState()

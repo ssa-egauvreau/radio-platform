@@ -68,6 +68,13 @@ final class RadioViewModel: ObservableObject {
         }
         locationReporter.start()
         wireVoiceCallbacks()
+        NetworkPathMonitor.shared.onChange = { [weak self] reachable in
+            Task { @MainActor in
+                guard reachable, let self else { return }
+                self.voiceTransport.retryNow()
+                self.scanTransport.retryNow()
+            }
+        }
         scanTransport.onScanRx = { [weak self] channel in
             self?.handleScanRx(channel: channel)
         }
