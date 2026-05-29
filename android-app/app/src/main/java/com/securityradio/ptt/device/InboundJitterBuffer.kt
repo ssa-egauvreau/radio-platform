@@ -1,5 +1,6 @@
 package com.securityradio.ptt.device
 
+import com.securityradio.ptt.support.VoiceTiming
 import android.media.AudioTrack
 import android.os.SystemClock
 import java.util.concurrent.TimeUnit
@@ -26,7 +27,7 @@ import kotlin.concurrent.withLock
  *
  * On a fresh talk-spurt the buffer waits for [INITIAL_TARGET_FRAMES] of audio
  * (~60 ms) before starting playout so a brief opening jitter spike does not
- * immediately trigger PLC. Long pauses between transmissions ([TALK_SPURT_GAP_MS])
+ * immediately trigger PLC. Long pauses between transmissions ([VoiceTiming.TALK_SPURT_GAP_MS])
  * reset state so the next talker starts cleanly without inherited PLC bleed.
  */
 class InboundJitterBuffer(
@@ -61,7 +62,7 @@ class InboundJitterBuffer(
                 }
             }
             val now = SystemClock.elapsedRealtime()
-            if (lastEnqueueMs != 0L && now - lastEnqueueMs > TALK_SPURT_GAP_MS) {
+            if (lastEnqueueMs != 0L && now - lastEnqueueMs > VoiceTiming.TALK_SPURT_GAP_MS) {
                 // A fresh talk-spurt — drop any stale tail so the new talker
                 // is not preceded by a faded-out copy of the last one.
                 queue.clear()
@@ -231,7 +232,6 @@ class InboundJitterBuffer(
 
         // Talk-spurt boundary; matches the relay air-claim window so an
         // operator gap between transmissions clears stale state cleanly.
-        const val TALK_SPURT_GAP_MS = 300L
 
         // Number of PLC frames synthesised before falling to silence.
         const val PLC_FADE_FRAMES = 3

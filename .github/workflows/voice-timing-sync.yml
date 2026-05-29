@@ -1,0 +1,41 @@
+name: Voice timing sync
+
+# Cross-platform guard: server, web, iOS, and Android must agree on air/Talk
+# poll numbers documented in docs/voice-timing.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/voice-timing.md'
+      - 'scripts/check-voice-timing.mjs'
+      - 'server/src/voiceRelay.ts'
+      - 'server/web-console/src/voice/voiceTiming.ts'
+      - 'ios-app/SafeTMobile/Support/VoiceTiming.swift'
+      - 'android-app/**/VoiceTiming.kt'
+      - '.github/workflows/voice-timing-sync.yml'
+  pull_request:
+    paths:
+      - 'docs/voice-timing.md'
+      - 'scripts/check-voice-timing.mjs'
+      - 'server/**'
+      - 'ios-app/**'
+      - 'android-app/**'
+      - '.github/workflows/voice-timing-sync.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: voice timing constants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Verify cross-platform voice timing
+        run: node scripts/check-voice-timing.mjs

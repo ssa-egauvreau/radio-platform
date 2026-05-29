@@ -23,6 +23,7 @@ import {
   isVoiceCodec,
   type VoiceCodec,
 } from "./voiceCodecRegistry";
+import { RX_GAP_MS, releaseAirControlJson } from "./voiceTiming";
 
 export type VoiceState = "idle" | "connecting" | "listening" | "transmitting" | "error" | "closed";
 
@@ -98,10 +99,6 @@ const JOIN_ERRORS: Record<string, string> = {
   bad_join: "The channel could not be joined.",
   channel_lookup_failed: "The server could not verify channel access.",
 };
-
-/** No inbound audio for this long means the channel is clear again. */
-/** Idle RX — align with mobile talk-spurt gap (see docs/voice-timing.md). */
-const RX_GAP_MS = 300;
 
 /** Voice-fallback detector: at least this many raw PCM frames clustered within
  *  CLEAR_RX_BURST_WINDOW_MS is treated as a sustained talk-spurt (not a marker/tone-out). */
@@ -1105,7 +1102,7 @@ export class VoiceChannelClient {
       return;
     }
     try {
-      ws.send(JSON.stringify({ type: "release_air" }));
+      ws.send(releaseAirControlJson());
     } catch {
       /* socket dropped */
     }

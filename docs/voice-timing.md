@@ -14,6 +14,17 @@ Shared numbers for half-duplex voice, talker hints, and RX idle detection. When 
 | Presence poll | **12000 ms** | Android, iOS |
 | Web RX idle (`RX_GAP_MS`) | **300 ms** | Web console — matches mobile talk-spurt gap |
 
+## Source of truth in code
+
+| Area | File |
+|------|------|
+| Server TTL | `server/src/voiceRelay.ts` (`VOICE_AIR_TTL_MS`) |
+| Web console | `server/web-console/src/voice/voiceTiming.ts` |
+| iOS | `ios-app/SafeTMobile/Support/VoiceTiming.swift` |
+| Android | `android-app/app/src/main/java/com/securityradio/ptt/support/VoiceTiming.kt` |
+
+CI runs `node scripts/check-voice-timing.mjs` on PRs that touch voice timing files.
+
 ## Client checklist
 
 - [ ] PTT release sends `{"type":"release_air"}` on an open voice WebSocket

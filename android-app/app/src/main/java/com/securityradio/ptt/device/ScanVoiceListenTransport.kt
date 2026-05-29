@@ -1,5 +1,6 @@
 package com.securityradio.ptt.device
 
+import com.securityradio.ptt.support.VoiceTiming
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -36,14 +37,13 @@ class ScanVoiceListenTransport(
      *  on a talk-spurt boundary keeps biquad ring isolated from other
      *  channels' transmissions. Keyed by channel label. */
     private val scanLastInboundNs = java.util.concurrent.ConcurrentHashMap<String, Long>()
-    private val scanTalkSpurtGapNs = 300_000_000L
 
     /**
      * Apply the agency post-decode chain to a scan-channel IMBE frame, or
      * fall back to the legacy duplicate upsample when no shaping is set.
      *
      * Each scan channel has independent talk-spurt boundary detection — a
-     * gap > [scanTalkSpurtGapNs] between frames on the same channel resets
+     * gap > [VoiceTiming.TALK_SPURT_GAP_NS] between frames on the same channel resets
      * the processor's filter state for that channel so a previous talker's
      * biquad ring stays out of the next talker's first frame.
      *
@@ -57,7 +57,7 @@ class ScanVoiceListenTransport(
             ?: return P25ImbeNative.Frames.upsampleDup8kToLe16Mono(pcm8k160)
         val now = System.nanoTime()
         val prev = scanLastInboundNs.put(channelLabel, now) ?: 0L
-        if (prev == 0L || now - prev > scanTalkSpurtGapNs) {
+        if (prev == 0L || now - prev > VoiceTiming.TALK_SPURT_GAP_NS) {
             processor.reset()
         }
         return processor.process(pcm8k160)

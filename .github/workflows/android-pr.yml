@@ -75,6 +75,10 @@ jobs:
       - name: Configure local.properties
         run: echo "sdk.dir=$ANDROID_SDK_ROOT" > android-app/local.properties
 
+      - name: JVM unit tests
+        working-directory: android-app
+        run: ./gradlew testDebugUnitTest --no-daemon
+
       - name: Compile Kotlin + native (debug)
         working-directory: android-app
         # `assembleDebug` runs compileDebugKotlin AND triggers the

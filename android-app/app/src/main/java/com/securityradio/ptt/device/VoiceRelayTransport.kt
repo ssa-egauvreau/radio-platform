@@ -1,5 +1,6 @@
 package com.securityradio.ptt.device
 
+import com.securityradio.ptt.support.VoiceTiming
 import com.securityradio.ptt.data.remote.normalizeApiBaseUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -248,7 +249,7 @@ class VoiceRelayTransport(
      */
     private fun dispatchInboundVoice(payload: ByteArray) {
         val now = System.nanoTime()
-        val newSpurt = lastInboundVoiceNs == 0L || now - lastInboundVoiceNs > talkSpurtGapNs
+        val newSpurt = lastInboundVoiceNs == 0L || now - lastInboundVoiceNs > VoiceTiming.TALK_SPURT_GAP_NS
         lastInboundVoiceNs = now
 
         if (payload.size >= 2) {
@@ -312,12 +313,6 @@ class VoiceRelayTransport(
      *  talk-spurt boundary on the RX side so the post-decode chain can
      *  reset its biquad state before the next talker's first frame. */
     private var lastInboundVoiceNs = 0L
-
-    /** Treat a > 300 ms gap between inbound voice frames as a new talk-spurt.
-     *  Matches the relay's claim-air TTL window for the same reason: longer
-     *  than worst-case framing jitter, shorter than the human gap between
-     *  separate transmissions. */
-    private val talkSpurtGapNs = 300_000_000L
 
     /**
      * Run the decoded 8 kHz frame through the agency's post-decode chain
@@ -464,7 +459,7 @@ class VoiceRelayTransport(
         // A gap between mic frames means a fresh key-up — re-learn the noise floor
         // and reset any per-spurt encoder state (Opus prediction, etc.).
         val now = System.nanoTime()
-        if (now - lastConsumeNs > TX_GAP_RESET_NS) {
+        if (now - lastConsumeNs > VoiceTiming.TALK_SPURT_GAP_NS) {
             txConditioner.reset()
             encoder.resetForTalkSpurt()
         }
@@ -609,7 +604,5 @@ class VoiceRelayTransport(
     private companion object {
         private const val TAG = "VoiceRelay"
 
-        /** A pause this long between mic frames marks a new talk-spurt (≈300 ms). */
-        private const val TX_GAP_RESET_NS = 300_000_000L
     }
 }

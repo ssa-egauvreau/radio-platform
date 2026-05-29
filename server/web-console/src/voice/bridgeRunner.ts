@@ -5,6 +5,7 @@
 
 import { getToken } from "../api";
 import { imbeDecode, initImbe } from "./imbeVocoder";
+import { RX_GAP_MS } from "./voiceTiming";
 
 export type BridgeRunState = "idle" | "connecting" | "running" | "error" | "closed";
 
@@ -32,7 +33,6 @@ export interface BridgeRunnerConfig {
 
 const TARGET_RATE = 16000;
 const CAPTURE_WORKLET_URL = "/pcm-capture-worklet.js";
-const RX_GAP_MS = 500;
 const IMBE_MAGIC_0 = 0xf5;
 const IMBE_MAGIC_1 = 0xab;
 

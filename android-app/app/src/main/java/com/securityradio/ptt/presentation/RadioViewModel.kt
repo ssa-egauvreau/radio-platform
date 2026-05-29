@@ -26,6 +26,7 @@ import com.securityradio.ptt.device.BluetoothStatusProbe
 import com.securityradio.ptt.device.ConnectivityMonitor
 import com.securityradio.ptt.device.ExternalMicMonitor
 import com.securityradio.ptt.device.LastRxAudioRecorder
+import com.securityradio.ptt.support.VoiceTiming
 import com.securityradio.ptt.device.RxMessageHistory
 import com.securityradio.ptt.device.RxMessageHistory.Entry as RxHistoryEntry
 import android.app.Application
@@ -341,7 +342,7 @@ class RadioViewModel(
         }
         viewModelScope.launch {
             while (isActive) {
-                delay(PRESENCE_POLL_MS)
+                delay(VoiceTiming.PRESENCE_POLL_MS)
                 pulsePresenceFromCurrentState(clearWhenOffline = true)
                 reconcileVoiceTransport()
             }
@@ -1493,7 +1494,7 @@ class RadioViewModel(
                     }
                     audioCommittedBusy = useBusy
                 }
-                delay(AIR_POLL_MS)
+                delay(VoiceTiming.AIR_POLL_WHILE_PTT_MS)
             }
         }
     }
@@ -1834,7 +1835,7 @@ class RadioViewModel(
      */
     private suspend fun pollChannelCatalog() {
         while (currentCoroutineContext().isActive) {
-            delay(CATALOG_POLL_MS)
+            delay(VoiceTiming.CATALOG_POLL_MS)
             if (_uiState.value.channelsLoading) continue
             val fresh = try {
                 channelRepository.loadCatalog()
@@ -1959,7 +1960,7 @@ class RadioViewModel(
         var since = 0L
         var primed = false
         while (currentCoroutineContext().isActive) {
-            delay(INBOX_POLL_MS)
+            delay(VoiceTiming.INBOX_POLL_MS)
             if (_uiState.value.networkLabel != "ONLINE") continue
             val channel = _uiState.value.channelLabel.trim().takeUnless { it.isEmpty() || it == "----" }
             val response = try {
@@ -2116,7 +2117,13 @@ class RadioViewModel(
                 snapBefore.rxAttributedLine.isNotEmpty() ||
                     snapBefore.activeTalkUnitId.isNotEmpty() ||
                     snapBefore.isPttPressed
-            delay(if (fastPoll) TALK_ACTIVITY_FAST_POLL_MS else TALK_ACTIVITY_POLL_MS)
+            delay(
+                if (fastPoll) {
+                    VoiceTiming.TALK_ACTIVITY_FAST_POLL_MS
+                } else {
+                    VoiceTiming.TALK_ACTIVITY_POLL_MS
+                },
+            )
             if (_uiState.value.networkLabel == "OFFLINE") {
                 if (_uiState.value.rxAttributedLine.isNotEmpty() ||
                     _uiState.value.activeTalkUnitId.isNotEmpty()
@@ -2399,19 +2406,12 @@ class RadioViewModel(
         const val VERSION_BANNER_MS = 5_000L
         /** How long the "MOVED TO" banner survives the immediate re-join "VOICE ON" ack. */
         const val MOVE_BANNER_MS = 6_000L
-        const val AIR_POLL_MS = 250L
         const val AIR_AUDIO_STABLE_POLLS = 1
-        const val TALK_ACTIVITY_POLL_MS = 1200L
-        /** Faster refresh while someone appears on air (clears stale talker sooner). */
-        const val TALK_ACTIVITY_FAST_POLL_MS = 400L
         const val WAKE_DEBOUNCE_MS = 700L
-        const val PRESENCE_POLL_MS = 12_000L
-        const val INBOX_POLL_MS = 2_000L
         const val STATUS_REFRESH_MS = 2_000L
         const val SOUNDS_VERSION_POLL_MS = 60_000L
         /** Foreground OTA poll while the radio screen is visible (matches [AppUpdater.CHECK_INTERVAL_MS]). */
         const val APP_UPDATE_POLL_MS = 30L * 60 * 1000
-        const val CATALOG_POLL_MS = 15_000L
         const val PROFILE_POLL_MS = 15_000L
         const val OFFLINE_BANNER_CYCLE_MS = 2_000L
         const val OFFLINE_TONE_INTERVAL_MS = 15_000L

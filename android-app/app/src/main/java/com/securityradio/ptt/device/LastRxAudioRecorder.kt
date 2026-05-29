@@ -1,5 +1,6 @@
 package com.securityradio.ptt.device
 
+import com.securityradio.ptt.support.VoiceTiming
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -63,7 +64,7 @@ class LastRxAudioRecorder(
         if (chunk.isEmpty()) return
         val now = SystemClock.elapsedRealtime()
         synchronized(lock) {
-            if (lastChunkAtMs > 0L && now - lastChunkAtMs > RX_GAP_MS) {
+            if (lastChunkAtMs > 0L && now - lastChunkAtMs > VoiceTiming.RX_GAP_MS) {
                 finalizeCurrentTransmissionLocked()
                 currentChunks.clear()
                 currentBytes = 0
@@ -220,7 +221,6 @@ class LastRxAudioRecorder(
     }
 
     companion object {
-        const val RX_GAP_MS = 500L
         const val MAX_TRANSMISSION_BYTES = 30 * VoiceAudioSpecs.SAMPLE_RATE_HZ * 2
         const val MIN_TRANSMISSION_BYTES = VoiceAudioSpecs.SAMPLE_RATE_HZ / 5 * 2
         /** Minimum stored bytes for message history (same threshold as last-RX replay). */
