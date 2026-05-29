@@ -10,7 +10,7 @@ struct RadioLiveActivity: Widget {
                 Image(systemName: "antenna.radiowaves.left.and.right")
                     .font(.title3)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(context.attributes.channel)
+                    Text(context.state.channel)
                         .font(.headline)
                     if let callsign = context.state.callsign, !callsign.isEmpty {
                         Text(callsign).font(.caption)
@@ -24,7 +24,7 @@ struct RadioLiveActivity: Widget {
         } dynamicIsland: { context in
             DynamicIsland {
                 DynamicIslandExpandedRegion(.leading) {
-                    Label(context.attributes.channel, systemImage: "antenna.radiowaves.left.and.right")
+                    Label(context.state.channel, systemImage: "antenna.radiowaves.left.and.right")
                         .font(.caption)
                 }
                 DynamicIslandExpandedRegion(.trailing) {

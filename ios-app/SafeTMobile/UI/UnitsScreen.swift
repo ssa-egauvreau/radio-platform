@@ -59,9 +59,17 @@ struct UnitsScreen: View {
             .refreshable { await refresh() }
         } else if filteredUnits.isEmpty {
             ScrollView {
-                Text(units.isEmpty ? "NO UNITS REPORTING" : "NO MATCHES")
-                    .font(.system(size: 12, weight: .semibold)).foregroundColor(.safetTextDim)
-                    .frame(maxWidth: .infinity, minHeight: 300)
+                // Spacers + minHeight keep the empty-state text vertically
+                // centered inside the scroll viewport (the way it was before
+                // `.refreshable` forced the ScrollView wrapper). Without the
+                // Spacers the text glues to the top of the visible area.
+                VStack {
+                    Spacer(minLength: 80)
+                    Text(units.isEmpty ? "NO UNITS REPORTING" : "NO MATCHES")
+                        .font(.system(size: 12, weight: .semibold)).foregroundColor(.safetTextDim)
+                    Spacer(minLength: 80)
+                }
+                .frame(maxWidth: .infinity, minHeight: 400)
             }
             .refreshable { await refresh() }
         } else {

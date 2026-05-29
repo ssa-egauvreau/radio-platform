@@ -29,7 +29,11 @@ private struct RootView: View {
 
     var body: some View {
         if let user = session.currentUser, let token = session.token {
-            RadioScreen(viewModel: RadioViewModel(user: user, token: token))
+            // Pass user/token (not a pre-built view-model) so RadioScreen's
+            // StateObject autoclosure owns the VM lifetime. Constructing the
+            // VM at the call site would build a fresh instance on every
+            // RootView re-render, defeating @StateObject's retention.
+            RadioScreen(user: user, token: token)
                 .id(user.id)
         } else {
             LoginScreen()

@@ -1,13 +1,15 @@
 import Foundation
 import Network
 
-/// Singleton NWPathMonitor wrapper. Callers set `onChange` once and hop to the
-/// main actor themselves — the monitor queue is private to this file.
+/// Singleton NWPathMonitor wrapper. The NWPathMonitor publishes updates on
+/// its own private queue; we hop everything to MainActor before mutating
+/// `isReachable` or firing `onChange` so callers (RadioViewModel) can read
+/// the property + the callback safely without an actor isolation gap.
 final class NetworkPathMonitor {
     static let shared = NetworkPathMonitor()
 
-    private(set) var isReachable: Bool = true
-    var onChange: ((Bool) -> Void)?
+    @MainActor private(set) var isReachable: Bool = true
+    @MainActor var onChange: ((Bool) -> Void)?
 
     private let monitor: NWPathMonitor
     private let queue = DispatchQueue(label: "safet.net")
@@ -15,11 +17,18 @@ final class NetworkPathMonitor {
     init() {
         monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { [weak self] path in
-            guard let self else { return }
             let reachable = (path.status == .satisfied)
-            self.isReachable = reachable
-            self.onChange?(reachable)
+            DispatchQueue.main.async { [weak self] in
+                self?.update(isReachable: reachable)
+            }
         }
         monitor.start(queue: queue)
+    }
+
+    @MainActor
+    private func update(isReachable: Bool) {
+        let changed = self.isReachable != isReachable
+        self.isReachable = isReachable
+        if changed { onChange?(isReachable) }
     }
 }

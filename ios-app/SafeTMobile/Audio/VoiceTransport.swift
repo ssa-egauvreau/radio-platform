@@ -21,6 +21,12 @@ final class VoiceTransport {
     var onError: ((String) -> Void)?
     var onBusy: ((String?) -> Void)?
     var onReceivingChange: ((Bool) -> Void)?
+    /// Fires only when the underlying socket link actually dropped (i.e.
+    /// we're about to schedule a reconnect). UI uses this to enter the
+    /// "Reconnecting" pill state — it must NOT fire on every server-pushed
+    /// `error` frame, since transient errors during normal operation would
+    /// then latch the pill amber forever.
+    var onLinkLost: (() -> Void)?
     /// Admin flipped the channel's transmit codec; the encoder swaps on the
     /// next frame. UI can surface the change via this callback.
     var onCodecChange: ((VoiceCodec) -> Void)?
@@ -353,6 +359,10 @@ final class VoiceTransport {
         reconnectAttempts += 1
         let delaySeconds = VoiceTiming.backoffDelaySeconds(attempt: reconnectAttempts, cap: 16)
         onError?("link lost — reconnecting in \(Int(delaySeconds))s")
+        // Fire onLinkLost only here — this is the one site that knows the
+        // socket actually dropped. Generic `error` frames pushed by the
+        // server during normal operation must not flip the Reconnecting pill.
+        onLinkLost?()
         let nanoseconds = UInt64(delaySeconds * 1_000_000_000)
         reconnectTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: nanoseconds)

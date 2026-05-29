@@ -5,7 +5,7 @@ import UIKit
 /// The safeT Mobile radio shell — status strip, channel display, controls,
 /// emergency, and a press-and-hold PTT bar.
 struct RadioScreen: View {
-    @StateObject var viewModel: RadioViewModel
+    @StateObject private var viewModel: RadioViewModel
     @EnvironmentObject private var session: AuthSession
     @EnvironmentObject private var settings: SettingsStore
     @State private var pttDown = false
@@ -16,6 +16,15 @@ struct RadioScreen: View {
     @State private var showingSettings = false
     @State private var micStatus: AVAudioSession.RecordPermission = Self.initialMicStatus()
 
+    /// Construct the view-model lazily inside the StateObject autoclosure so
+    /// SwiftUI retains the instance across re-renders. Building the view-model
+    /// in the caller (e.g. `RadioScreen(viewModel: RadioViewModel(...))`)
+    /// instantiates a fresh VM every body invocation; the autoclosure form
+    /// only fires once per `.id(user.id)` lifetime.
+    init(user: AuthenticatedUser, token: String) {
+        _viewModel = StateObject(wrappedValue: RadioViewModel(user: user, token: token))
+    }
+
     private static func initialMicStatus() -> AVAudioSession.RecordPermission {
         if ProcessInfo.processInfo.arguments.contains("-uitest-logged-in") { return .granted }
         return AVAudioSession.sharedInstance().recordPermission
@@ -25,7 +34,12 @@ struct RadioScreen: View {
         Group {
             switch micStatus {
             case .denied: micDeniedCard
-            case .undetermined: micUndeterminedCard
+            // .undetermined intentionally renders the radio shell — the
+            // view-model's `requestRecordPermission()` triggers the OS prompt
+            // organically on the first PTT-related call. An in-app "Allow
+            // Microphone" card here used to fire alongside the OS prompt,
+            // double-stacking the dialog on first launch.
+            case .undetermined: radioShell
             case .granted: radioShell
             @unknown default: radioShell
             }
@@ -49,7 +63,12 @@ struct RadioScreen: View {
                 Spacer(minLength: 12)
                 emergencyButton(state)
                 if settings.bigPttButtonEnabled {
-                    EmptyView()
+                    // RESERVE space at the bottom so the bottom-trailing
+                    // BigPttButton overlay (140 pt circle) doesn't cover the
+                    // EMERGENCY button or the channel ▲/▼ row on small
+                    // phones. Without this spacer the overlay floats over
+                    // the controls above it.
+                    Color.clear.frame(height: 160)
                 } else {
                     pttBar(state)
                 }
@@ -122,41 +141,6 @@ struct RadioScreen: View {
                     }
                 } label: {
                     Text("OPEN SETTINGS")
-                        .font(.system(size: 14, weight: .heavy))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 24)
-                        .padding(.vertical, 12)
-                        .background(Color.safetBlue)
-                        .cornerRadius(8)
-                }
-            }
-            .padding(24)
-        }
-    }
-
-    @ViewBuilder
-    private var micUndeterminedCard: some View {
-        ZStack {
-            Color.safetBackground.ignoresSafeArea()
-            VStack(spacing: 16) {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 48, weight: .bold))
-                    .foregroundColor(.safetSignal)
-                Text("ALLOW MICROPHONE")
-                    .font(.system(size: 16, weight: .heavy))
-                    .foregroundColor(.safetText)
-                Text("safeT needs microphone access to transmit on the radio channel.")
-                    .font(.system(size: 13))
-                    .foregroundColor(.safetTextDim)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-                Button {
-                    Task {
-                        _ = await AudioSessionManager.requestRecordPermission()
-                        micStatus = AVAudioSession.sharedInstance().recordPermission
-                    }
-                } label: {
-                    Text("ALLOW MICROPHONE")
                         .font(.system(size: 14, weight: .heavy))
                         .foregroundColor(.white)
                         .padding(.horizontal, 24)
