@@ -26,8 +26,27 @@ final class ImbeTxConditioner {
         agcTarget = 1
     }
 
-    func conditionLe16(frame: inout Data) {
+    func conditionLe16(frame: inout Data, bypassExpanderAgc: Bool = false) {
         guard frame.count >= 2 else { return }
+        if bypassExpanderAgc {
+            frame.withUnsafeMutableBytes { raw in
+                guard let bytes = raw.baseAddress?.assumingMemoryBound(to: UInt8.self) else { return }
+                let sampleCount = raw.count / 2
+                for i in 0..<sampleCount {
+                    let off = i * 2
+                    let lo = UInt16(bytes[off])
+                    let hi = UInt16(bytes[off + 1])
+                    let sample = Double(Int16(bitPattern: lo | (hi << 8)))
+                    let filtered = lpf.process(hpf.process(sample))
+                    let limited = Self.softLimit(filtered)
+                    let out = Int16(clamping: Int(limited.rounded()))
+                    let le = UInt16(bitPattern: out)
+                    bytes[off] = UInt8(le & 0xff)
+                    bytes[off + 1] = UInt8((le >> 8) & 0xff)
+                }
+            }
+            return
+        }
         var speechSq = 0.0
         var speechN = 0
         var peakAbs = 0.0

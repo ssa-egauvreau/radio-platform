@@ -179,6 +179,20 @@ struct RadioScreen: View {
 
     private func displayPanel(_ state: RadioUiState) -> some View {
         VStack(alignment: .leading, spacing: 6) {
+            if state.channelTen33 {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10, weight: .bold))
+                    Text("10-33 EMERGENCY TRAFFIC")
+                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                }
+                .foregroundColor(.safetAmber)
+                .padding(.vertical, 4)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.safetAmber.opacity(0.15))
+                .cornerRadius(6)
+            }
             Text(state.displayLine1.uppercased())
                 .font(.system(size: 11, weight: .bold))
                 .tracking(2)
@@ -226,6 +240,14 @@ struct RadioScreen: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.safetTextDim)
                 .lineLimit(1)
+
+            if !state.rxAttributedLine.isEmpty, !state.channelTen33 {
+                Text(state.rxAttributedLine)
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .foregroundColor(state.rxFromScan ? .safetGreen : .safetSignal)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.7)
+            }
 
             if state.scanActive {
                 scanBanner(state)

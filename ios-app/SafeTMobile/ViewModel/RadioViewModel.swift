@@ -30,6 +30,7 @@ final class RadioViewModel: ObservableObject {
     private var inboxSince = 0
     private var inboxPrimed = false
     private var voiceStarted = false
+    private var pttAirPollTask: Task<Void, Never>?
 
     private let clockFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -73,6 +74,8 @@ final class RadioViewModel: ObservableObject {
         startClock()
         startPresencePolling()
         startInboxPolling()
+        startTalkHintsPolling()
+        startCatalogRefreshPolling()
         Task { await loadCatalog() }
     }
 
@@ -235,12 +238,14 @@ final class RadioViewModel: ObservableObject {
             return
         }
         uiState.statusMessage = "AIR: CHECKING"
+        startPttAirPolling()
         do {
             let air = try await api.airState(channel: currentChannel)
             guard uiState.isPttPressed else { return }
-            let busy = air.occupied && air.transmittingUnitId?.uppercased() != unitId
+            let busy = channelBusyForLocalPtt(air)
             if busy {
-                enterBusy("CHANNEL BUSY")
+                let peer = air.transmittingUnitId?.uppercased() ?? ""
+                enterBusy(peer.isEmpty ? "CHANNEL BUSY" : "CHANNEL BUSY — \(peer)")
                 return
             }
             // Air is clear — play the permit beep, then start capturing. The beep
@@ -271,8 +276,12 @@ final class RadioViewModel: ObservableObject {
     }
 
     private func onPttReleased() {
+        pttAirPollTask?.cancel()
+        pttAirPollTask = nil
         uiState.isPttPressed = false
         uiState.pttBusyTone = false
+        uiState.activeTalkUnitId = ""
+        uiState.activeTalkDisplayName = ""
         // Cut the busy cue immediately when PTT is released. Without this,
         // releasing PTT before the ~2s busy clip finishes leaves audio still
         // playing while the status strip already says "RX IDLE", which masks
@@ -435,10 +444,174 @@ final class RadioViewModel: ObservableObject {
         }
     }
 
+    private func startCatalogRefreshPolling() {
+        Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(VoiceTiming.catalogPollSeconds))
+                guard let self else { return }
+                if self.uiState.networkLabel == "ONLINE" {
+                    await self.loadCatalog()
+                }
+            }
+        }
+    }
+
+    private func startTalkHintsPolling() {
+        Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                let snap = self.uiState
+                let fast =
+                    !snap.rxAttributedLine.isEmpty ||
+                    !snap.activeTalkUnitId.isEmpty ||
+                    snap.isPttPressed
+                let delay = fast
+                    ? VoiceTiming.talkActivityFastPollSeconds
+                    : VoiceTiming.talkActivityPollSeconds
+                try? await Task.sleep(for: .seconds(delay))
+                await self.pollTalkHints()
+            }
+        }
+    }
+
+    private func pollTalkHints() async {
+        guard uiState.networkLabel == "ONLINE" else {
+            if !uiState.rxAttributedLine.isEmpty || !uiState.activeTalkUnitId.isEmpty {
+                uiState.rxAttributedLine = ""
+                uiState.activeTalkUnitId = ""
+                uiState.activeTalkDisplayName = ""
+                uiState.rxFromScan = false
+            }
+            return
+        }
+        let tuned = currentChannel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !tuned.isEmpty, tuned != "----" else { return }
+
+        let scanParam: String? = {
+            guard uiState.scanActive else { return nil }
+            let home = tuned.lowercased()
+            let names = uiState.scanIncludedChannels
+                .filter { $0 != home }
+                .sorted()
+            return names.isEmpty ? nil : names.joined(separator: ",")
+        }()
+
+        let air = try? await api.airState(channel: tuned)
+        let dto = try? await api.talkActivity(home: tuned, scan: scanParam)
+
+        let homeAirLine = rxLineFromLiveVoice(air: air)
+        let mockHome = mockMainAttribution(dto: dto, tuned: tuned)
+        let homeLine = homeAirLine.isEmpty ? mockHome : homeAirLine
+        let scanLine = mockScanAttribution(dto: dto, tuned: tuned)
+        let merged = homeLine.isEmpty ? scanLine : homeLine
+        let mergedFromScan = homeLine.isEmpty && !scanLine.isEmpty
+        let (talkUnit, talkName) = resolveActiveTalkAttribution(air: air)
+
+        if merged != uiState.rxAttributedLine ||
+            mergedFromScan != uiState.rxFromScan ||
+            talkUnit != uiState.activeTalkUnitId ||
+            talkName != uiState.activeTalkDisplayName {
+            uiState.rxAttributedLine = merged
+            uiState.rxFromScan = mergedFromScan
+            uiState.activeTalkUnitId = talkUnit
+            uiState.activeTalkDisplayName = talkName
+        }
+    }
+
+    private func startPttAirPolling() {
+        pttAirPollTask?.cancel()
+        pttAirPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                guard let self else { return }
+                guard self.uiState.isPttPressed else { return }
+                if self.uiState.networkLabel == "ONLINE", let ch = self.currentChannel {
+                    if let air = try? await self.api.airState(channel: ch) {
+                        if self.channelBusyForLocalPtt(air), self.uiState.isPttPressed {
+                            let peer = air.transmittingUnitId?.uppercased() ?? ""
+                            self.enterBusy(peer.isEmpty ? "CHANNEL BUSY" : "CHANNEL BUSY — \(peer)")
+                            self.voiceAudio.stopCapture()
+                            self.voiceTransport.stopUplinkCapture()
+                            self.uiState.isTransmitting = false
+                        }
+                    }
+                }
+                try? await Task.sleep(for: .seconds(VoiceTiming.airPollWhilePttSeconds))
+            }
+        }
+    }
+
+    private func channelBusyForLocalPtt(_ air: AirState) -> Bool {
+        guard air.occupied else { return false }
+        let peer = air.transmittingUnitId?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        return !peer.isEmpty && peer != unitId.uppercased()
+    }
+
+    private func resolveActiveTalkAttribution(air: AirState?) -> (String, String) {
+        if uiState.isEmergencyActive {
+            return (unitId.uppercased(), uiState.operatorDisplayName)
+        }
+        if uiState.isPttPressed && !uiState.pttBusyTone {
+            return (unitId.uppercased(), uiState.operatorDisplayName)
+        }
+        guard let tx = air?.transmittingUnitId?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+              !tx.isEmpty else {
+            return ("", "")
+        }
+        if tx == unitId.uppercased() { return ("", "") }
+        let name = air?.transmittingDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return (tx, name)
+    }
+
+    private func rxLineFromLiveVoice(air: AirState?) -> String {
+        guard let tx = air?.transmittingUnitId?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased(),
+              !tx.isEmpty else { return "" }
+        if tx == unitId.uppercased() { return "" }
+        if uiState.channelTen33 { return "" }
+        let name = air?.transmittingDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let name, !name.isEmpty {
+            return "RX: \(tx) • \(name)"
+        }
+        return "RX: \(tx) • VOICE"
+    }
+
+    private func mockMainAttribution(dto: TalkActivity?, tuned: String) -> String {
+        guard let main = dto?.main, main.active, channelsMatch(main.channel, tuned) else { return "" }
+        if isLocalTalker(unitId: main.unitId) { return "" }
+        return formatTalker(snapshot: main, prefix: "RX")
+    }
+
+    private func mockScanAttribution(dto: TalkActivity?, tuned: String) -> String {
+        guard uiState.scanActive, let scan = dto?.scan, scan.active else { return "" }
+        let scanCh = scan.channel.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !scanCh.isEmpty, !channelsMatch(scanCh, tuned) else { return "" }
+        let included = uiState.scanIncludedChannels.contains(scanCh.lowercased())
+        guard included, !isLocalTalker(unitId: scan.unitId) else { return "" }
+        return formatTalker(snapshot: scan, prefix: "RX")
+    }
+
+    private func formatTalker(snapshot: TalkerSnapshot, prefix: String) -> String {
+        let uid = snapshot.unitId?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? "---"
+        let un = snapshot.username?.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let un, !un.isEmpty {
+            return "\(prefix): \(uid) • \(un)"
+        }
+        return "\(prefix): \(uid)"
+    }
+
+    private func isLocalTalker(unitId raw: String?) -> Bool {
+        let talker = raw?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
+        return !talker.isEmpty && talker == unitId.uppercased()
+    }
+
+    private func channelsMatch(_ a: String, _ b: String) -> Bool {
+        a.trimmingCharacters(in: .whitespacesAndNewlines)
+            .caseInsensitiveCompare(b.trimmingCharacters(in: .whitespacesAndNewlines)) == .orderedSame
+    }
+
     private func startPresencePolling() {
         Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(12))
+                try? await Task.sleep(for: .seconds(VoiceTiming.presencePollSeconds))
                 guard let self else { return }
                 await self.pulsePresence()
             }
@@ -462,7 +635,7 @@ final class RadioViewModel: ObservableObject {
     private func startInboxPolling() {
         Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(5))
+                try? await Task.sleep(for: .seconds(VoiceTiming.inboxPollSeconds))
                 guard let self else { return }
                 await self.pollInbox()
             }
@@ -480,6 +653,19 @@ final class RadioViewModel: ObservableObject {
             }
             inboxSince = max(response.lastId, inboxSince)
             inboxPrimed = true
+            let ten33Active = currentChannel.map { ch in
+                response.ten33.contains { channelsMatch($0, ch) }
+            } ?? false
+            if ten33Active != uiState.channelTen33 {
+                let was = uiState.channelTen33
+                uiState.channelTen33 = ten33Active
+                if was && !ten33Active {
+                    uiState.rxAttributedLine = ""
+                    uiState.activeTalkUnitId = ""
+                    uiState.activeTalkDisplayName = ""
+                    uiState.rxFromScan = false
+                }
+            }
         } catch {
             // Keep the last cursor; try again on the next tick.
         }

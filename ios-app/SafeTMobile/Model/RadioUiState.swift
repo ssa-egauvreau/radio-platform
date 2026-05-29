@@ -42,4 +42,11 @@ struct RadioUiState {
     /// Last channel name that produced scan-channel RX traffic — shown as a
     /// transient banner in the display panel.
     var scanRxChannel: String?
+    /// Live RX attribution line (e.g. "RX: UNIT • Name") from `/v1/air` + talk-activity.
+    var rxAttributedLine = ""
+    var rxFromScan = false
+    var activeTalkUnitId = ""
+    var activeTalkDisplayName = ""
+    /// Dispatcher 10-33 emergency-traffic marker on the tuned channel.
+    var channelTen33 = false
 }

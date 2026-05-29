@@ -57,10 +57,8 @@ final class VoiceTransport {
     // file in practice.
     var activeCaptureSessionId: UInt64?
 
-    /// Registry of every voice codec this client can encode + decode. IMBE
-    /// is always present (wraps the existing P25ImbeNative); Codec2 + Opus
-    /// are present as registry slots but report isReady = false until their
-    /// native libs land.
+    /// Registry of every voice codec this client can encode + decode (IMBE,
+    /// Codec2, Opus — same wire format as Android and the web console).
     private let codecRegistry: VoiceCodecRegistry = {
         let registry = VoiceCodecRegistry()
         registry.registerEncoder(ImbeEncoder())
@@ -92,7 +90,9 @@ final class VoiceTransport {
     private var lastInboundVoiceAt: TimeInterval = 0
     /// Treat > 300 ms gap between inbound voice frames as a new talk-spurt.
     /// Matches the Android `scanTalkSpurtGapNs` for the same reason.
-    private let talkSpurtGapSeconds: TimeInterval = 0.3
+    private let talkSpurtGapSeconds: TimeInterval = VoiceTiming.talkSpurtGapSeconds
+    /// Agency flag: minimal TX chain (HPF/LPF only), matching bridge / web bypass.
+    private var bypassMicProcessing = false
 
     init(baseURL: URL, token: String, unitId: String, audio: VoiceAudio, session: URLSession = .shared) {
         self.baseURL = baseURL
@@ -131,7 +131,17 @@ final class VoiceTransport {
 
     func stopUplinkCapture() {
         activeCaptureSessionId = nil
+        codecRegistry.txEncoder(for: currentTxCodec)?.resetForTalkSpurt()
+        releaseTransmitHold()
         resetUplinkState()
+    }
+
+    /// PTT released — clear `/v1/air` immediately for peers (Android/web parity).
+    func releaseTransmitHold() {
+        pcmAcc.removeAll(keepingCapacity: true)
+        guard let task else { return }
+        let payload = "{\"type\":\"release_air\"}"
+        task.send(.string(payload)) { _ in }
     }
 
     func resetUplinkState() {
@@ -186,7 +196,7 @@ final class VoiceTransport {
             pcmFrameScratch = pcmAcc.prefix(frameBytes)
             pcmAcc.removeFirst(frameBytes)
 
-            txConditioner.conditionLe16(frame: &pcmFrameScratch)
+            txConditioner.conditionLe16(frame: &pcmFrameScratch, bypassExpanderAgc: bypassMicProcessing)
             guard let packet = encoder.encodeFrame(pcmFrameScratch) else { continue }
             task.send(.data(packet)) { _ in }
         }
@@ -244,10 +254,7 @@ final class VoiceTransport {
             }
             await MainActor.run {
                 self.postDecodeProcessor = next
-                // Reset the talk-spurt timestamp so the next inbound frame
-                // is treated as a new spurt boundary — the new processor's
-                // biquad state starts from rest, but we also want to log
-                // that boundary cleanly in case logging is added later.
+                self.bypassMicProcessing = response.config?.bypassMicProcessing ?? false
                 self.lastInboundVoiceAt = 0
             }
         } catch {
@@ -446,7 +453,7 @@ final class VoiceTransport {
         let timer = Timer(timeInterval: 0.25, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                if Date().timeIntervalSince(self.lastReceivedAt) > 0.3 {
+                if Date().timeIntervalSince(self.lastReceivedAt) > VoiceTiming.talkSpurtGapSeconds {
                     self.onReceivingChange?(false)
                 }
             }

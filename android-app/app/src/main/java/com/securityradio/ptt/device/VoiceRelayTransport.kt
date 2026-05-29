@@ -49,8 +49,7 @@ fun httpApiBaseUrlToVoiceWebSocketUrl(httpBaseUrl: String): String {
  *   `codec_change` roll-out) without any client-side signaling.
  *
  * Codec libs: IMBE via bundled dvmvocoder (GPL — see cpp/dvmvocoder).
- * Codec2 and Opus slots live in the registry but are not wired up yet — see
- * Codec2VoiceCodec.kt / OpusVoiceCodec.kt for the integration plan.
+ * Codec2 and Opus are registered in [VoiceCodecRegistry] when native libs load.
  */
 sealed interface VoiceControlEvent {
     data class Joined(

@@ -37,8 +37,7 @@ export interface VoiceCallbacks {
   onMove?: (toChannel: string, by: string | null) => void;
   /** Fired when the admin flips the channel's transmit codec, so the UI can
    *  surface "Channel switched to Opus" or similar. The web client itself
-   *  only encodes IMBE today, so a switch to Codec2/Opus is purely
-   *  informational and the registry's fallback keeps IMBE on TX. */
+   *  informational when the admin picks a codec this browser cannot encode yet. */
   onCodecChange?: (codec: VoiceCodec) => void;
 }
 
@@ -101,7 +100,8 @@ const JOIN_ERRORS: Record<string, string> = {
 };
 
 /** No inbound audio for this long means the channel is clear again. */
-const RX_GAP_MS = 500;
+/** Idle RX — align with mobile talk-spurt gap (see docs/voice-timing.md). */
+const RX_GAP_MS = 300;
 
 /** Voice-fallback detector: at least this many raw PCM frames clustered within
  *  CLEAR_RX_BURST_WINDOW_MS is treated as a sustained talk-spurt (not a marker/tone-out). */

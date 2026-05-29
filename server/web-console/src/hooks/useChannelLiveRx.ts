@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { api, type Transmission } from "../api";
 
 const AIR_POLL_MS = 1200;
+const AIR_POLL_FAST_MS = 400;
 const TX_POLL_MS = 2000;
 
 export type LiveTalker = {
@@ -112,7 +113,9 @@ export function useChannelLiveRx({
     }
 
     void pollAir();
-    const id = window.setInterval(() => void pollAir(), AIR_POLL_MS);
+    const pollMs =
+      homeReceiving || scanRxChannel ? AIR_POLL_FAST_MS : AIR_POLL_MS;
+    const id = window.setInterval(() => void pollAir(), pollMs);
     return () => {
       cancelled = true;
       window.clearInterval(id);

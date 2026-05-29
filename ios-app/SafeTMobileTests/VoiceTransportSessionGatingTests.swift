@@ -97,6 +97,13 @@ final class VoiceTransportSessionGatingTests: XCTestCase {
 
     // MARK: - UInt64 boundary behaviour matches VoiceAudio's id generator
 
+    func test_stopUplinkCapture_sendsReleaseAirWithoutCrashingWhenSocketClosed() {
+        let transport = makeTransport()
+        transport.startUplinkCapture(sessionId: 1)
+        transport.stopUplinkCapture()
+        XCTAssertNil(transport.activeCaptureSessionId)
+    }
+
     func test_activeCaptureSessionId_acceptsUInt64Max() {
         // VoiceAudio increments `captureSessionId &+= 1` (wrapping). The
         // gate stores the raw UInt64 — verify the maximum boundary round

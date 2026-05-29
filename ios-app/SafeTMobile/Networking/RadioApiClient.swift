@@ -10,6 +10,19 @@ struct ChannelDTO: Decodable, Identifiable {
 struct AirState: Decodable {
     let occupied: Bool
     let transmittingUnitId: String?
+    let transmittingDisplayName: String?
+}
+
+struct TalkerSnapshot: Decodable {
+    let channel: String
+    let active: Bool
+    let unitId: String?
+    let username: String?
+}
+
+struct TalkActivity: Decodable {
+    let main: TalkerSnapshot?
+    let scan: TalkerSnapshot?
 }
 
 struct InboxAlert: Decodable {
@@ -25,6 +38,19 @@ struct InboxAlert: Decodable {
 struct InboxResponse: Decodable {
     let alerts: [InboxAlert]
     let lastId: Int
+    /// Channel names with 10-33 (emergency traffic) active — from inbox poll.
+    let ten33: [String]
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        alerts = try c.decode([InboxAlert].self, forKey: .alerts)
+        lastId = try c.decode(Int.self, forKey: .lastId)
+        ten33 = try c.decodeIfPresent([String].self, forKey: .ten33) ?? []
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case alerts, lastId, ten33
+    }
 }
 
 /// One row from `GET /v1/transmissions`. Maps the server `TransmissionRow`.
@@ -121,9 +147,7 @@ struct AudioConfigSummaryResponse: Decodable {
 /// Device-friendly summary of the agency-wide audio config. Mirrors the
 /// server-side `DeviceAudioConfig` (`server/src/audioConfig.ts`) and the
 /// Android `AudioConfigDto`. iOS currently consumes only the `postDecode`
-/// block (PR-postdecode-ios-rx); the AGC / gain / bypassMicProcessing fields
-/// are surfaced so a future PR mirroring PR-129's Android scope can wire the
-/// TX side without changing this struct.
+/// RX uses `postDecode`; TX uses `bypassMicProcessing` via `VoiceTransport`.
 struct AudioConfigSummary: Decodable {
     let agcEnabled: Bool?
     let noiseSuppression: Bool?
@@ -225,6 +249,18 @@ final class RadioApiClient {
     func airState(channel: String?) async throws -> AirState {
         let query = channel.map { [URLQueryItem(name: "channel", value: $0)] } ?? []
         return try await get("v1/air", query: query, as: AirState.self)
+    }
+
+    /// Live talker hints for home + optional scan channels (same as Android `/v1/talk-activity`).
+    func talkActivity(home: String?, scan: String?) async throws -> TalkActivity {
+        var query: [URLQueryItem] = []
+        if let home, !home.isEmpty {
+            query.append(URLQueryItem(name: "home", value: home))
+        }
+        if let scan, !scan.isEmpty {
+            query.append(URLQueryItem(name: "scan", value: scan))
+        }
+        return try await get("v1/talk-activity", query: query, as: TalkActivity.self)
     }
 
     func presenceHeartbeat(unitId: String, channel: String) async throws {

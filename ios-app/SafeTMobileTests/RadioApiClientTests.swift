@@ -73,7 +73,7 @@ final class RadioApiClientTests: XCTestCase {
 
     func test_airState_includesChannelQuery_andDecodesSnakeCase() async throws {
         StubURLProtocol.handler = { _ in
-            let json = #"{ "occupied": true, "transmitting_unit_id": "A1B2C3" }"#
+            let json = #"{ "occupied": true, "transmitting_unit_id": "A1B2C3", "transmitting_display_name": "Patrol 1" }"#
             return .init(body: Data(json.utf8))
         }
 
@@ -81,6 +81,7 @@ final class RadioApiClientTests: XCTestCase {
 
         XCTAssertTrue(air.occupied)
         XCTAssertEqual(air.transmittingUnitId, "A1B2C3")
+        XCTAssertEqual(air.transmittingDisplayName, "Patrol 1")
 
         let request = try XCTUnwrap(StubURLProtocol.observedRequests.first)
         let comps = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)
