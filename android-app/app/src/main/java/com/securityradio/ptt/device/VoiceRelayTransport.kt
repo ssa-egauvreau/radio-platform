@@ -81,10 +81,15 @@ class VoiceRelayTransport(
     /** Read on every inbound 8 kHz vocoded frame (IMBE, Codec2). When non-null,
      *  the decoded PCM runs through the shared post-decode chain (presence
      *  bell / soft saturation / shelves / polyphase upsample) before reaching
-     *  the player. Null = legacy duplicate-upsample fast path. 16 kHz codecs
-     *  (Opus) bypass this chain because its polyphase upsample and presence
-     *  shaping are tuned for vocoded 8 kHz input. */
+     *  the player. Null = legacy duplicate-upsample fast path. 16 kHz Opus runs
+     *  through the same processor's wideband entry point (no upsample) when the
+     *  agency enabled `wideband`; otherwise Opus plays unshaped. */
     private val postDecodeProcessorProvider: () -> PostDecodeChain.Processor? = { null },
+    /** Read on `air_released` (cue synthesis) and on every inbound Opus frame
+     *  (wideband routing decision). Null when no shaping/cue is configured.
+     *  Held separately from the processor because the cue path needs the config
+     *  even when there is no DSP processor (e.g. a roger-beep-only config). */
+    private val postDecodeConfigProvider: () -> PostDecodeChain.Config? = { null },
 ) : StreamingPcmSink {
 
     private val _controlEvents = MutableSharedFlow<VoiceControlEvent>(extraBufferCapacity = 16)
@@ -233,9 +238,28 @@ class VoiceRelayTransport(
                         _controlEvents.tryEmit(VoiceControlEvent.Moved(channel = channel, by = by))
                     }
                 }
+                "air_released" -> {
+                    // Another unit on this channel just unkeyed. Synthesize the
+                    // close-side end-of-TX cue (roger beep / squelch tail)
+                    // locally and inject it into playout. No-op unless the
+                    // agency enabled at least one of the cue flags.
+                    playEndOfTxCue()
+                }
             }
         } catch (e: Exception) {
             Log.w(TAG, "Unparsed voice control frame: ${e.message}")
+        }
+    }
+
+    /** Build + play the close-side end-of-TX cue when the relay reports another
+     *  unit unkeyed. Pinned + identical to the web/iOS cue. No-op unless the
+     *  agency enabled the roger beep and/or squelch tail. */
+    private fun playEndOfTxCue() {
+        val cfg = postDecodeConfigProvider() ?: return
+        if (!cfg.rogerBeepEnabled && !cfg.squelchTailEnabled) return
+        val cue = PostDecodeChain.endOfTxCue(cfg)
+        if (cue.isNotEmpty()) {
+            inbound.writePcmFromMain(cue)
         }
     }
 
@@ -256,9 +280,12 @@ class VoiceRelayTransport(
             if (decoder != null) {
                 if (newSpurt) {
                     decoder.resetForTalkSpurt()
-                    if (decoder.nativeSampleRate == 8000) {
-                        postDecodeProcessorProvider()?.reset()
-                    }
+                    // Reset the post-decode chain on every talk-spurt boundary,
+                    // regardless of codec: the 8 kHz path and the Opus wideband
+                    // path share the same biquad / compressor state on mobile,
+                    // so a previous talker's filter ring must not bleed into the
+                    // next talker's first frame on either path.
+                    postDecodeProcessorProvider()?.reset()
                 }
                 if (decoder.codec == VoiceCodec.IMBE && !ensureImbeNativeLoadedForRx()) {
                     // Lazy-load the JNI lib on first IMBE frame so peers stay audible
@@ -290,15 +317,31 @@ class VoiceRelayTransport(
      * Brings a decoder's native-rate output to the playback rate (16 kHz mono
      * PCM-16 LE). 8 kHz output (IMBE, Codec2) runs through the existing
      * post-decode chain or duplicate-upsample fast path; 16 kHz output (Opus)
-     * is shipped to the player unchanged since the chain's polyphase upsample
-     * and presence-bell shaping are tuned for vocoded 8 kHz input.
+     * runs through the same chain's wideband entry point (no upsample) when the
+     * agency enabled `wideband`, otherwise plays unshaped.
      */
     private fun renderDecoded(samples: ShortArray, nativeRate: Int): ByteArray {
         return when (nativeRate) {
             8000 -> applyPostDecodeOrDup(samples)
-            16000 -> shortLeMonoBytes(samples)
+            16000 -> applyWidebandOrPassthrough(samples)
             else -> shortLeMonoBytes(samples)
         }
+    }
+
+    /**
+     * Opus (16 kHz) RX shaping: when the agency enabled `wideband` AND a
+     * processor exists, run the decoded frame through the same
+     * biquad → compressor → saturation tail as the 8 kHz path but skipping the
+     * upsample (the input is already 16 kHz). Otherwise play unshaped — today's
+     * behaviour. Frame length is arbitrary (Opus frames are not 160 samples);
+     * the wideband loop is length-agnostic.
+     */
+    private fun applyWidebandOrPassthrough(samples: ShortArray): ByteArray {
+        val processor = postDecodeProcessorProvider()
+        if (processor != null && postDecodeConfigProvider()?.wideband == true) {
+            return processor.processWideband(samples)
+        }
+        return shortLeMonoBytes(samples)
     }
 
     private fun shortLeMonoBytes(samples: ShortArray): ByteArray {
