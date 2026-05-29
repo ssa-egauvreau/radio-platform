@@ -141,32 +141,32 @@ targets:
         SWIFT_OBJC_BRIDGING_HEADER: SafeTMobile/SafeTMobile-Bridging-Header.h
         CLANG_CXX_LANGUAGE_STANDARD: "c++17"
         HEADER_SEARCH_PATHS:
-          # ORDER MATTERS: codec2's `defines.h` must be found before
-          # dvmvocoder's. The generated codebook *.c files in
-          # codec2_generated/ do `#include "defines.h"` with no local
-          # defines.h alongside them, so the search falls through to
-          # HEADER_SEARCH_PATHS. dvmvocoder's defines.h is a C++ header
-          # (#includes <cstdint>); pointing a C compile at it produces
-          # "'cstdint' file not found" because cstdint is C++-only.
-          - $(SRCROOT)/../android-app/app/src/main/cpp/codec2/src
-          # codec2_generated holds the vendored codebook arrays AND the
-          # static `codec2/version.h` — codec2.h includes it as
-          # <codec2/version.h>, so this directory has to be on the angle-
-          # bracket search path.
-          - $(SRCROOT)/../android-app/app/src/main/cpp/codec2_generated
-          - $(SRCROOT)/../android-app/app/src/main/cpp/dvmvocoder/vocoder
-          - $(SRCROOT)/../android-app/app/src/main/cpp/dvmvocoder/vocoder/imbe
-          # libopus headers — must come before the silk subdirs because
-          # several SILK .c files do `#include "opus_types.h"` with no
-          # path qualifier and the resolution falls through to
-          # HEADER_SEARCH_PATHS. opus/include holds the public API
-          # (opus.h, opus_defines.h, opus_types.h); celt/, silk/ and
-          # silk/float/ hold the internal headers each subsystem's .c
-          # files include directly.
+          # ORDER MATTERS, three-way:
+          # 1. libopus headers FIRST. Codec2 ships its own kiss_fft.h at
+          #    codec2/src/kiss_fft.h and so does libopus at opus/celt/kiss_fft.h.
+          #    libopus's analysis.c (in opus/src/, NOT on any -I) does
+          #    `#include "kiss_fft.h"` and falls through to HEADER_SEARCH_PATHS;
+          #    if codec2/src wins, the wrong kiss_fft_state / kiss_twiddle_scalar
+          #    defs land and analysis.c fails to compile. Codec2's own .c files
+          #    keep finding codec2's kiss_fft.h because the same-directory rule
+          #    for "" includes resolves from codec2/src/ first.
+          # 2. codec2/src must come BEFORE dvmvocoder, because the generated
+          #    codebook *.c files in codec2_generated/ do `#include "defines.h"`
+          #    with no local defines.h alongside them — falls through to
+          #    HEADER_SEARCH_PATHS. dvmvocoder's defines.h is a C++ header
+          #    (#includes <cstdint>); a C compile pointed at it produces
+          #    "'cstdint' file not found".
+          # 3. codec2_generated holds the vendored codebook arrays AND a static
+          #    `codec2/version.h` that codec2.h includes as <codec2/version.h>,
+          #    so this directory has to be on the angle-bracket search path.
           - $(SRCROOT)/../android-app/app/src/main/cpp/opus/include
           - $(SRCROOT)/../android-app/app/src/main/cpp/opus/celt
           - $(SRCROOT)/../android-app/app/src/main/cpp/opus/silk
           - $(SRCROOT)/../android-app/app/src/main/cpp/opus/silk/float
+          - $(SRCROOT)/../android-app/app/src/main/cpp/codec2/src
+          - $(SRCROOT)/../android-app/app/src/main/cpp/codec2_generated
+          - $(SRCROOT)/../android-app/app/src/main/cpp/dvmvocoder/vocoder
+          - $(SRCROOT)/../android-app/app/src/main/cpp/dvmvocoder/vocoder/imbe
         OTHER_LDFLAGS: "-lc++"
     info:
       path: SafeTMobile/Info.plist
