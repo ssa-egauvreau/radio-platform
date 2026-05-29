@@ -178,14 +178,17 @@ struct SettingsScreen: View {
 
     private func row(_ label: String, _ value: String) -> some View {
         HStack {
-            Text(label).foregroundColor(.safetTextDim)
+            Text(label)
+                .font(.body)
+                .foregroundColor(.safetTextDim)
             Spacer()
             Text(value)
-                .font(.system(size: 13, design: .monospaced))
+                .font(.system(.footnote, design: .monospaced))
                 .foregroundColor(.safetText)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
+        .accessibilityElement(children: .combine)
     }
 
     private var tunedChannel: String? {

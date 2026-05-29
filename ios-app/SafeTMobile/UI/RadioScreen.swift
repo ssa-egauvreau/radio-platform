@@ -346,7 +346,7 @@ struct RadioScreen: View {
                 .foregroundColor(.safetSignal)
 
             Text(state.channelLabel)
-                .font(.system(size: 34, weight: .heavy, design: .rounded))
+                .font(.system(.largeTitle, design: .rounded).weight(.heavy))
                 .foregroundColor(.safetText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
@@ -459,9 +459,13 @@ struct RadioScreen: View {
             controlButton(title: "CH \u{25BC}", enabled: !state.channelsLoading) {
                 viewModel.handle(.channelDown)
             }
+            .accessibilityLabel("Channel down")
+            .accessibilityValue("Currently \(state.channelLabel)")
             controlButton(title: "CH \u{25B2}", enabled: !state.channelsLoading) {
                 viewModel.handle(.channelUp)
             }
+            .accessibilityLabel("Channel up")
+            .accessibilityValue("Currently \(state.channelLabel)")
         }
     }
 
@@ -528,6 +532,10 @@ struct RadioScreen: View {
                     viewModel.handle(.pttReleased)
                 }
         )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Push to talk")
+        .accessibilityHint("Hold to transmit on channel \(state.channelLabel)")
+        .accessibilityValue(state.isTransmitting ? "Transmitting" : "Idle")
     }
 
     /// While transmitting, render "XMIT" with the lightning-bolt SF Symbol so
