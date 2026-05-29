@@ -105,9 +105,18 @@ final class VoiceLinkTelemetryReporter {
 
     func stop() {
         lock.lock()
-        timer?.invalidate()
+        let t = timer
         timer = nil
         lock.unlock()
+        // Timer.invalidate must run on the run loop the timer was added to;
+        // we hop to main to match the add path above, otherwise the call
+        // becomes a no-op and the timer fires once more before the loop
+        // notices it's invalid.
+        if let t {
+            DispatchQueue.main.async {
+                t.invalidate()
+            }
+        }
     }
 
     // MARK: - counter recording

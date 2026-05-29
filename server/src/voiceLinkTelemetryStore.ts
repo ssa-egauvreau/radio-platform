@@ -132,6 +132,14 @@ export async function insertVoiceLinkTelemetry(
  * `[now - sinceMs, now]`, optionally filtered to one channel. Counters sum
  * across the window; `codec_mix` merges every per-window codec breakdown so
  * the dashboard sees the per-codec health for that unit over the range.
+ *
+ * Implementation note: row-level counters (frames_received, etc.) and the
+ * codec-level breakdown are aggregated as two SEPARATE queries on the same
+ * filter, then joined per unit in JS. A single query that LATERAL-joins
+ * `jsonb_each` produces one row per (telemetry_row × codec) and would
+ * double-count the row-level counters whenever a window has more than one
+ * codec key in its breakdown. Splitting keeps the row-level counters honest
+ * without giving up the per-codec breakdown.
  */
 export async function listVoiceLinkUnitSummaries(
   agencyId: number,
@@ -144,7 +152,8 @@ export async function listVoiceLinkUnitSummaries(
     params.push(channel.trim());
     channelClause = ` AND channel = $${params.length}`;
   }
-  const rows = await requirePool().query<{
+  const pool = requirePool();
+  const rowsRes = await pool.query<{
     unit_id: string;
     last_seen: Date | string;
     reports: string;
@@ -158,7 +167,6 @@ export async function listVoiceLinkUnitSummaries(
     talk_spurts_ended: string;
     bytes_received: string;
     wall_ms_observation: string;
-    codec_mix: unknown;
     channels: string[];
     client_types: string[];
   }>(
@@ -175,54 +183,45 @@ export async function listVoiceLinkUnitSummaries(
             COALESCE(SUM(talk_spurts_ended),0)::text AS talk_spurts_ended,
             COALESCE(SUM(bytes_received),0)::text AS bytes_received,
             COALESCE(SUM(wall_ms_observation),0)::text AS wall_ms_observation,
-            -- Per-codec breakdown: merge each row's JSONB and sum the
-            -- framesReceived / framesDecoded fields per codec key. The
-            -- per-row blob is small (typically 1-2 codecs) so this stays
-            -- O(rows × codecs) which is well under any practical fleet size.
-            jsonb_object_agg(
-              codec_key,
-              jsonb_build_object(
-                'framesReceived', codec_rx,
-                'framesDecoded', codec_dec
-              )
-            ) FILTER (WHERE codec_key IS NOT NULL) AS codec_mix,
             COALESCE(ARRAY_AGG(DISTINCT channel) FILTER (WHERE channel IS NOT NULL), ARRAY[]::text[]) AS channels,
             COALESCE(ARRAY_AGG(DISTINCT client_type) FILTER (WHERE client_type IS NOT NULL), ARRAY[]::text[]) AS client_types
-       FROM (
-         SELECT t.id,
-                t.unit_id,
-                t.server_ts,
-                t.channel,
-                t.client_type,
-                t.frames_received,
-                t.frames_decoded,
-                t.decode_failures,
-                t.plc_frames_synthesized,
-                t.buffer_underruns,
-                t.max_buffer_depth_frames,
-                t.talk_spurts_started,
-                t.talk_spurts_ended,
-                t.bytes_received,
-                t.wall_ms_observation,
-                kv.key AS codec_key,
-                SUM(COALESCE((kv.value ->> 'framesReceived')::int, 0)) AS codec_rx,
-                SUM(COALESCE((kv.value ->> 'framesDecoded')::int, 0)) AS codec_dec
-           FROM voice_link_telemetry t
-                LEFT JOIN LATERAL jsonb_each(COALESCE(t.codec_breakdown,'{}'::jsonb)) kv
-                          ON jsonb_typeof(t.codec_breakdown) = 'object'
-          WHERE t.agency_id = $1
-            AND t.server_ts >= $2${channelClause}
-          GROUP BY t.id, t.unit_id, t.server_ts, t.channel, t.client_type,
-                   t.frames_received, t.frames_decoded, t.decode_failures,
-                   t.plc_frames_synthesized, t.buffer_underruns,
-                   t.max_buffer_depth_frames, t.talk_spurts_started,
-                   t.talk_spurts_ended, t.bytes_received, t.wall_ms_observation,
-                   kv.key
-       ) flat
+       FROM voice_link_telemetry
+      WHERE agency_id = $1 AND server_ts >= $2${channelClause}
       GROUP BY unit_id
-      ORDER BY last_seen DESC NULLS LAST;`,
+      ORDER BY MAX(server_ts) DESC NULLS LAST;`,
     params,
   );
+
+  // Second pass: per-codec breakdown. One row per (unit, codec) which we
+  // index into the units below. Same WHERE filter as the row aggregate so
+  // the two stay in lockstep.
+  const codecRes = await pool.query<{
+    unit_id: string;
+    codec_key: string;
+    codec_rx: string;
+    codec_dec: string;
+  }>(
+    `SELECT t.unit_id,
+            kv.key AS codec_key,
+            COALESCE(SUM((kv.value ->> 'framesReceived')::int), 0)::text AS codec_rx,
+            COALESCE(SUM((kv.value ->> 'framesDecoded')::int), 0)::text AS codec_dec
+       FROM voice_link_telemetry t,
+            LATERAL jsonb_each(COALESCE(t.codec_breakdown,'{}'::jsonb)) kv
+      WHERE t.agency_id = $1 AND t.server_ts >= $2${channelClause}
+        AND jsonb_typeof(t.codec_breakdown) = 'object'
+      GROUP BY t.unit_id, kv.key;`,
+    params,
+  );
+  const codecByUnit = new Map<string, CodecBreakdown>();
+  for (const c of codecRes.rows) {
+    const map = codecByUnit.get(c.unit_id) ?? {};
+    map[c.codec_key] = {
+      framesReceived: Number(c.codec_rx),
+      framesDecoded: Number(c.codec_dec),
+    };
+    codecByUnit.set(c.unit_id, map);
+  }
+  const rows = rowsRes;
 
   return rows.rows.map((r) => ({
     unit_id: r.unit_id,
@@ -238,7 +237,7 @@ export async function listVoiceLinkUnitSummaries(
     talk_spurts_ended: Number(r.talk_spurts_ended),
     bytes_received: Number(r.bytes_received),
     wall_ms_observation: Number(r.wall_ms_observation),
-    codec_mix: coerceCodecMix(r.codec_mix),
+    codec_mix: codecByUnit.get(r.unit_id) ?? {},
     channels: Array.isArray(r.channels) ? r.channels : [],
     client_types: Array.isArray(r.client_types) ? r.client_types : [],
   }));

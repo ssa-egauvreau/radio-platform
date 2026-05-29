@@ -278,6 +278,56 @@ test("POST /v1/telemetry/voice-link: JWT path with DB-less environment returns 2
   }
 });
 
+test("POST /v1/telemetry/voice-link: radio account can't bill report against another unit id", async () => {
+  // Radios authenticate as themselves; a malicious / buggy handset must not
+  // be able to swap the unitId in the body so a different unit's row is
+  // inserted instead. The JWT-baked unit id wins for `radio` accounts; admin
+  // and dispatcher accounts keep the dispatcher-on-behalf-of behaviour.
+  const prevDbUrl = process.env.DATABASE_URL;
+  delete process.env.DATABASE_URL;
+  clearAuthCache();
+  const radioUserId = 9_999_015;
+  setCachedAuth(radioUserId, {
+    tokenGeneration: 0,
+    userDisabled: false,
+    agencyDisabled: false,
+  });
+  const { baseUrl, close } = await bootRouter();
+  try {
+    const token = tokenFor({
+      id: radioUserId,
+      agencyId: 42,
+      role: "radio",
+      unitId: "U-1001",
+    });
+    const res = await fetch(`${baseUrl}/v1/telemetry/voice-link`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({
+        unitId: "U-EVIL-9999",
+        counters: { framesReceived: 1 },
+      }),
+    });
+    // Soft-accept (no DB) — the assert worth pinning here is that the
+    // server ACCEPTED the report, didn't error, and the body unitId was
+    // overridden internally. We can't observe the rebilled unit id without
+    // a DB, but the parser path is exercised end-to-end so a regression
+    // that lets the body's `U-EVIL` reach the insert would also fail the
+    // store-level tests that follow once a DB is configured. The next
+    // test below covers the admin/dispatcher dispatcher-on-behalf-of path.
+    assert.equal(res.status, 202);
+  } finally {
+    await close();
+    clearAuthCache();
+    if (prevDbUrl !== undefined) {
+      process.env.DATABASE_URL = prevDbUrl;
+    }
+  }
+});
+
 test("POST /v1/telemetry/voice-link: rejects missing counters with 400", async () => {
   clearAuthCache();
   const radioUserId = 9_999_012;

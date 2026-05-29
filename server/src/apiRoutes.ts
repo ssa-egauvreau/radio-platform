@@ -2334,10 +2334,18 @@ export function createApiRouter(): Router {
       let unitId: string | null = null;
       if (req.authUser?.agencyId != null) {
         agencyId = req.authUser.agencyId;
-        // Prefer the body's unit id (a dispatch console may report on behalf
-        // of multiple radios), falling back to the auth user's unit id.
-        const bodyUnit = typeof body.unitId === "string" ? body.unitId.trim() : "";
-        unitId = bodyUnit || req.authUser.unitId || null;
+        // For `radio` accounts, lock the report to the unit id baked into
+        // the JWT — a radio must never be able to bill a report against
+        // another unit id. Admins and dispatchers can report on behalf of
+        // any unit in their agency (a dispatch console is multi-unit on
+        // purpose), so they pick the unit from the body and fall back to
+        // their own JWT unitId.
+        if (req.authUser.role === "radio") {
+          unitId = req.authUser.unitId ?? null;
+        } else {
+          const bodyUnit = typeof body.unitId === "string" ? body.unitId.trim() : "";
+          unitId = bodyUnit || req.authUser.unitId || null;
+        }
       } else {
         const headerRaw = req.headers["x-radio-key"];
         const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
