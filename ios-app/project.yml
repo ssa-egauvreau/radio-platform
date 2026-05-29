@@ -78,6 +78,18 @@ targets:
       # inside the float code paths via cpu_support.h; the .c files in
       # celt/{arm,x86,mips} are stub files that need a matching RTCD
       # bootstrap which the autotools build wires in, not us).
+      #
+      # libopus compile flags repeated on every source block because
+      # XcodeGen's compilerFlags applies per-path. The flags match the
+      # autotools `--enable-float` build with VAR_ARRAYS, USE_ALLOCA and
+      # HAVE_LRINTF on. We deliberately omit `-DPACKAGE_VERSION="1.5.2"`
+      # because the xcconfig escape rules around the embedded quotes are
+      # brittle — libopus's celt/celt.c falls back to
+      # `PACKAGE_VERSION = "unknown"` and that string only ever surfaces
+      # via `opus_get_version_string()`, which we don't call. The Android
+      # NDK CMakeLists and the Emscripten build pass the real version
+      # string because their command-line escape is straightforward.
+      #
       - path: ../android-app/app/src/main/cpp/opus/src
         includes:
           - opus.c
@@ -88,7 +100,7 @@ targets:
           - analysis.c
           - mlp.c
           - mlp_data.c
-        compilerFlags: "-DOPUS_BUILD -DUSE_ALLOCA -DVAR_ARRAYS -DHAVE_LRINTF -DPACKAGE_VERSION=\\\"1.5.2\\\""
+        compilerFlags: "-DOPUS_BUILD -DUSE_ALLOCA -DVAR_ARRAYS -DHAVE_LRINTF"
       - path: ../android-app/app/src/main/cpp/opus/celt
         includes:
           - bands.c
@@ -109,15 +121,15 @@ targets:
           - quant_bands.c
           - rate.c
           - vq.c
-        compilerFlags: "-DOPUS_BUILD -DUSE_ALLOCA -DVAR_ARRAYS -DHAVE_LRINTF -DPACKAGE_VERSION=\\\"1.5.2\\\""
+        compilerFlags: "-DOPUS_BUILD -DUSE_ALLOCA -DVAR_ARRAYS -DHAVE_LRINTF"
       - path: ../android-app/app/src/main/cpp/opus/silk
         includes:
           - "*.c"
-        compilerFlags: "-DOPUS_BUILD -DUSE_ALLOCA -DVAR_ARRAYS -DHAVE_LRINTF -DPACKAGE_VERSION=\\\"1.5.2\\\""
+        compilerFlags: "-DOPUS_BUILD -DUSE_ALLOCA -DVAR_ARRAYS -DHAVE_LRINTF"
       - path: ../android-app/app/src/main/cpp/opus/silk/float
         includes:
           - "*.c"
-        compilerFlags: "-DOPUS_BUILD -DUSE_ALLOCA -DVAR_ARRAYS -DHAVE_LRINTF -DPACKAGE_VERSION=\\\"1.5.2\\\""
+        compilerFlags: "-DOPUS_BUILD -DUSE_ALLOCA -DVAR_ARRAYS -DHAVE_LRINTF"
     configFiles:
       Debug: Local.xcconfig
       Release: Local.xcconfig

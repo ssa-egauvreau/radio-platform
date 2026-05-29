@@ -155,7 +155,10 @@ final class OpusEncoder: VoiceEncoder {
         var framed = Data(capacity: 2 + Int(packetLen))
         framed.append(codec.magic0)
         framed.append(codec.magic1)
-        framed.append(outBuf, count: Int(packetLen))
+        // Slice off the unused tail of outBuf since opus_encode only
+        // populates `packetLen` bytes; copying the whole 512-byte capacity
+        // would smuggle silent padding into the wire frame.
+        framed.append(contentsOf: outBuf.prefix(Int(packetLen)))
         return framed
     }
 }
@@ -196,7 +199,7 @@ final class OpusDecoder: VoiceDecoder {
     }
 
     func decodeFrame(_ framedBytes: Data) -> [Int16]? {
-        guard let s = state else { return nil }
+        guard state != nil else { return nil }
         guard framedBytes.count > 2 else { return nil }
         let firstByte = framedBytes[framedBytes.startIndex]
         let secondByte = framedBytes[framedBytes.startIndex + 1]
@@ -216,7 +219,7 @@ final class OpusDecoder: VoiceDecoder {
     /// available. The encoder side already emits LBRR on the wire today
     /// for FEC-aware peers to recover.
     func decodeLostFrameFromNext(_ nextFramedBytes: Data) -> [Int16]? {
-        guard let _ = state else { return nil }
+        guard state != nil else { return nil }
         guard nextFramedBytes.count > 2 else { return nil }
         let firstByte = nextFramedBytes[nextFramedBytes.startIndex]
         let secondByte = nextFramedBytes[nextFramedBytes.startIndex + 1]

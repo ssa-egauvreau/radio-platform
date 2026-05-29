@@ -65,13 +65,17 @@ class OpusEncoder : VoiceEncoder {
         // 640-byte LE buffer from the capture worklet, so a straight cast
         // would be a byte-order mismatch on big-endian; build the ShortArray
         // explicitly so the wire format stays endian-stable.
+        //
+        // Both bytes are masked to 0xFF before assembly because Kotlin
+        // `Byte.toInt()` sign-extends — `0xAB.toByte().toInt() == -85`,
+        // which would smear high bits into the upper word.
         val samples = ShortArray(FRAME_SAMPLES)
         var i = 0
         var off = 0
         while (i < FRAME_SAMPLES) {
             val lo = pcm16kLe640[off].toInt() and 0xFF
-            val hi = pcm16kLe640[off + 1].toInt() shl 8
-            samples[i] = (lo or hi).toShort()
+            val hi = pcm16kLe640[off + 1].toInt() and 0xFF
+            samples[i] = ((hi shl 8) or lo).toShort()
             off += 2
             i++
         }
