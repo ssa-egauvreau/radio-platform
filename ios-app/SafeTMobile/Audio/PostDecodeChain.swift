@@ -296,10 +296,17 @@ enum PostDecodeChain {
     // ----- helpers -------------------------------------------------------
 
     /// Round + clamp a `Double` into the `Int16` range.
+    ///
+    /// Uses `floor(x + 0.5)` (round half toward +∞) to match JavaScript's
+    /// `Math.round` and Kotlin's `roundToInt()` — Swift's default `.rounded()`
+    /// is round-half-away-from-zero, which would round negative half-values the
+    /// other way (e.g. -2.5 → -3 vs -2) and break sample-exact cross-platform
+    /// parity. Audio samples rarely land on an exact half, but the DSP contract
+    /// is "byte-identical across web / Android / iOS", so we pin the tie rule.
     fileprivate static func clamp16(_ x: Double) -> Int {
         if x > 32767 { return 32767 }
         if x < -32768 { return -32768 }
-        return Int(x.rounded())
+        return Int((x + 0.5).rounded(.down))
     }
 
     /// RBJ-cookbook biquad — direct-form-II transposed. Same math as the
