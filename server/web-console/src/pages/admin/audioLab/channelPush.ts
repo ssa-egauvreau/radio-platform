@@ -1,18 +1,22 @@
 // Pushes a processed Audio Lab clip onto a real voice channel — opens a transient
 // WebSocket to the relay, keys it as a one-off "LAB" unit, and streams the clip as
-// IMBE frames (with clear-PCM sideband for the recorder). Real-time-paced so listeners
+// vocoded frames (with clear-PCM sideband for the recorder). Real-time-paced so listeners
 // hear it like any other talk-spurt rather than a fire-hose burst.
 
+import type { VoiceCodec } from "../../../api";
 import { getToken } from "../../../api";
+import { codec2Encode, codec2Ready, initCodec2 } from "../../../voice/codec2Vocoder";
 import { imbeEncode, imbeReady, initImbe } from "../../../voice/imbeVocoder";
+import { opusEncode, opusReady, initOpus } from "../../../voice/opusWasmCodec";
+import { codecMagic } from "../../../voice/voiceCodecRegistry";
 
-const IMBE_MAGIC_0 = 0xf5;
-const IMBE_MAGIC_1 = 0xab;
 const LISTEN_PCM_MAGIC_0 = 0xf6;
 const LISTEN_PCM_MAGIC_1 = 0xac;
 
 const IMBE_FRAME_8K_SAMPLES = 160; // 20 ms @ 8 kHz
-const FRAME_16K_SAMPLES = 320; // 20 ms @ 16 kHz
+const CODEC2_FRAME_8K_SAMPLES = 160;
+const OPUS_FRAME_16K_SAMPLES = 320; // 20 ms @ 16 kHz
+const FRAME_16K_SAMPLES = 320;
 const FRAME_MS = 20;
 /** The unit_id under which a lab push appears on the air. Distinct so dispatchers can
  *  see at a glance that the channel is being keyed by the Audio Lab, not a real talker. */
@@ -36,12 +40,35 @@ function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+async function ensurePushCodec(codec: VoiceCodec): Promise<void> {
+  if (codec === "imbe") {
+    if (!imbeReady()) {
+      const ok = await initImbe();
+      if (!ok) throw new Error("IMBE vocoder unavailable — cannot push to channel");
+    }
+    return;
+  }
+  if (codec === "codec2_3200") {
+    if (!codec2Ready()) {
+      const ok = await initCodec2();
+      if (!ok) throw new Error("Codec2 vocoder unavailable — cannot push to channel");
+    }
+    return;
+  }
+  if (!opusReady()) {
+    const ok = await initOpus();
+    if (!ok) throw new Error("Opus vocoder unavailable — cannot push to channel");
+  }
+}
+
 export interface ChannelPushOptions {
   /** Channel name to key. The caller is responsible for confirming the user really
    *  wants to broadcast on this channel (the audio is real over-the-air voice). */
   channelName: string;
   /** Already-processed clip — Int16 PCM @ 16 kHz mono (output of `processClip`). */
   pcm: Int16Array;
+  /** Wire codec for the streamed frames (should match the channel's codec for a fair test). */
+  codec?: VoiceCodec;
   /** If true, also send the clear-PCM sideband so the transmission lands in the recorder
    *  / transmission log. Default true so the lab push is searchable later. */
   recordSideband?: boolean;
@@ -54,27 +81,18 @@ export interface ChannelPushHandle {
   cancel(): void;
 }
 
-/** Streams a processed clip onto a channel as IMBE + sideband, paced to real time so it
- *  sounds like a normal talk-spurt to listeners. Caller awaits `finished`. */
+/** Streams a processed clip onto a channel, paced to real time so it sounds like a normal talk-spurt. */
 export function pushClipToChannel(opts: ChannelPushOptions): ChannelPushHandle {
-  const { channelName, pcm, recordSideband = true } = opts;
+  const { channelName, pcm, codec = "imbe", recordSideband = true } = opts;
   let cancelled = false;
   let ws: WebSocket | null = null;
 
   const finished = (async () => {
-    if (!imbeReady()) {
-      const ok = await initImbe();
-      if (!ok) {
-        throw new Error("IMBE vocoder unavailable — cannot push to channel");
-      }
-    }
+    await ensurePushCodec(codec);
 
     ws = new WebSocket(voiceSocketUrl());
     ws.binaryType = "arraybuffer";
 
-    // Single close-on-exit guard for every path past the open race — join failure,
-    // streaming exception, normal completion, or cancellation. Without this, a
-    // rejected join (timeout / listen_only / server error) would leak the socket.
     const closeWsOnExit = (socket: WebSocket | null): void => {
       if (!socket) return;
       try {
@@ -99,11 +117,9 @@ export function pushClipToChannel(opts: ChannelPushOptions): ChannelPushHandle {
         return;
       }
 
-      // Reattach onclose to a benign handler now that we're past the open race.
       ws.onclose = null;
       ws.onerror = null;
 
-      // Send join, wait for the relay's "joined" ack (or "error" — which bubbles up).
       const join = new Promise<void>((resolve, reject) => {
         const w = ws;
         if (!w) {
@@ -126,7 +142,6 @@ export function pushClipToChannel(opts: ChannelPushOptions): ChannelPushHandle {
               clearTimeout(timeout);
               reject(new Error(`Channel join rejected (${msg.code ?? "unknown"})`));
             }
-            // Ignore "busy" / "move" / etc. — they're not relevant to a one-shot push.
           } catch {
             /* malformed — ignore */
           }
@@ -140,40 +155,67 @@ export function pushClipToChannel(opts: ChannelPushOptions): ChannelPushHandle {
         return;
       }
 
-      // Stream IMBE + sideband at the real 20 ms frame cadence. The relay's claimAir is
-      // refreshed by each binary frame, so pacing keeps the channel held for the duration.
-      const pcm8k = downsample16To8(pcm);
+      const magic = codecMagic(codec);
       const start = performance.now();
       let frameIndex = 0;
-      for (let off = 0; off + IMBE_FRAME_8K_SAMPLES <= pcm8k.length; off += IMBE_FRAME_8K_SAMPLES) {
-        if (cancelled || ws.readyState !== WebSocket.OPEN) {
-          break;
-        }
-        const cw = imbeEncode(pcm8k.subarray(off, off + IMBE_FRAME_8K_SAMPLES));
-        if (cw) {
-          const frame = new Uint8Array(13);
-          frame[0] = IMBE_MAGIC_0;
-          frame[1] = IMBE_MAGIC_1;
-          frame.set(cw, 2);
-          ws.send(frame);
-        }
-        if (recordSideband) {
-          // The relay records the sideband but does not broadcast it (see voiceRelay.ts).
-          const slice16k = pcm.subarray(frameIndex * FRAME_16K_SAMPLES, (frameIndex + 1) * FRAME_16K_SAMPLES);
-          if (slice16k.length === FRAME_16K_SAMPLES) {
-            const side = new Uint8Array(2 + slice16k.byteLength);
-            side[0] = LISTEN_PCM_MAGIC_0;
-            side[1] = LISTEN_PCM_MAGIC_1;
-            side.set(new Uint8Array(slice16k.buffer, slice16k.byteOffset, slice16k.byteLength), 2);
-            ws.send(side);
+
+      if (codec === "opus") {
+        for (let off = 0; off + OPUS_FRAME_16K_SAMPLES <= pcm.length; off += OPUS_FRAME_16K_SAMPLES) {
+          if (cancelled || ws.readyState !== WebSocket.OPEN) break;
+          const packet = opusEncode(pcm.subarray(off, off + OPUS_FRAME_16K_SAMPLES));
+          if (packet) {
+            const frame = new Uint8Array(2 + packet.length);
+            frame[0] = magic.b0;
+            frame[1] = magic.b1;
+            frame.set(packet, 2);
+            ws.send(frame);
           }
+          if (recordSideband) {
+            const slice16k = pcm.subarray(frameIndex * FRAME_16K_SAMPLES, (frameIndex + 1) * FRAME_16K_SAMPLES);
+            if (slice16k.length === FRAME_16K_SAMPLES) {
+              const side = new Uint8Array(2 + slice16k.byteLength);
+              side[0] = LISTEN_PCM_MAGIC_0;
+              side[1] = LISTEN_PCM_MAGIC_1;
+              side.set(new Uint8Array(slice16k.buffer, slice16k.byteOffset, slice16k.byteLength), 2);
+              ws.send(side);
+            }
+          }
+          frameIndex += 1;
+          const wait = frameIndex * FRAME_MS - (performance.now() - start);
+          if (wait > 0) await sleep(wait);
         }
-        frameIndex += 1;
-        // Pace to wall-clock so the sequence claims air for the right duration.
-        const nextDueMs = frameIndex * FRAME_MS;
-        const wait = nextDueMs - (performance.now() - start);
-        if (wait > 0) {
-          await sleep(wait);
+      } else {
+        const pcm8k = downsample16To8(pcm);
+        const frameSamples = codec === "codec2_3200" ? CODEC2_FRAME_8K_SAMPLES : IMBE_FRAME_8K_SAMPLES;
+        for (let off = 0; off + frameSamples <= pcm8k.length; off += frameSamples) {
+          if (cancelled || ws.readyState !== WebSocket.OPEN) break;
+          const slice8k = pcm8k.subarray(off, off + frameSamples);
+          let payload: Uint8Array | null = null;
+          if (codec === "codec2_3200") {
+            payload = codec2Encode(slice8k);
+          } else {
+            payload = imbeEncode(slice8k);
+          }
+          if (payload) {
+            const frame = new Uint8Array(2 + payload.length);
+            frame[0] = magic.b0;
+            frame[1] = magic.b1;
+            frame.set(payload, 2);
+            ws.send(frame);
+          }
+          if (recordSideband) {
+            const slice16k = pcm.subarray(frameIndex * FRAME_16K_SAMPLES, (frameIndex + 1) * FRAME_16K_SAMPLES);
+            if (slice16k.length === FRAME_16K_SAMPLES) {
+              const side = new Uint8Array(2 + slice16k.byteLength);
+              side[0] = LISTEN_PCM_MAGIC_0;
+              side[1] = LISTEN_PCM_MAGIC_1;
+              side.set(new Uint8Array(slice16k.buffer, slice16k.byteOffset, slice16k.byteLength), 2);
+              ws.send(side);
+            }
+          }
+          frameIndex += 1;
+          const wait = frameIndex * FRAME_MS - (performance.now() - start);
+          if (wait > 0) await sleep(wait);
         }
       }
     } finally {

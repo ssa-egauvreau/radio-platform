@@ -4,8 +4,9 @@
 // the production TX/RX paths (imbeTxConditioner.ts, imbeVocoder.ts) so the lab's "Default"
 // preset reproduces what a real talker would sound like today.
 
+import type { VoiceCodec } from "../../../api";
 import { ImbeTxConditioner } from "../../../voice/imbeTxConditioner";
-import { imbeDecode, imbeEncode, imbeReady, initImbe } from "../../../voice/imbeVocoder";
+import { runLabCodecRoundtrip, runLabCodecRoundtripProduction } from "./codecRoundtrip.js";
 
 /** Worklet frame length the production capture path emits — 40 ms @ 16 kHz. The TX
  *  conditioner's adaptive AGC / gate update once per frame, so running the lab's
@@ -393,7 +394,7 @@ function applyWindGate(
 }
 
 /** 16 kHz → 8 kHz by sample-pair averaging (matches encodeImbeFrames). */
-function downsample16To8(pcm16k: Int16Array): Int16Array {
+export function downsample16To8(pcm16k: Int16Array): Int16Array {
   const out = new Int16Array(pcm16k.length >> 1);
   for (let i = 0; i < out.length; i++) {
     out[i] = (pcm16k[2 * i] + pcm16k[2 * i + 1]) >> 1;
@@ -403,7 +404,7 @@ function downsample16To8(pcm16k: Int16Array): Int16Array {
 
 /** Sample-duplicate upsample — the production default. Aliases in the high band, gives
  *  IMBE that characteristic "crunchy" top end. Kept so the lab can demonstrate the gap. */
-function upsampleDup8To16(pcm8k: Int16Array): Int16Array {
+export function upsampleDup8To16(pcm8k: Int16Array): Int16Array {
   const out = new Int16Array(pcm8k.length * 2);
   for (let i = 0; i < pcm8k.length; i++) {
     out[i * 2] = pcm8k[i];
@@ -415,7 +416,7 @@ function upsampleDup8To16(pcm8k: Int16Array): Int16Array {
 /** Linear-interpolation upsample: insert the midpoint between each sample. One-sample
  *  carryover keeps frame boundaries seamless. Cheap and removes most of the duplicate
  *  upsample's aliasing crunch — the cheapest quality win available. */
-function upsampleLinear8To16(pcm8k: Int16Array): Int16Array {
+export function upsampleLinear8To16(pcm8k: Int16Array): Int16Array {
   const out = new Int16Array(pcm8k.length * 2);
   let prev = pcm8k[0] ?? 0;
   for (let i = 0; i < pcm8k.length; i++) {
@@ -430,7 +431,7 @@ function upsampleLinear8To16(pcm8k: Int16Array): Int16Array {
 /** Polyphase upsample using a small windowed-sinc kernel. Properly anti-aliased — the
  *  cleanest of the three modes. 33-tap kernel with Hann window at fc=Fs/4 is a sweet
  *  spot for 8→16 kHz: tight stopband, modest CPU. */
-function upsamplePolyphase8To16(pcm8k: Int16Array): Int16Array {
+export function upsamplePolyphase8To16(pcm8k: Int16Array): Int16Array {
   const KERNEL = polyphaseKernel();
   const HALF = (KERNEL.length - 1) >> 1; // 16 — equal taps each side of centre
   const out = new Int16Array(pcm8k.length * 2);
@@ -564,7 +565,11 @@ function polyphase24Kernel(): [Float32Array, Float32Array, Float32Array] {
  *  Int16 PCM at 16 kHz, ready to play through Web Audio or push onto a channel.
  *  (The "polyphase24" upsample mode also returns 16 kHz here — the lab's playback
  *  path runs `upsamplePlayback16To24` as a final step on its way to the DAC.) */
-export async function processClip(input: Int16Array, cfg: AudioLabConfig): Promise<Int16Array> {
+export async function processClip(
+  input: Int16Array,
+  cfg: AudioLabConfig,
+  codec: VoiceCodec = "imbe",
+): Promise<Int16Array> {
   // --- Stage 1: pre-IMBE conditioning ---
   const conditioned = input.slice();
   // Wind reduction runs first so the rest of the chain (HPF, LPF, AGC) sees a
@@ -593,39 +598,9 @@ export async function processClip(input: Int16Array, cfg: AudioLabConfig): Promi
   }
 
   // --- Stage 2: vocoder ---
-  let postVocoder: Int16Array;
-  if (cfg.vocoder.bypass) {
-    postVocoder = conditioned;
-  } else {
-    if (!imbeReady()) {
-      const ok = await initImbe();
-      if (!ok) {
-        throw new Error("IMBE vocoder unavailable — WASM failed to load");
-      }
-    }
-    const pcm8k = downsample16To8(conditioned);
-    const decoded8k = new Int16Array(pcm8k.length);
-    let outOff = 0;
-    for (let off = 0; off + 160 <= pcm8k.length; off += 160) {
-      const cw = imbeEncode(pcm8k.subarray(off, off + 160));
-      if (!cw) continue;
-      const dec = imbeDecode(cw);
-      if (!dec) continue;
-      decoded8k.set(dec, outOff);
-      outOff += 160;
-    }
-    const decoded = decoded8k.subarray(0, outOff);
-    // "polyphase24" uses the same 8→16 polyphase here; the 16→24 step happens at
-    // playback time in the AudioLabPanel so channel-push stays at the 16 kHz
-    // rate the rest of the system expects.
-    postVocoder =
-      cfg.postDecode.upsampleMode === "linear"
-        ? upsampleLinear8To16(decoded)
-        : cfg.postDecode.upsampleMode === "polyphase" ||
-            cfg.postDecode.upsampleMode === "polyphase24"
-          ? upsamplePolyphase8To16(decoded)
-          : upsampleDup8To16(decoded);
-  }
+  const postVocoder = cfg.vocoder.bypass
+    ? conditioned
+    : await runLabCodecRoundtrip(conditioned, codec, cfg.postDecode.upsampleMode);
 
   // --- Stage 3: post-decode shaping ---
   const shaped = postVocoder.slice();
@@ -720,38 +695,15 @@ function applySoftSaturationInPlace(pcm: Int16Array, amount: number): void {
 export async function processClipProduction(
   input: Int16Array,
   bypassMicProcessing = false,
+  codec: VoiceCodec = "imbe",
 ): Promise<Int16Array> {
-  if (!imbeReady()) {
-    const ok = await initImbe();
-    if (!ok) {
-      throw new Error("IMBE vocoder unavailable — WASM failed to load");
-    }
-  }
-  // Stage 1: production TX conditioner, frame-by-frame so the adaptive state evolves
-  // the same way as a live keyup.
   const conditioned = input.slice();
   const cond = new ImbeTxConditioner();
   for (let off = 0; off < conditioned.length; off += PRODUCTION_FRAME_16K) {
     const end = Math.min(off + PRODUCTION_FRAME_16K, conditioned.length);
     cond.process(conditioned.subarray(off, end), bypassMicProcessing);
   }
-
-  // Stage 2: 16 → 8 kHz, IMBE encode + decode.
-  const pcm8k = downsample16To8(conditioned);
-  const decoded8k = new Int16Array(pcm8k.length);
-  let outOff = 0;
-  for (let off = 0; off + 160 <= pcm8k.length; off += 160) {
-    const cw = imbeEncode(pcm8k.subarray(off, off + 160));
-    if (!cw) continue;
-    const dec = imbeDecode(cw);
-    if (!dec) continue;
-    decoded8k.set(dec, outOff);
-    outOff += 160;
-  }
-  const decoded = decoded8k.subarray(0, outOff);
-
-  // Stage 3: production RX — sample-duplicate upsample, no shaping, no EQ.
-  return upsampleDup8To16(decoded);
+  return runLabCodecRoundtripProduction(conditioned, codec);
 }
 
 /** Default preset — reproduces production behaviour today (IMBE round-trip,

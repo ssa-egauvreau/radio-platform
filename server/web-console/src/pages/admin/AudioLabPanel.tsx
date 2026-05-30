@@ -1,6 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, describeError, type AudioLabPresetSummary, type UserChannel } from "../../api";
+import {
+  api,
+  describeError,
+  VOICE_CODEC_LABEL,
+  VOICE_CODECS,
+  type AudioLabPresetSummary,
+  type UserChannel,
+  type VoiceCodec,
+} from "../../api";
+import { codec2Decode, codec2Encode, codec2Ready, initCodec2 } from "../../voice/codec2Vocoder";
 import { imbeDecode, imbeEncode, imbeReady, initImbe } from "../../voice/imbeVocoder";
+import { opusDecode, opusEncode, opusReady, initOpus } from "../../voice/opusWasmCodec";
 import {
   DEFAULT_PRESET,
   outputSampleRate,
@@ -38,10 +48,11 @@ const PRODUCTION_AUDIO_CONFIG = {
 interface LatencyMeasurement {
   /** Network RTT to /health endpoint (ms). */
   rttMs: number;
-  /** Time to IMBE-encode one 20 ms frame (ms). */
+  /** Time to encode one 20 ms frame (ms). */
   encodeMs: number;
-  /** Time to IMBE-decode one frame (ms). */
+  /** Time to decode one frame (ms). */
   decodeMs: number;
+  codec: VoiceCodec;
   /** When the measurement was taken — used to invalidate stale numbers. */
   takenAt: number;
 }
@@ -70,30 +81,80 @@ async function measureNetworkRtt(samples = 6): Promise<number> {
   return sorted[Math.floor(sorted.length / 2)] ?? sorted[0]!;
 }
 
-async function measureCodecRoundtrip(): Promise<{ encodeMs: number; decodeMs: number }> {
-  if (!imbeReady()) {
-    const ok = await initImbe();
-    if (!ok) throw new Error("IMBE WASM is not loaded");
-  }
-  // 160-sample 8 kHz sine — exercise the codec on a realistic signal, not silence.
-  const probe = new Int16Array(160);
-  for (let i = 0; i < 160; i++) {
-    probe[i] = Math.round(Math.sin((2 * Math.PI * 500 * i) / 8000) * 8000);
-  }
+async function measureCodecRoundtrip(
+  codec: VoiceCodec,
+): Promise<{ encodeMs: number; decodeMs: number }> {
+  const ITER = 50;
   let encodeTotal = 0;
   let decodeTotal = 0;
-  const ITER = 50;
-  for (let i = 0; i < ITER; i++) {
-    const t0 = performance.now();
-    const cw = imbeEncode(probe);
-    const t1 = performance.now();
-    if (!cw) continue;
-    imbeDecode(cw);
-    const t2 = performance.now();
-    encodeTotal += t1 - t0;
-    decodeTotal += t2 - t1;
+  let samples = 0;
+
+  if (codec === "opus") {
+    if (!opusReady()) {
+      const ok = await initOpus();
+      if (!ok) throw new Error("Opus WASM is not loaded");
+    }
+    const probe = new Int16Array(320);
+    for (let i = 0; i < 320; i++) {
+      probe[i] = Math.round(Math.sin((2 * Math.PI * 500 * i) / 16000) * 8000);
+    }
+    for (let i = 0; i < ITER; i++) {
+      const t0 = performance.now();
+      const packet = opusEncode(probe);
+      const t1 = performance.now();
+      if (!packet) continue;
+      opusDecode(packet);
+      const t2 = performance.now();
+      encodeTotal += t1 - t0;
+      decodeTotal += t2 - t1;
+      samples += 1;
+    }
+  } else if (codec === "codec2_3200") {
+    if (!codec2Ready()) {
+      const ok = await initCodec2();
+      if (!ok) throw new Error("Codec2 WASM is not loaded");
+    }
+    const probe = new Int16Array(160);
+    for (let i = 0; i < 160; i++) {
+      probe[i] = Math.round(Math.sin((2 * Math.PI * 500 * i) / 8000) * 8000);
+    }
+    for (let i = 0; i < ITER; i++) {
+      const t0 = performance.now();
+      const cw = codec2Encode(probe);
+      const t1 = performance.now();
+      if (!cw) continue;
+      codec2Decode(cw);
+      const t2 = performance.now();
+      encodeTotal += t1 - t0;
+      decodeTotal += t2 - t1;
+      samples += 1;
+    }
+  } else {
+    if (!imbeReady()) {
+      const ok = await initImbe();
+      if (!ok) throw new Error("IMBE WASM is not loaded");
+    }
+    const probe = new Int16Array(160);
+    for (let i = 0; i < 160; i++) {
+      probe[i] = Math.round(Math.sin((2 * Math.PI * 500 * i) / 8000) * 8000);
+    }
+    for (let i = 0; i < ITER; i++) {
+      const t0 = performance.now();
+      const cw = imbeEncode(probe);
+      const t1 = performance.now();
+      if (!cw) continue;
+      imbeDecode(cw);
+      const t2 = performance.now();
+      encodeTotal += t1 - t0;
+      decodeTotal += t2 - t1;
+      samples += 1;
+    }
   }
-  return { encodeMs: encodeTotal / ITER, decodeMs: decodeTotal / ITER };
+
+  if (samples === 0) {
+    throw new Error(`${VOICE_CODEC_LABEL[codec]} round-trip failed — WASM encode returned nothing`);
+  }
+  return { encodeMs: encodeTotal / samples, decodeMs: decodeTotal / samples };
 }
 
 function cloneConfig(c: AudioLabConfig): AudioLabConfig {
@@ -136,6 +197,18 @@ export function AudioLabPanel() {
     }
   });
 
+  const [labCodec, setLabCodec] = useState<VoiceCodec>(() => {
+    try {
+      const saved = localStorage.getItem("audiolab-codec");
+      if (saved && (VOICE_CODECS as readonly string[]).includes(saved)) {
+        return saved as VoiceCodec;
+      }
+    } catch {
+      /* ignore */
+    }
+    return "imbe";
+  });
+
   // Global apply state. `liveBypassMicProcessing` mirrors the bypass flag of
   // the currently-deployed agency config so "Play with live server settings"
   // honors it — without that, an admin who pushed Bridge-style minimal sees
@@ -175,6 +248,20 @@ export function AudioLabPanel() {
   // Mirror of `recording` state so stable callbacks (onAutoStop, unmount cleanup) can
   // reach the live recorder without going through a stale closure on the React state.
   const recordingRef = useRef<LabRecorder | null>(null);
+
+  useEffect(() => {
+    void initImbe();
+    void initCodec2();
+    void initOpus();
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("audiolab-codec", labCodec);
+    } catch {
+      /* ignore */
+    }
+  }, [labCodec]);
 
   // Load channels for the push dropdown (talk-capable only).
   useEffect(() => {
@@ -328,7 +415,7 @@ export function AudioLabPanel() {
     setState("processing");
     let processed: Int16Array;
     try {
-      processed = await processClip(recordedClip, config);
+      processed = await processClip(recordedClip, config, labCodec);
     } catch (err) {
       setError_(describeError(err));
       setState("idle");
@@ -355,7 +442,11 @@ export function AudioLabPanel() {
     setState("processing");
     let processed: Int16Array;
     try {
-      processed = await processClipProduction(recordedClip, globalConfig.liveBypassMicProcessing);
+      processed = await processClipProduction(
+        recordedClip,
+        globalConfig.liveBypassMicProcessing,
+        labCodec,
+      );
     } catch (err) {
       setError_(describeError(err));
       setState("idle");
@@ -628,8 +719,17 @@ export function AudioLabPanel() {
     setInfo_(null);
     setMeasuringLatency(true);
     try {
-      const [rttMs, codec] = await Promise.all([measureNetworkRtt(), measureCodecRoundtrip()]);
-      setLatency({ rttMs, encodeMs: codec.encodeMs, decodeMs: codec.decodeMs, takenAt: Date.now() });
+      const [rttMs, codecTiming] = await Promise.all([
+        measureNetworkRtt(),
+        measureCodecRoundtrip(labCodec),
+      ]);
+      setLatency({
+        rttMs,
+        encodeMs: codecTiming.encodeMs,
+        decodeMs: codecTiming.decodeMs,
+        codec: labCodec,
+        takenAt: Date.now(),
+      });
     } catch (err) {
       setError_(describeError(err));
     } finally {
@@ -646,6 +746,15 @@ export function AudioLabPanel() {
       setError_("Pick a channel to push to.");
       return;
     }
+    const channelRow = channels.find((c) => c.name === pushChannel);
+    if (channelRow && channelRow.codec !== labCodec && !confirmingPush) {
+      setError_(
+        `Channel "${pushChannel}" uses ${VOICE_CODEC_LABEL[channelRow.codec]}, but you are testing ${VOICE_CODEC_LABEL[labCodec]}. ` +
+          "Change the Test codec dropdown to match, or pick a different channel. Click Push again to force anyway.",
+      );
+      setConfirmingPush(true);
+      return;
+    }
     if (!confirmingPush) {
       setConfirmingPush(true);
       return;
@@ -658,6 +767,7 @@ export function AudioLabPanel() {
       const handle = pushClipToChannel({
         channelName: pushChannel,
         pcm: processedClip,
+        codec: labCodec,
       });
       await handle.finished;
       setInfo_(`Pushed to "${pushChannel}".`);
@@ -716,14 +826,53 @@ export function AudioLabPanel() {
       <header>
         <h2>Audio Lab</h2>
         <p className="muted">
-          Record a short clip, run it through a configurable IMBE pipeline, and play it back to hear the
-          effect of each setting. Optionally push the processed clip onto a real channel to hear it
-          over the air. Nothing here changes the production audio path until you wire a preset in.
+          Record a short clip, round-trip it through a voice codec (IMBE, Codec2, or Opus), and tune the
+          mic and playback chain. Optionally push onto a real channel. Nothing here changes production
+          audio until you apply settings live or save a shared preset.
         </p>
       </header>
 
       {error && <div className="audio-lab-banner error">{error}</div>}
       {info && !error && <div className="audio-lab-banner info">{info}</div>}
+
+      <section className="audio-lab-presets" aria-label="Test codec">
+        <label>
+          <span>Test codec</span>
+          <select
+            value={labCodec}
+            onChange={(e) => setLabCodec(e.target.value as VoiceCodec)}
+            disabled={busy}
+            title="Which voice codec to use for preview, production A/B, and channel push."
+          >
+            {VOICE_CODECS.map((c) => (
+              <option key={c} value={c}>
+                {VOICE_CODEC_LABEL[c]}
+              </option>
+            ))}
+          </select>
+        </label>
+        {pushChannel && (
+          <button
+            type="button"
+            className="btn sm"
+            disabled={busy}
+            onClick={() => {
+              const ch = channels.find((c) => c.name === pushChannel);
+              if (ch) {
+                setLabCodec(ch.codec);
+                setInfo_(`Test codec set to ${VOICE_CODEC_LABEL[ch.codec]} (matches ${pushChannel}).`);
+              }
+            }}
+            title="Set the test codec to match the selected push channel."
+          >
+            Match channel codec
+          </button>
+        )}
+        <span className="muted small">
+          Presets below tune mic and playback processing; they do not change the codec. For over-the-air
+          push, the test codec should match the channel (Channels tab).
+        </span>
+      </section>
 
       <section className="audio-lab-record">
         <div className="audio-lab-buttons">
@@ -747,7 +896,7 @@ export function AudioLabPanel() {
             className="btn"
             onClick={handlePlayProduction}
             disabled={busy || !recordedClip || recordedClip.length === 0}
-            title="Run the recorded clip through the exact production audio path (live ImbeTxConditioner + IMBE round-trip + sample-duplicate upsample, no post-decode shaping)."
+            title="Run the clip through the live TX conditioner and the selected codec (production-style decode, no custom post-EQ)."
           >
             ▶ Play with live server settings
           </button>
@@ -881,7 +1030,7 @@ export function AudioLabPanel() {
 
       {/* Simple controls */}
       {viewMode === "simple" && (
-        <SimpleControls config={config} setConfig={setConfig} />
+        <SimpleControls config={config} setConfig={setConfig} labCodec={labCodec} />
       )}
 
       {/* Apply globally button — visible in both views */}
@@ -1035,13 +1184,17 @@ export function AudioLabPanel() {
         </fieldset>
 
         <fieldset>
-          <legend>Vocoder (IMBE codec)</legend>
+          <legend>Vocoder ({VOICE_CODEC_LABEL[labCodec]})</legend>
           <Toggle
-            label="Bypass IMBE (clean PCM only)"
+            label="Bypass vocoder (clean PCM only)"
             value={config.vocoder.bypass}
             onChange={(v) => setConfig({ ...config, vocoder: { bypass: v } })}
           />
-          <div className="muted small">When bypass is OFF, the clip round-trips through the IMBE vocoder (encode → decode) the same way a real on-air talk-spurt does.</div>
+          <div className="muted small">
+            When bypass is OFF, the clip round-trips through <b>{VOICE_CODEC_LABEL[labCodec]}</b> (encode →
+            decode), the same way a real on-air talk-spurt does. Change the <b>Test codec</b> dropdown above
+            to compare IMBE, Codec2, and Opus.
+          </div>
         </fieldset>
 
         <fieldset disabled={config.vocoder.bypass}>
@@ -1084,8 +1237,8 @@ export function AudioLabPanel() {
           {config.postDecode.upsampleMode === "polyphase24" && (
             <div className="muted small">
               24 kHz output is rendered into the lab&apos;s playback buffer only.
-              Channel push (and the on-air wire) stay at 16 kHz, since the IMBE
-              codec is band-limited to ~4 kHz regardless. Worth A/B-ing against
+              Channel push stays at 16 kHz on the wire. IMBE and Codec2 are band-limited to ~4 kHz;
+              Opus is wideband at 16 kHz. Worth A/B-ing against
               the standard polyphase mode — the audible delta is usually subtle.
             </div>
           )}
@@ -1369,7 +1522,7 @@ export function AudioLabPanel() {
         <button className="btn sm" onClick={handleMeasureLatency} disabled={measuringLatency || busy}>
           {measuringLatency ? "Measuring…" : latency ? "Re-measure" : "Measure now"}
         </button>
-        <LatencyBreakdown latency={latency} />
+        <LatencyBreakdown latency={latency} labCodec={labCodec} />
       </section>
 
       <section className="audio-lab-server-config">
@@ -1481,7 +1634,14 @@ function Toggle({
   );
 }
 
-function LatencyBreakdown({ latency }: { latency: LatencyMeasurement | null }) {
+function LatencyBreakdown({
+  latency,
+  labCodec,
+}: {
+  latency: LatencyMeasurement | null;
+  labCodec: VoiceCodec;
+}) {
+  const codecLabel = VOICE_CODEC_LABEL[labCodec];
   // Fixed components of the production path (in milliseconds). Half the worklet frame
   // is the average wait between PTT start and the first 40 ms chunk being emitted; the
   // listener cushion is `playHead` in voiceClient.ts; the output buffer is a typical
@@ -1497,7 +1657,7 @@ function LatencyBreakdown({ latency }: { latency: LatencyMeasurement | null }) {
   if (!latency) {
     return (
       <div className="muted small">
-        Click <b>Measure now</b> to ping the server and time the IMBE codec on this device.
+        Click <b>Measure now</b> to ping the server and time {codecLabel} encode/decode on this device.
       </div>
     );
   }
@@ -1515,10 +1675,16 @@ function LatencyBreakdown({ latency }: { latency: LatencyMeasurement | null }) {
   const rows: { label: string; value: string; note?: string }[] = [
     { label: "Mic capture wait (½ worklet frame)", value: `${FIXED.micWaitMs} ms` },
     { label: "TX conditioning", value: `~${FIXED.preConditionMs} ms` },
-    { label: "IMBE encode (measured)", value: `${latency.encodeMs.toFixed(2)} ms` },
+    {
+      label: `${VOICE_CODEC_LABEL[latency.codec]} encode (measured)`,
+      value: `${latency.encodeMs.toFixed(2)} ms`,
+    },
     { label: "Network round-trip (measured)", value: `${latency.rttMs.toFixed(1)} ms` },
     { label: "Relay forward", value: `~${FIXED.relayForwardMs} ms` },
-    { label: "IMBE decode (measured)", value: `${latency.decodeMs.toFixed(2)} ms` },
+    {
+      label: `${VOICE_CODEC_LABEL[latency.codec]} decode (measured)`,
+      value: `${latency.decodeMs.toFixed(2)} ms`,
+    },
     { label: "Listener jitter cushion", value: `${FIXED.listenerCushionMs} ms` },
     { label: "Web Audio output buffer", value: `~${FIXED.outputBufferMs} ms` },
   ];

@@ -3,6 +3,8 @@
 // several underlying knobs at once. Power users can flip to "Show advanced
 // tuning" in the parent panel to see every individual knob.
 
+import type { VoiceCodec } from "../../../api";
+import { VOICE_CODEC_LABEL } from "../../../api";
 import type { AudioLabConfig, UpsampleMode } from "./pipeline";
 
 // ---------- Composite-control level mappings ----------
@@ -196,9 +198,10 @@ export function applyTrebleDb(cfg: AudioLabConfig, db: number): AudioLabConfig {
 interface SimpleControlsProps {
   config: AudioLabConfig;
   setConfig: (cfg: AudioLabConfig) => void;
+  labCodec?: VoiceCodec;
 }
 
-export function SimpleControls({ config, setConfig }: SimpleControlsProps) {
+export function SimpleControls({ config, setConfig, labCodec = "imbe" }: SimpleControlsProps) {
   return (
     <section className="audio-lab-simple">
       <SimpleSection
@@ -272,7 +275,7 @@ export function SimpleControls({ config, setConfig }: SimpleControlsProps) {
 
       <SimpleSection
         title="Audio quality"
-        description="How the codec output is rendered for playback. Over-the-air audio always uses the Standard path; Higher quality is a listening-only A/B (the IMBE codec only carries audio up to ~4 kHz regardless)."
+        description={`How ${VOICE_CODEC_LABEL[labCodec]} output is rendered for playback. IMBE and Codec2 are narrowband (~4 kHz); Opus is wideband. Higher quality upsampling is listen-only A/B on this page.`}
       >
         <ButtonGroup<QualityLevel>
           value={readQualityLevel(config)}
