@@ -194,6 +194,8 @@ app.get("/v1/air", (req, res) => {
     occupied,
     transmitting_unit_id: talker?.unit_id ?? null,
     transmitting_display_name: talker?.display_name ?? null,
+    /** When true, the keyed station is a bridge/AI that yields — handsets may talk over. */
+    transmitting_yields: talker?.yields ?? false,
   });
 });
 

@@ -381,7 +381,7 @@ export async function buildInfoRequestResponse(
       }
       const result = await fetchCadPersonSearchRadio(agencyId, infoRequest.subject);
       if (!result.ok) {
-        return result.line.includes("cannot reach")
+        return result.line.includes("CAD is down")
           ? cadSystemDownLine(csPart)
           : `${csPart}${result.line}.`;
       }
@@ -397,7 +397,7 @@ export async function buildInfoRequestResponse(
       }
       const result = await fetchCadVehicleSearchRadio(agencyId, infoRequest.subject);
       if (!result.ok) {
-        return result.line.includes("cannot reach")
+        return result.line.includes("CAD is down")
           ? cadSystemDownLine(csPart)
           : `${csPart}${result.line}.`;
       }

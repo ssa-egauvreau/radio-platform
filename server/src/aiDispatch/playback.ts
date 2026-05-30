@@ -103,6 +103,9 @@ async function playPcmOnChannelUnlocked(opts: {
             await sleep(wait);
           }
         }
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "release_air" }));
+        }
         finish();
       } catch (e) {
         finish(e instanceof Error ? e : new Error(String(e)));
@@ -185,23 +188,13 @@ async function playMarkerBurstOnChannelUnlocked(opts: {
 
     const sendMarker = async () => {
       try {
+        // Match the web console: one `marker_tone` control frame, then the full
+        // PCM clip in a single binary message. Sending 20 ms chunks used to
+        // clear `markerToneUntilMs` after the first chunk so later chunks
+        // claimed `/v1/air` as keyed voice and blocked units with busy tone.
         ws.send(JSON.stringify({ type: "marker_tone" }));
-        let next = Date.now();
-        for (let off = 0; off < opts.pcm.length; off += FRAME_BYTES) {
-          if (ws.readyState !== WebSocket.OPEN) {
-            break;
-          }
-          const end = Math.min(off + FRAME_BYTES, opts.pcm.length);
-          let frame = opts.pcm.subarray(off, end);
-          if (frame.length < FRAME_BYTES) {
-            frame = Buffer.concat([frame, Buffer.alloc(FRAME_BYTES - frame.length)]);
-          }
-          ws.send(frame);
-          next += 20;
-          const wait = next - Date.now();
-          if (wait > 0) {
-            await sleep(wait);
-          }
+        if (ws.readyState === WebSocket.OPEN && opts.pcm.length > 0) {
+          ws.send(opts.pcm);
         }
         finish();
       } catch (e) {

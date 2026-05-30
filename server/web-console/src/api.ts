@@ -246,6 +246,8 @@ export interface AirState {
   occupied: boolean;
   transmitting_unit_id: string | null;
   transmitting_display_name: string | null;
+  /** Bridge / AI dispatch traffic that yields — local PTT is not blocked. */
+  transmitting_yields?: boolean;
 }
 
 /** Home + scan talker hints (Android `/v1/talk-activity`). */

@@ -45,7 +45,21 @@ describe("talk-activity data source", () => {
 
     const main = peekVoiceTransmittingTalker(AGENCY, HOME);
     const scan = peekVoiceTransmittingTalker(AGENCY, SCAN);
-    assert.deepEqual(main, { unit_id: "U1", display_name: "Patrol" });
-    assert.deepEqual(scan, { unit_id: "U2", display_name: "Car 2" });
+    assert.deepEqual(main, { unit_id: "U1", display_name: "Patrol", yields: false });
+    assert.deepEqual(scan, { unit_id: "U2", display_name: "Car 2", yields: false });
+  });
+
+  test("peekVoiceTransmittingTalker reports yields for yielding bridge traffic", () => {
+    const ws = {} as WebSocket;
+    __claimVoiceAirForTest({
+      agencyId: AGENCY,
+      channel: HOME,
+      ws,
+      unitId: "AI-DISPATCH",
+      displayName: "Dispatch",
+      yields: true,
+    });
+    const talker = peekVoiceTransmittingTalker(AGENCY, HOME);
+    assert.deepEqual(talker, { unit_id: "AI-DISPATCH", display_name: "Dispatch", yields: true });
   });
 });

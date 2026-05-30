@@ -76,4 +76,6 @@ data class AirStateDto(
     /** Non-null while live PCM keyed on this channel (same TTL as relay “on air”). */
     @SerializedName("transmitting_unit_id") val transmittingUnitId: String? = null,
     @SerializedName("transmitting_display_name") val transmittingDisplayName: String? = null,
+    /** When true, keyed traffic is from a yielding bridge/AI — local PTT is not blocked. */
+    @SerializedName("transmitting_yields") val transmittingYields: Boolean = false,
 )

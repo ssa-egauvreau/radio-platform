@@ -55,7 +55,7 @@ describe("voice air / release_air", () => {
       displayName: "Patrol 1",
     });
     const talker = peekVoiceTransmittingTalker(AGENCY, CHANNEL);
-    assert.deepEqual(talker, { unit_id: "U100", display_name: "Patrol 1" });
+    assert.deepEqual(talker, { unit_id: "U100", display_name: "Patrol 1", yields: false });
   });
 
   test("release_air clears the holder immediately", () => {

@@ -656,6 +656,7 @@ export function __claimVoiceAirForTest(opts: {
   unitId: string;
   displayName?: string | null;
   lastPcmMs?: number;
+  yields?: boolean;
 }): void {
   const chNorm = normalizedChannel(opts.channel);
   const key = channelKey(opts.agencyId, chNorm);
@@ -665,7 +666,7 @@ export function __claimVoiceAirForTest(opts: {
     displayName: opts.displayName?.trim() || null,
     lastPcmMs: opts.lastPcmMs ?? Date.now(),
     priority: false,
-    yields: false,
+    yields: opts.yields ?? false,
   });
 }
 
@@ -724,7 +725,7 @@ export function peekVoiceTransmittingUnit(agencyId: number, channelRaw: unknown)
 export function peekVoiceTransmittingTalker(
   agencyId: number,
   channelRaw: unknown,
-): { unit_id: string; display_name: string | null } | null {
+): { unit_id: string; display_name: string | null; yields: boolean } | null {
   const chNorm = normalizedChannel(channelRaw);
   if (!chNorm || chNorm === "----") {
     return null;
@@ -748,7 +749,7 @@ export function peekVoiceTransmittingTalker(
     broadcastAirReleased(slot.ws, key);
     return null;
   }
-  return { unit_id: slot.unitUpper, display_name: slot.displayName };
+  return { unit_id: slot.unitUpper, display_name: slot.displayName, yields: slot.yields };
 }
 
 type AirClaim = { ok: true } | { ok: false; holder: string };

@@ -663,6 +663,7 @@ final class RadioViewModel: ObservableObject {
 
     private func channelBusyForLocalPtt(_ air: AirState) -> Bool {
         guard air.occupied else { return false }
+        if air.transmittingYields == true { return false }
         let peer = air.transmittingUnitId?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased() ?? ""
         return !peer.isEmpty && peer != unitId.uppercased()
     }

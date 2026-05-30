@@ -1532,6 +1532,7 @@ class RadioViewModel(
     /** Server says occupied; if the slot names another unit than us, busy; env-only lacks [transmittingUnitId]. */
     private fun isAirBusyForThisUnit(air: AirStateDto): Boolean {
         if (!air.occupied) return false
+        if (air.transmittingYields) return false
         val tx =
             air.transmittingUnitId?.trim()?.uppercase(Locale.US)?.takeIf { it.isNotEmpty() }
                 ?: return true

@@ -1,6 +1,9 @@
 import { setChannelTen33 } from "../store.js";
 import { playMarkerToneOnChannel } from "./markerTone.js";
 
+/** On-air attribution for 10-33 marker bursts only (does not claim `/v1/air`). */
+export const TEN33_MARKER_UNIT_ID = "10-33";
+
 const MARKER_INTERVAL_MS = 12_000;
 
 type LoopKey = string;
@@ -55,7 +58,8 @@ export async function applyChannelTen33Marker(opts: {
   agencyId: number;
   channelName: string;
   active: boolean;
-  markerUnitId: string;
+  /** Ignored — marker audio always uses [TEN33_MARKER_UNIT_ID] for attribution. */
+  markerUnitId?: string;
   source: "regex" | "ai" | "manual";
   /** When false, only the DB flag is set until startTen33MarkerLoop runs (AI 10-33 callout first). */
   startAudioLoop?: boolean;
@@ -73,7 +77,7 @@ export async function applyChannelTen33Marker(opts: {
           loopbackPort: opts.loopbackPort,
           agencyId: opts.agencyId,
           channelName: channel,
-          unitId: opts.markerUnitId,
+          unitId: TEN33_MARKER_UNIT_ID,
         },
         opts.immediateAudioBurst !== false,
       );

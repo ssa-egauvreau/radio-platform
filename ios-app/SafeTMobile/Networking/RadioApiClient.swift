@@ -11,6 +11,8 @@ struct AirState: Decodable {
     let occupied: Bool
     let transmittingUnitId: String?
     let transmittingDisplayName: String?
+    /// When true, keyed traffic is from a yielding bridge/AI — local PTT is allowed.
+    let transmittingYields: Bool?
 }
 
 struct TalkerSnapshot: Decodable {
