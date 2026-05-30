@@ -60,7 +60,9 @@ Only return found:true if HIGH CONFIDENCE the number is correct and current. Avo
 
 Find the Google Maps listing and street address for: "${query}"
 
-This is for CAD geocoding — the officer may only say a business and street (example: "McDonalds on Main Street" or "Citizen Assist at Walgreens on Chapman"). Resolve to the actual storefront street address with number in Orange County CA when possible.
+This is for CAD geocoding — the officer may only say a business and street (example: "McDonalds on Main Street", "Ross at account 3123 near the property address", or "Farmer Boys on Katella and Batavia"). Resolve to the actual storefront street address with number in Orange County CA when possible.
+
+When the query mentions "near" coordinates, a property anchor, or cross streets, pick the closest matching business location to that hint — not a different branch far away.
 
 Use Google Maps style addressing: numbered street first, then city, then two-letter state and 5-digit ZIP when known.
 
