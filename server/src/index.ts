@@ -22,6 +22,7 @@ import {
   peekVoiceTransmittingTalker,
 } from "./voiceRelay.js";
 import { backfillAiDispatchActivityLog, configureAiDispatchEngine } from "./aiDispatch/engine.js";
+import { startDispatchWatchdog } from "./aiDispatch/dispatchWatchdog.js";
 import { getAiDispatchPlatformStatus } from "./aiDispatch/platformConfig.js";
 import { scheduleAllAgencyTtsPrecache } from "./aiDispatch/ttsPrecache.js";
 import { getTranscriptionDiagnostics } from "./transcribe.js";
@@ -351,6 +352,7 @@ async function main(): Promise<void> {
     console.log(`DATABASE_URL ${process.env.DATABASE_URL ? "configured" : "not set (in-memory defaults)"}`);
     // The radio-bridge worker ingests stream-URL bridges onto their channels.
     configureAiDispatchEngine({ port });
+    startDispatchWatchdog();
     void scheduleAllAgencyTtsPrecache();
     setTimeout(() => void backfillAiDispatchActivityLog(), 15_000);
     startBridgeWorker({ port });

@@ -53,7 +53,7 @@ import {
   isVerifiedOpenCallId,
 } from "../ten8/cadComments.js";
 import {
-  buildTen8AddVehicleBody,
+  buildTen8AddVehicleBodyCombined,
   formatTen8VehicleLookupComment,
 } from "../ten8/vehicles.js";
 import type { PlateLookupResult } from "./plateLookup.js";
@@ -254,12 +254,17 @@ async function postTen8RadioCommentIfVerified(opts: {
 /**
  * Post plate/VIN decode to 10-8 vehicles API and duplicate the same facts as a CAD comment.
  */
+function sleepMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function postTen8PlateLookupToCall(opts: {
   agencyId: number;
   callId: string;
   active: Ten8ActiveIncident[];
   callsign: string;
   lookup: PlateLookupResult;
+  plateRequest: AiDispatchParseResult["plate_request"];
   trustedFromCreate: boolean;
 }): Promise<Record<string, unknown>> {
   const callId = opts.callId.trim();
@@ -271,29 +276,49 @@ async function postTen8PlateLookupToCall(opts: {
     return { skipped: "call_not_verified_open" };
   }
 
-  const out: Record<string, unknown> = { call_id: callId };
-  const vehicleBody = buildTen8AddVehicleBody(opts.lookup);
-  if (vehicleBody) {
-    const vehicleRes = await ten8AddVehicle(
-      opts.agencyId,
-      callId,
-      vehicleBody as unknown as Record<string, unknown>,
-    );
-    out.vehicle_request = vehicleBody;
-    Object.assign(out, vehicleRes);
-  }
-
+  const vehicleBody = buildTen8AddVehicleBodyCombined(opts.plateRequest, opts.lookup);
   const vehicleComment = formatTen8VehicleLookupComment(opts.callsign, opts.lookup);
-  if (vehicleComment) {
-    const commentRes = await ten8AddComment(opts.agencyId, callId, vehicleComment);
-    out.vehicle_comment = { comment: vehicleComment, ...commentRes };
+  const retryDelays = opts.trustedFromCreate ? [0, 1500, 4000] : [0];
+
+  for (let attempt = 0; attempt < retryDelays.length; attempt++) {
+    const delay = retryDelays[attempt]!;
+    if (delay > 0) {
+      await sleepMs(delay);
+    }
+    const out: Record<string, unknown> = { call_id: callId, attempt: attempt + 1 };
+    if (vehicleBody) {
+      const vehicleRes = await ten8AddVehicle(
+        opts.agencyId,
+        callId,
+        vehicleBody as unknown as Record<string, unknown>,
+      );
+      out.vehicle_request = vehicleBody;
+      Object.assign(out, vehicleRes);
+      if (vehicleRes.ok) {
+        if (vehicleComment) {
+          const commentRes = await ten8AddComment(opts.agencyId, callId, vehicleComment);
+          out.vehicle_comment = { comment: vehicleComment, ...commentRes };
+        }
+        return out;
+      }
+      const status = vehicleRes.status ?? 0;
+      if (opts.trustedFromCreate && (status === 404 || status === 0) && attempt < retryDelays.length - 1) {
+        continue;
+      }
+    }
+
+    if (vehicleComment) {
+      const commentRes = await ten8AddComment(opts.agencyId, callId, vehicleComment);
+      out.vehicle_comment = { comment: vehicleComment, ...commentRes };
+    }
+
+    if (!vehicleBody && !vehicleComment) {
+      return { skipped: "no_vehicle_data", call_id: callId };
+    }
+    return out;
   }
 
-  if (!vehicleBody && !vehicleComment) {
-    return { skipped: "no_vehicle_data", call_id: callId };
-  }
-
-  return out;
+  return { skipped: "vehicle_post_exhausted", call_id: callId };
 }
 
 async function persistAiDispatchLog(opts: {
@@ -558,7 +583,10 @@ async function processTransmission(transmissionId: number): Promise<void> {
           }
         }
 
-        if (plate.lookup && (plate.lookup.plate || plate.lookup.vin)) {
+        if (
+          plate.lookup &&
+          (plate.lookup.plate || plate.lookup.vin || parsed.plate_request?.plate || parsed.plate_request?.vin)
+        ) {
           let plateCallId = newCallIdFromCreate;
           let trustedFromCreate = !!plateCallId;
           if (!plateCallId) {
@@ -572,6 +600,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
               active,
               callsign,
               lookup: plate.lookup,
+              plateRequest: parsed.plate_request,
               trustedFromCreate,
             });
           } else {
@@ -662,6 +691,18 @@ async function processTransmission(transmissionId: number): Promise<void> {
           yieldsToUnits,
           ttsKind,
         );
+        if (plate.followUpSpeak?.trim()) {
+          const tail = adaptDispatcherResponseForChannel(plate.followUpSpeak.trim(), tx.channel_name);
+          await speakDispatcherReply(
+            tx,
+            transmissionId,
+            unitId,
+            transcript,
+            tail,
+            yieldsToUnits,
+            "plate_readback",
+          );
+        }
       } else if (allowOnAir && speakText && parsed.intent === "request_info" && !infoRequestNeedsAsync(parsed.info_request!)) {
         const reply = adaptDispatcherResponseForChannel(speakText, tx.channel_name);
         parsed = { ...parsed, dispatcher_response: reply };

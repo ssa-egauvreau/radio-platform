@@ -23,6 +23,29 @@ function normalizeUnitId(u: string): string {
   return u.trim().toLowerCase().replace(/^27-/, "");
 }
 
+/** True when the incident has at least one unit assigned in CAD payload. */
+export function incidentHasAssignedUnits(inc: { payload: unknown }): boolean {
+  if (!inc.payload || typeof inc.payload !== "object") {
+    return false;
+  }
+  const body = inc.payload as Record<string, unknown>;
+  const incident =
+    body.incident && typeof body.incident === "object"
+      ? (body.incident as Record<string, unknown>)
+      : body;
+  const units = incident.units ?? incident.Units;
+  if (!Array.isArray(units) || units.length === 0) {
+    return false;
+  }
+  return units.some((u) => {
+    if (!u || typeof u !== "object") {
+      return false;
+    }
+    const row = u as Record<string, unknown>;
+    return String(row.unit ?? row.id ?? row.unitId ?? row.unit_id ?? "").trim().length > 0;
+  });
+}
+
 export function incidentPayloadHasUnit(inc: { payload: unknown }, targetUnit: string): boolean {
   if (!targetUnit || !inc.payload || typeof inc.payload !== "object") {
     return false;

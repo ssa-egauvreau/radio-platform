@@ -36,7 +36,7 @@ import {
   isVerifiedOpenCallId,
 } from "../ten8/cadComments.js";
 import {
-  buildTen8AddVehicleBody,
+  buildTen8AddVehicleBodyCombined,
   formatTen8VehicleLookupComment,
 } from "../ten8/vehicles.js";
 import type { PlateLookupResult } from "./plateLookup.js";
@@ -392,14 +392,17 @@ export async function runAiDispatchDryRun(
         }
       }
 
-      if (plate.lookup && (plate.lookup.plate || plate.lookup.vin)) {
+      if (
+        plate.lookup &&
+        (plate.lookup.plate || plate.lookup.vin || parsed.plate_request?.plate || parsed.plate_request?.vin)
+      ) {
         let plateCallId = newCallIdFromCreate;
         const trustedFromCreate = !!plateCallId;
         if (!plateCallId) {
           const match = findMatchingOpenIncident(active, parsed, unitId);
           plateCallId = match?.call_id?.trim() || null;
         }
-        const vehicleBody = buildTen8AddVehicleBody(plate.lookup);
+        const vehicleBody = buildTen8AddVehicleBodyCombined(parsed.plate_request, plate.lookup);
         const vehicleComment = formatTen8VehicleLookupComment(callsign, plate.lookup);
         if (!plateCallId) {
           ten8Actions.ten8_plate_vehicle = { skipped: "no_matching_open_call_for_plate" };

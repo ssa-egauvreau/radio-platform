@@ -21,7 +21,7 @@ function callCodeForRadio(incidentType: string | null): string {
   return t;
 }
 
-function shortenLocationForRadio(loc: string | null): string {
+export function shortenLocationForRadio(loc: string | null): string {
   if (!loc?.trim()) {
     return "";
   }
@@ -218,6 +218,72 @@ export async function fetchCadPersonSearchRadio(
     body += "; narrow the search for more";
   }
   return { ok: true, line: body };
+}
+
+export type CadPlateLookupHit = {
+  found: boolean;
+  vehicleSummary: string | null;
+  stateOnFile: string | null;
+  historyLine: string | null;
+};
+
+function formatUnixTsRadio(ts: unknown): string {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) {
+    return "";
+  }
+  const d = new Date(n * 1000);
+  const mo = d.getMonth() + 1;
+  const day = d.getDate();
+  const yr = String(d.getFullYear()).slice(-2);
+  return `${mo}/${day}/${yr}`;
+}
+
+function formatCadPlateHistoryLine(v: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const st = str(v.state);
+  if (st) {
+    parts.push(`${st} on file`);
+  }
+  const calls = Array.isArray(v.calls) ? (v.calls as Record<string, unknown>[]) : [];
+  for (const c of calls.slice(0, 4)) {
+    const type = callCodeForRadio(str(c.type) || null);
+    const when = formatUnixTsRadio(c.timestamp);
+    const id = str(c.incident_id) || str(c.incident_id1) || (c.id != null ? String(c.id) : "");
+    const chunk = [type, when, id ? `call ${id}` : ""].filter(Boolean).join(" ");
+    if (chunk) {
+      parts.push(chunk);
+    }
+  }
+  return parts.join("; ");
+}
+
+/** 10-8 vehicle search by plate for dispatcher plate readbacks (first hit). */
+export async function fetchCadPlateLookup(
+  agencyId: number,
+  plate: string,
+  state?: string | null,
+): Promise<CadPlateLookupHit> {
+  const subject = [state?.trim(), plate.trim()].filter(Boolean).join(" ");
+  const res = await ten8SearchVehicles(agencyId, buildCadVehicleSearchParams(subject));
+  if (!res.ok) {
+    return { found: false, vehicleSummary: null, stateOnFile: null, historyLine: null };
+  }
+  const data = res.data as Record<string, unknown> | null;
+  const results = Array.isArray(data?.results) ? (data!.results as Record<string, unknown>[]) : [];
+  if (results.length === 0) {
+    return { found: false, vehicleSummary: null, stateOnFile: null, historyLine: null };
+  }
+  const v = results[0]!;
+  const vehicleSummary = [str(v.year), str(v.color), str(v.make), str(v.model)].filter(Boolean).join(" ");
+  const stateOnFile = str(v.state) || state?.trim().toUpperCase() || null;
+  const historyLine = formatCadPlateHistoryLine(v);
+  return {
+    found: true,
+    vehicleSummary: vehicleSummary || null,
+    stateOnFile,
+    historyLine: historyLine || null,
+  };
 }
 
 export async function fetchCadVehicleSearchRadio(

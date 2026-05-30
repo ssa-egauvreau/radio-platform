@@ -1,5 +1,9 @@
 import type { AiDispatchParseResult } from "./parse.js";
+import { ten8Configured } from "../ten8/client.js";
+import { fetchCadPlateLookup } from "../ten8/cadRadioLookup.js";
 import {
+  buildPlateCadLeadReadback,
+  buildPlateDmvTailReadback,
   buildPlateReadback,
   buildVinReadback,
   consumePendingPlateRequest,
@@ -13,7 +17,11 @@ export async function handlePlateFromParse(opts: {
   agencyId: number;
   unitId: string;
   parsed: AiDispatchParseResult;
-}): Promise<{ lookup: PlateLookupResult | null; speakText: string | null }> {
+}): Promise<{
+  lookup: PlateLookupResult | null;
+  speakText: string | null;
+  followUpSpeak: string | null;
+}> {
   const { agencyId, unitId, parsed } = opts;
   const intent = parsed.intent;
   const pr = parsed.plate_request;
@@ -21,27 +29,52 @@ export async function handlePlateFromParse(opts: {
   if (intent === "info_request_912" || (intent === "plate_request" && pr && !pr.plate && !pr.vin)) {
     notePendingPlateRequest(agencyId, unitId);
     const ack = parsed.dispatcher_response?.trim() || `${unitId}, 913.`;
-    return { lookup: null, speakText: ack };
+    return { lookup: null, speakText: ack, followUpSpeak: null };
   }
 
-  // Run the plate any time the parse carried plate or VIN fields — this includes a 961
-  // with the plate inline (intent="dispatch") as well as a standalone plate_request /
-  // plate_transmit transmission.
   if (pr?.vin && /^[A-HJ-NPR-Z0-9]{17}$/.test(pr.vin)) {
     const lookup = await lookupVin(agencyId, pr.vin);
-    return { lookup, speakText: buildVinReadback(unitId, lookup) };
-  }
-  if (pr?.plate) {
-    const lookup = await runPlateLookup(agencyId, pr.plate, pr.state);
-    return { lookup, speakText: buildPlateReadback(unitId, lookup) };
+    return { lookup, speakText: buildVinReadback(unitId, lookup), followUpSpeak: null };
   }
 
-  // Pending 912 with no plate yet: only consume the held window on a plate_* intent.
+  if (pr?.plate) {
+    const plate = pr.plate;
+    const state = pr.state;
+    const normalized = plate.trim().toUpperCase();
+    if (!/^[A-Z0-9]{2,8}$/.test(normalized)) {
+      const lookup = await runPlateLookup(agencyId, plate, state);
+      return {
+        lookup,
+        speakText: buildPlateReadback(unitId, lookup),
+        followUpSpeak: null,
+      };
+    }
+    let cadEnabled = false;
+    try {
+      cadEnabled = await ten8Configured(agencyId);
+    } catch {
+      cadEnabled = false;
+    }
+    const cadPromise = cadEnabled
+      ? fetchCadPlateLookup(agencyId, plate, state)
+      : Promise.resolve({
+          found: false,
+          vehicleSummary: null,
+          stateOnFile: null,
+          historyLine: null,
+        });
+    const dmvPromise = runPlateLookup(agencyId, plate, state);
+    const [cad, lookup] = await Promise.all([cadPromise, dmvPromise]);
+    const speakText = buildPlateCadLeadReadback(unitId, plate, state, cad);
+    const followUpSpeak = buildPlateDmvTailReadback(unitId, lookup, cad);
+    return { lookup, speakText, followUpSpeak };
+  }
+
   if (intent === "plate_request" || intent === "plate_transmit") {
     if (consumePendingPlateRequest(agencyId, unitId)) {
-      return { lookup: null, speakText: `${unitId}, 10-9 your full plate.` };
+      return { lookup: null, speakText: `${unitId}, 10-9 your full plate.`, followUpSpeak: null };
     }
   }
 
-  return { lookup: null, speakText: null };
+  return { lookup: null, speakText: null, followUpSpeak: null };
 }

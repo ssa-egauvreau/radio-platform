@@ -1,5 +1,6 @@
 import { getAgencyIntegrationValue } from "../store.js";
 import { recordLookupResult } from "../integrations/health.js";
+import type { CadPlateLookupHit } from "../ten8/cadRadioLookup.js";
 import {
   callSignForReadback,
   plateToSpokenPhonetic,
@@ -180,6 +181,85 @@ export async function runPlateLookup(
   const result = await lookupPlateToVin(p, st, apiKey);
   recordLookupResult(agencyId, "plate_lookup", result);
   return result;
+}
+
+function normalizeVehicleToken(s: string | null | undefined): string {
+  return (s ?? "").trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** True when DMV decode adds year/make/model not already stated from 10-8. */
+export function cadMissingDmvVehicleFields(
+  cad: CadPlateLookupHit | null,
+  dmv: PlateLookupResult,
+): boolean {
+  if (!dmv.ok) {
+    return false;
+  }
+  if (!cad?.found || !cad.vehicleSummary) {
+    return true;
+  }
+  const cadNorm = normalizeVehicleToken(cad.vehicleSummary);
+  for (const field of [dmv.year, dmv.make, dmv.model, dmv.color]) {
+    const tok = normalizeVehicleToken(field);
+    if (tok && tok.length >= 3 && !cadNorm.includes(tok)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function dmvVehiclePhrase(lookup: PlateLookupResult): string {
+  const parts = [lookup.year, lookup.make, lookup.model].filter(Boolean).join(" ");
+  return parts || "a vehicle with no further details available";
+}
+
+/** First on-air line: 10-8 CAD hit or NO MAKE. */
+export function buildPlateCadLeadReadback(
+  unitId: string,
+  plate: string,
+  state: string | null | undefined,
+  cad: CadPlateLookupHit | null,
+): string {
+  const cs = callSignForReadback(unitId);
+  const csPart = cs ? `${cs}, ` : "";
+  const phonetic = plateToSpokenPhonetic(plate);
+  const stSpoken = stateCodeToSpoken(state);
+  if (!cad?.found) {
+    return `${csPart}your ${stSpoken} plate of ${phonetic} comes back NO MAKE`;
+  }
+  const vehicle = cad.vehicleSummary?.trim() || "vehicle on file";
+  let line = `${csPart}your ${stSpoken} plate of ${phonetic} comes back ${vehicle}`;
+  if (cad.historyLine?.trim()) {
+    line += `, ${cad.historyLine.trim()}`;
+  }
+  return line;
+}
+
+/** Second on-air line: PlateToVin confirmation (always when DMV succeeds). */
+export function buildPlateDmvTailReadback(
+  unitId: string,
+  dmv: PlateLookupResult,
+  cad: CadPlateLookupHit | null,
+): string | null {
+  if (!dmv.ok) {
+    if (dmv.reason === "no_record") {
+      const cs = callSignForReadback(unitId);
+      const csPart = cs ? `${cs}, ` : "";
+      return `${csPart}DMV shows no record for that plate.`;
+    }
+    return null;
+  }
+  const cs = callSignForReadback(unitId);
+  const csPart = cs ? `${cs}, ` : "";
+  const vehicle = dmvVehiclePhrase(dmv);
+  const vinPart = dmv.vin ? ` the last six of the vin is ${vinLast6Spoken(dmv.vin)}` : "";
+  if (cad?.found && !cadMissingDmvVehicleFields(cad, dmv)) {
+    if (dmv.vin) {
+      return `${csPart}DMV confirms, last six of the vin is ${vinLast6Spoken(dmv.vin)}.`;
+    }
+    return null;
+  }
+  return `${csPart}to a ${vehicle}${vinPart}.`;
 }
 
 export function buildPlateReadback(unitId: string, lookup: PlateLookupResult): string {

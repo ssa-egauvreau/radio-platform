@@ -1,4 +1,5 @@
 import type { PlateLookupResult } from "../aiDispatch/plateLookup.js";
+import type { PlateRequestFields } from "../aiDispatch/parse.js";
 
 /** 10-8 CAD API POST /v1/incidents/{lookup}/vehicles (AddVehicleRequest). */
 export type Ten8AddVehicleBody = {
@@ -77,6 +78,38 @@ export function buildTen8AddVehicleBody(lookup: PlateLookupResult): Ten8AddVehic
   }
 
   return { notes: notesParts.join(" "), vehicle };
+}
+
+/** Merge PlateToVin decode with raw plate/VIN from the parse (961 create path). */
+export function buildTen8AddVehicleBodyCombined(
+  pr: PlateRequestFields | null | undefined,
+  lookup: PlateLookupResult | null | undefined,
+): Ten8AddVehicleBody | null {
+  const fromLookup = lookup ? buildTen8AddVehicleBody(lookup) : null;
+  if (fromLookup) {
+    return fromLookup;
+  }
+  if (!pr) {
+    return null;
+  }
+  const license = pr.plate?.trim().toUpperCase();
+  const vin = pr.vin?.trim().toUpperCase();
+  const state = pr.state?.trim().toUpperCase();
+  if (!license && !vin) {
+    return null;
+  }
+  const vehicle: Ten8AddVehicleBody["vehicle"] = {};
+  if (license) {
+    vehicle.license = license;
+  }
+  if (vin) {
+    vehicle.vin = vin;
+  }
+  if (state) {
+    vehicle.state = state;
+  }
+  const notes = license && state ? `Plate ${state} ${license}` : vin ? "VIN on stop" : "Vehicle on stop";
+  return { notes, vehicle };
 }
 
 /**
