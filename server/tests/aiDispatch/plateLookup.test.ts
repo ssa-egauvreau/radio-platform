@@ -89,24 +89,24 @@ test("buildPlateReadback: success but no decoded vehicle details still names the
   assert.match(out, /alpha bravo charlie one two three/i);
 });
 
-test("buildPlateReadback: no_record failure path explicitly says 'no record found' with the run plate", () => {
+test("buildPlateReadback: no_record failure path says no return on that plate", () => {
   const out = buildPlateReadback("27-205", {
     ok: false,
     plate: "ABC123",
     state: "CA",
     reason: "no_record",
   });
-  assert.match(out, /no record found/i);
+  assert.match(out, /no return comes back to that license plate/i);
   assert.match(out, /alpha bravo charlie one two three/i);
 });
 
-test("buildPlateReadback: generic failure path says 'plate lookup unavailable, stand by'", () => {
+test("buildPlateReadback: generic failure path says license plate system is down", () => {
   const out = buildPlateReadback("27-205", {
     ok: false,
     reason: "network_error",
     message: "Whatever",
   });
-  assert.match(out, /plate lookup unavailable, stand by\.?$/i);
+  assert.match(out, /license plate system is down right now/i);
 });
 
 test("buildPlateReadback: command-staff callsign 27-020 KEEPS the 27- prefix on the air", () => {
@@ -164,13 +164,13 @@ test("buildVinReadback: success but no decoded fields falls back to 'vin comes b
   assert.match(out, /vin comes back valid but vehicle details are unavailable\.?$/i);
 });
 
-test("buildVinReadback: no_record failure says 'vin lookup shows no record found'", () => {
+test("buildVinReadback: no_record failure says no return on that VIN", () => {
   const out = buildVinReadback("27-205", {
     ok: false,
     vin: "1HGCM82633A123456",
     reason: "no_record",
   });
-  assert.match(out, /vin lookup shows no record found\.?$/i);
+  assert.match(out, /no return comes back to that VIN/i);
 });
 
 test("buildVinReadback: invalid_vin failure asks for a 10-9", () => {
@@ -185,13 +185,13 @@ test("buildVinReadback: invalid_vin failure asks for a 10-9", () => {
   assert.match(out, /10-9/);
 });
 
-test("buildVinReadback: generic failure path says 'vin lookup unavailable, stand by'", () => {
+test("buildVinReadback: generic failure path says license plate system is down", () => {
   const out = buildVinReadback("27-205", {
     ok: false,
     vin: "1HGCM82633A123456",
     reason: "network_error",
   });
-  assert.match(out, /vin lookup unavailable, stand by\.?$/i);
+  assert.match(out, /license plate system is down right now/i);
 });
 
 // ---------- pending 912 plate request window ----------------------------
@@ -316,14 +316,14 @@ test("buildPlateReadback: no_record reason includes the plate the unit ran", () 
     state: "CA",
     reason: "no_record",
   });
-  assert.match(out, /no record found/);
+  assert.match(out, /no return comes back to that license plate/);
   assert.match(out, /eight Victor Whiskey Victor/);
 });
 
-test("buildPlateReadback: any other failure says 'unavailable, stand by'", () => {
+test("buildPlateReadback: API failures say license plate system is down", () => {
   for (const reason of ["api_error", "network_error", "auth_error", "insufficient_credit"]) {
     const out = buildPlateReadback("27-2009", { ok: false, reason });
-    assert.match(out, /unavailable, stand by/);
+    assert.match(out, /license plate system is down right now/i);
   }
 });
 
@@ -361,12 +361,12 @@ test("buildVinReadback: invalid_vin asks the unit to 10-9", () => {
 test("buildVinReadback: no_record vs other errors", () => {
   assert.match(
     buildVinReadback("27-2009", { ok: false, reason: "no_record" }),
-    /no record found/,
+    /no return comes back to that VIN/,
   );
   for (const reason of ["api_error", "network_error", "auth_error"]) {
     assert.match(
       buildVinReadback("27-2009", { ok: false, reason }),
-      /unavailable, stand by/,
+      /license plate system is down right now/,
     );
   }
 });

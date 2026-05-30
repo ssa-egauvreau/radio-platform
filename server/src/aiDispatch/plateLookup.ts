@@ -7,6 +7,7 @@ import {
   stateCodeToSpoken,
   vinLast6Spoken,
 } from "./platePhonetics.js";
+import { plateLookupFailureLine, vinLookupFailureLine } from "./lookupSpeech.js";
 
 export interface PlateLookupResult {
   ok: boolean;
@@ -242,12 +243,9 @@ export function buildPlateDmvTailReadback(
   cad: CadPlateLookupHit | null,
 ): string | null {
   if (!dmv.ok) {
-    if (dmv.reason === "no_record") {
-      const cs = callSignForReadback(unitId);
-      const csPart = cs ? `${cs}, ` : "";
-      return `${csPart}DMV shows no record for that plate.`;
-    }
-    return null;
+    const cs = callSignForReadback(unitId);
+    const csPart = cs ? `${cs}, ` : "";
+    return plateLookupFailureLine(csPart, dmv);
   }
   const cs = callSignForReadback(unitId);
   const csPart = cs ? `${cs}, ` : "";
@@ -267,9 +265,9 @@ export function buildPlateReadback(unitId: string, lookup: PlateLookupResult): s
   const csPart = cs ? `${cs}, ` : "";
   if (!lookup.ok) {
     if (lookup.reason === "no_record" && lookup.plate) {
-      return `${csPart}your ${stateCodeToSpoken(lookup.state)} plate of ${plateToSpokenPhonetic(lookup.plate)} shows no record found.`;
+      return `${csPart}your ${stateCodeToSpoken(lookup.state)} plate of ${plateToSpokenPhonetic(lookup.plate)}, ${plateLookupFailureLine("", lookup).trim()}`;
     }
-    return `${csPart}plate lookup unavailable, stand by.`;
+    return plateLookupFailureLine(csPart, lookup);
   }
   const vehicleParts = [lookup.color, lookup.year, lookup.make, lookup.model].filter(Boolean).join(" ");
   const phonetic = plateToSpokenPhonetic(lookup.plate ?? "");
@@ -284,13 +282,7 @@ export function buildVinReadback(unitId: string, lookup: PlateLookupResult): str
   const cs = callSignForReadback(unitId);
   const csPart = cs ? `${cs}, ` : "";
   if (!lookup.ok) {
-    if (lookup.reason === "no_record") {
-      return `${csPart}vin lookup shows no record found.`;
-    }
-    if (lookup.reason === "invalid_vin") {
-      return `${csPart}negative on that vin, please 10-9 the transmission.`;
-    }
-    return `${csPart}vin lookup unavailable, stand by.`;
+    return vinLookupFailureLine(csPart, lookup);
   }
   const core = [lookup.year, lookup.make, lookup.model].filter(Boolean).join(" ");
   if (!core) {

@@ -13,6 +13,7 @@ import {
   buildDistressTen33Callout,
   detectOfficerDistressFromTranscript,
 } from "./distressRules.js";
+import { callsignPrefixForRadio, genericInfoLookupFailedLine } from "./lookupSpeech.js";
 import { handlePlateFromParse } from "./plateHandler.js";
 import { parseDispatcherTransmission } from "./parse.js";
 import {
@@ -910,7 +911,7 @@ async function runAsyncInfoLookup(
     }
 
     const reply = adaptDispatcherResponseForChannel(
-      answer || `${parsed.unit ?? unitId}, negative, lookup failed.`,
+      answer || genericInfoLookupFailedLine(callsignPrefixForRadio(parsed.unit ?? unitId)),
       tx.channel_name,
     );
     await speakDispatcherReply(tx, transmissionId, unitId, transcript, reply, yieldsToUnits, "info_lookup");
@@ -950,7 +951,7 @@ async function runAsyncInfoLookup(
   } catch (err) {
     console.warn("[ai-dispatch] async info_request failed", err);
     const fallback = adaptDispatcherResponseForChannel(
-      `${parsed.unit ?? unitId}, negative, lookup failed.`,
+      genericInfoLookupFailedLine(callsignPrefixForRadio(parsed.unit ?? unitId)),
       tx.channel_name,
     );
     await speakDispatcherReply(tx, transmissionId, unitId, transcript, fallback, yieldsToUnits, "info_lookup").catch(

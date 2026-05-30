@@ -237,7 +237,7 @@ export async function fetchCadPersonSearchRadio(
       if (d.error === "ten8_unreachable") {
         return {
           ok: false,
-          line: "negative, cannot reach 10-8 CAD right now.",
+          line: "10-8 CAD is down right now.",
           status: res.status,
           found: false,
           matchCount: 0,
@@ -378,7 +378,7 @@ export async function fetchCadVehicleSearchRadio(
     if (res.status === 0 && res.data && typeof res.data === "object") {
       const d = res.data as Record<string, unknown>;
       if (d.error === "ten8_unreachable") {
-        return { ok: false, line: "negative, cannot reach 10-8 CAD right now.", status: res.status };
+        return { ok: false, line: "10-8 CAD is down right now.", status: res.status };
       }
     }
     return {
@@ -412,7 +412,7 @@ export async function fetchCadIncidentLookupRadio(
     if (res.status === 0 && res.data && typeof res.data === "object") {
       const d = res.data as Record<string, unknown>;
       if (d.error === "ten8_unreachable") {
-        return { ok: false, line: "negative, cannot reach 10-8 CAD right now.", status: res.status };
+        return { ok: false, line: "10-8 CAD is down right now.", status: res.status };
       }
     }
     return { ok: false, line: "negative, CAD incident lookup failed.", status: res.status };
@@ -451,7 +451,7 @@ export async function fetchCadOpenIncidentsRadio(
         return {
           ok: false,
           incidents: [],
-          line: "negative, cannot reach 10-8 CAD right now.",
+          line: "10-8 CAD is down right now.",
           status: res.status,
         };
       }

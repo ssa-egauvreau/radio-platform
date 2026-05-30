@@ -34,6 +34,15 @@ test("buildPlateCadLeadReadback: includes 10-8 vehicle and history when on file"
   assert.match(out, /CA on file/i);
 });
 
+test("buildPlateDmvTailReadback: DMV API down speaks license plate system is down", () => {
+  const tail = buildPlateDmvTailReadback(
+    "27-205",
+    { ok: false, plate: "8VWV621", state: "CA", reason: "network_error" },
+    { found: false, vehicleSummary: null, stateOnFile: null, historyLine: null },
+  );
+  assert.match(tail!, /license plate system is down right now/i);
+});
+
 test("buildPlateDmvTailReadback: NO MAKE path gets DMV year make model and vin last six", () => {
   const tail = buildPlateDmvTailReadback(
     "27-205",

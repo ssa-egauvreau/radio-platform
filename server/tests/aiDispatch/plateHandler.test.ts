@@ -248,7 +248,7 @@ test("handlePlateFromParse: plate_request with malformed plate short-circuits to
   assert.ok(out.lookup);
   assert.equal(out.lookup!.ok, false);
   assert.equal(out.lookup!.reason, "invalid_plate");
-  assert.match(out.speakText ?? "", /plate lookup unavailable, stand by/i);
+  assert.match(out.speakText ?? "", /license plate system is down|no return comes back/i);
 });
 
 test("handlePlateFromParse: plate_request with a 17-char VIN containing forbidden letters short-circuits to 10-9 (no DB)", async () => {

@@ -16,6 +16,13 @@ import { formatPhoneForTts } from "./speech/phoneSpeech.js";
 import type { InfoRequestFields } from "./parse.js";
 import { isWebSearchConfigured, webSearchAnswer } from "./webSearch.js";
 import {
+  cadLookupFailedLine,
+  cadSystemDownLine,
+  genericInfoLookupFailedLine,
+  webSearchFailureLine,
+  webSearchNotConfiguredLine,
+} from "./lookupSpeech.js";
+import {
   buildUnitLocationResponse,
   findRadioMapPosition,
   parseUnitLocationSubject,
@@ -249,7 +256,7 @@ export function infoRequestNeedsAsync(infoRequest: InfoRequestFields): boolean {
 }
 
 function webNotConfiguredLine(csPart: string): string {
-  return `${csPart}negative, web lookup not configured.`;
+  return webSearchNotConfiguredLine(csPart);
 }
 
 export async function buildInfoRequestResponse(
@@ -367,29 +374,39 @@ export async function buildInfoRequestResponse(
 
     case "cad_person_search": {
       if (!(await ten8Configured(agencyId))) {
-        return `${csPart}negative, 10-8 CAD is not configured.`;
+        return `${csPart}10-8 CAD is not configured.`;
       }
       if (!infoRequest.subject?.trim()) {
         return `${csPart}negative, no name or description for the person search.`;
       }
       const result = await fetchCadPersonSearchRadio(agencyId, infoRequest.subject);
+      if (!result.ok) {
+        return result.line.includes("cannot reach")
+          ? cadSystemDownLine(csPart)
+          : `${csPart}${result.line}.`;
+      }
       return `${csPart}${result.line}.`;
     }
 
     case "cad_vehicle_search": {
       if (!(await ten8Configured(agencyId))) {
-        return `${csPart}negative, 10-8 CAD is not configured.`;
+        return `${csPart}10-8 CAD is not configured.`;
       }
       if (!infoRequest.subject?.trim()) {
         return `${csPart}negative, no plate, VIN, or vehicle description heard.`;
       }
       const result = await fetchCadVehicleSearchRadio(agencyId, infoRequest.subject);
+      if (!result.ok) {
+        return result.line.includes("cannot reach")
+          ? cadSystemDownLine(csPart)
+          : `${csPart}${result.line}.`;
+      }
       return `${csPart}${result.line}.`;
     }
 
     case "cad_incident_lookup": {
       if (!(await ten8Configured(agencyId))) {
-        return `${csPart}negative, 10-8 CAD is not configured.`;
+        return `${csPart}10-8 CAD is not configured.`;
       }
       const lookup = infoRequest.subject?.trim() ?? "";
       const callNum = extractCallLookupNumber(lookup) ?? (/\d/.test(lookup) ? lookup : "");
@@ -397,12 +414,20 @@ export async function buildInfoRequestResponse(
         return `${csPart}10-9 the call number to look up that incident.`;
       }
       const result = await fetchCadIncidentLookupRadio(agencyId, callNum);
+      if (!result.ok) {
+        if (result.status === 404) {
+          return `${csPart}${result.line}.`;
+        }
+        return result.line.includes("CAD is down")
+          ? cadSystemDownLine(csPart)
+          : cadLookupFailedLine(csPart);
+      }
       return `${csPart}${result.line}.`;
     }
 
     case "cad_call_tags": {
       if (!(await ten8Configured(agencyId))) {
-        return `${csPart}negative, 10-8 CAD is not configured.`;
+        return `${csPart}10-8 CAD is not configured.`;
       }
       const subject = infoRequest.subject?.trim() ?? "";
       const callNum = extractCallLookupNumber(subject);
@@ -421,6 +446,11 @@ export async function buildInfoRequestResponse(
         return `${csPart}negative, no open call found for your unit. Say the call number.`;
       }
       const result = await fetchCadCallTagsRadio(agencyId, callId, tagQuery || null);
+      if (!result.ok) {
+        return result.line.includes("CAD is down")
+          ? cadSystemDownLine(csPart)
+          : cadLookupFailedLine(csPart);
+      }
       return `${csPart}${result.line}`;
     }
 
@@ -503,13 +533,10 @@ export async function buildInfoRequestResponse(
           return `${csPart}${name}, number is ${phoneSpoken}.`;
         }
       }
-      if (webResult.reason === "no_api_key" || webResult.reason === "anthropic_required") {
-        return webNotConfiguredLine(csPart);
+      if (!webResult.ok) {
+        return webSearchFailureLine(csPart, webResult);
       }
-      if (webResult.reason === "timeout") {
-        return `${csPart}negative, lookup timed out. Try again or check the number yourself.`;
-      }
-      return `${csPart}negative, unable to find a phone number for ${infoRequest.subject}.`;
+      return `${csPart}I can't find that information.`;
     }
 
     case "external_address": {
@@ -527,13 +554,10 @@ export async function buildInfoRequestResponse(
         const addressParts = [r.street, r.city, r.state].filter(Boolean).join(", ");
         return `${csPart}${name}, address is ${prepareLocationForTts(addressParts)}.`;
       }
-      if (webResult.reason === "no_api_key" || webResult.reason === "anthropic_required") {
-        return webNotConfiguredLine(csPart);
+      if (!webResult.ok) {
+        return webSearchFailureLine(csPart, webResult);
       }
-      if (webResult.reason === "timeout") {
-        return `${csPart}negative, lookup timed out. Try again.`;
-      }
-      return `${csPart}negative, unable to find an address for ${infoRequest.subject}.`;
+      return `${csPart}I can't find that information.`;
     }
 
     case "legal_code": {
@@ -559,13 +583,10 @@ export async function buildInfoRequestResponse(
         }
         return `${csPart}${parts.join(", ")}`;
       }
-      if (webResult.reason === "no_api_key" || webResult.reason === "anthropic_required") {
-        return webNotConfiguredLine(csPart);
+      if (!webResult.ok) {
+        return webSearchFailureLine(csPart, webResult);
       }
-      if (webResult.reason === "timeout") {
-        return `${csPart}negative, lookup timed out. Try again.`;
-      }
-      return `${csPart}negative, unable to find a code reference for ${infoRequest.subject}.`;
+      return `${csPart}I can't find that information.`;
     }
 
     case "general_query": {
@@ -579,13 +600,10 @@ export async function buildInfoRequestResponse(
       if (webResult.ok && webResult.raw && typeof webResult.raw.answer === "string") {
         return `${csPart}${webResult.raw.answer}`;
       }
-      if (webResult.reason === "no_api_key" || webResult.reason === "anthropic_required") {
-        return webNotConfiguredLine(csPart);
+      if (!webResult.ok) {
+        return webSearchFailureLine(csPart, webResult);
       }
-      if (webResult.reason === "timeout") {
-        return `${csPart}negative, lookup timed out. Try again.`;
-      }
-      return `${csPart}negative, unable to find an answer.`;
+      return `${csPart}I can't find that information.`;
     }
 
     default:
