@@ -48,10 +48,9 @@ final class RadioScreenUITests: XCTestCase {
 
     func test_radio_signOut_returnsToLogin() throws {
         let app = XCUIApplication()
-        // Force the legacy PTT bar so this test exercises the navigation
-        // path without contending with the bottom-trailing BigPttButton
-        // overlay. The big-PTT layout is covered separately by
-        // PttControlsRegressionUITests.
+        // -uitest-big-ptt-off forces the legacy PTT bar so the big always-
+        // thumbable PTT button does not overlap the SETTINGS tab strip. The
+        // big-PTT layout is covered separately in PttControlsRegressionUITests.
         app.launchArguments += ["-uitest-logged-in", "-uitest-big-ptt-off"]
         app.launch()
 
