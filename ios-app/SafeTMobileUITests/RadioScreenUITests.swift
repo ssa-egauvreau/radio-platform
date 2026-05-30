@@ -60,9 +60,6 @@ final class RadioScreenUITests: XCTestCase {
         settings.tap()
 
         let openConfirm = app.buttons["Sign Out…"]
-        // CI simulators take longer than dev hardware to first-paint a
-        // SwiftUI sheet; bump from 3 s to 5 s to match the SETTINGS wait
-        // above. The previous ceiling tripped intermittently on iOS UI tests.
         XCTAssertTrue(openConfirm.waitForExistence(timeout: 5), "Sign Out… not found in SETTINGS sheet")
         openConfirm.tap()
 

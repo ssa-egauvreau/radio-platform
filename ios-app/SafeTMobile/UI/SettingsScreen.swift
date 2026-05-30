@@ -163,6 +163,12 @@ struct SettingsScreen: View {
             } label: {
                 HStack {
                     Image(systemName: "rectangle.portrait.and.arrow.right")
+                        // Decorative — without this the system folds the SF
+                        // Symbol's localized name into the button's accessibility
+                        // label, so `app.buttons["Sign Out…"]` in the UI test
+                        // (and VoiceOver readout) wouldn't match a plain
+                        // "Sign Out…".
+                        .accessibilityHidden(true)
                     // Ellipsis is the iOS convention for "opens a
                     // confirmation" — and keeps this label distinct from the
                     // confirmation dialog's "Sign Out" so VoiceOver and UI
@@ -172,6 +178,10 @@ struct SettingsScreen: View {
                 }
                 .foregroundColor(.safetRed)
             }
+            // Pin the accessibility label explicitly so a future SwiftUI
+            // revision of how complex Button labels compose can't silently
+            // break `app.buttons["Sign Out…"]` again.
+            .accessibilityLabel("Sign Out…")
         }
         .listRowBackground(Color.safetSurface)
     }
