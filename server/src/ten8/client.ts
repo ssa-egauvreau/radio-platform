@@ -165,6 +165,22 @@ export async function ten8Configured(agencyId: number): Promise<boolean> {
   return (await ten8Config(agencyId)) != null;
 }
 
+/**
+ * The CAD + New Incident base URLs that would actually be used for this agency (after applying
+ * any per-agency overrides). Returned to the admin API tester so the page shows the real host it
+ * called, not a hardcoded guess. Null entries mean that API is not configured.
+ */
+export async function ten8ResolvedHosts(
+  agencyId: number,
+): Promise<{ cadBaseUrl: string | null; newIncidentBaseUrl: string | null }> {
+  const cad = await ten8Config(agencyId);
+  const ni = await newIncidentConfig(agencyId);
+  return {
+    cadBaseUrl: cad?.baseUrl ?? null,
+    newIncidentBaseUrl: ni?.baseUrl ?? null,
+  };
+}
+
 export async function ten8ListIncidents(
   agencyId: number,
   opts?: { from?: number; to?: number; field?: string },
