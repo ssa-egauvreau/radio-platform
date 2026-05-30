@@ -24,11 +24,14 @@ const ACTIONS: { value: string; label: string; write: boolean; api: Ten8Api }[] 
   { value: "create_incident", label: "Create incident (POST /incidents)", write: true, api: "new_incident" },
 ];
 
-/** Human label + host for each underlying 10-8 API, shown next to the selected action. */
+/**
+ * Human label + documented host for each underlying 10-8 API. `host` is only a hint shown before
+ * the first run; once an action runs, the pill shows the actual base URL the server resolved.
+ */
 const API_INFO: Record<Ten8Api, { label: string; host: string; setting: string }> = {
   cad: {
     label: "10-8 CAD API v1.1.0",
-    host: "connect.10-8systems.com",
+    host: "10-8 CAD gateway",
     setting: "10-8 CAD API base URL",
   },
   new_incident: {
@@ -216,7 +219,30 @@ export function Ten8ApiTestPanel() {
   const fields = FIELDS_BY_ACTION[action] ?? [];
   const currentAction = useMemo(() => ACTIONS.find((a) => a.value === action), [action]);
   const isWrite = currentAction?.write === true;
-  const apiInfo = API_INFO[currentAction?.api ?? "cad"];
+  const currentApi = currentAction?.api ?? "cad";
+  const apiInfo = API_INFO[currentApi];
+
+  /**
+   * Host actually used by the last run, reported by the server (respects per-agency overrides).
+   * Falls back to the static documented host until the first run. This is the source of truth —
+   * the static API_INFO host is only a hint before any call has been made.
+   */
+  const resolvedHost = useMemo(() => {
+    const h = result?.hosts;
+    if (!h) {
+      return null;
+    }
+    const url = currentApi === "new_incident" ? h.newIncidentBaseUrl : h.cadBaseUrl;
+    if (!url) {
+      return null;
+    }
+    try {
+      return new URL(url).host;
+    } catch {
+      return url.replace(/^https?:\/\//, "");
+    }
+  }, [result, currentApi]);
+  const shownHost = resolvedHost ?? apiInfo.host;
 
   /** When the server couldn't reach 10-8 at all, ten8Fetch returns this structured error. */
   const unreachable = useMemo(() => {
@@ -342,22 +368,21 @@ export function Ten8ApiTestPanel() {
         </p>
         <ul className="muted" style={{ marginTop: 0 }}>
           <li>
-            <b>10-8 CAD API v1.1.0</b> — reads, search, comments, tags, persons, vehicles. Host{" "}
-            <code>connect.10-8systems.com</code> (field: <i>10-8 CAD API base URL</i>). Every action
-            below <b>except</b> Create incident.
+            <b>10-8 CAD API v1.1.0</b> — reads, search, comments, tags, persons, vehicles. Set via
+            the <i>10-8 CAD API base URL</i> field. Every action below <b>except</b> Create incident.
           </li>
           <li>
-            <b>10-8 New Incident API v1.0.0</b> — only <i>Create incident</i>. Host{" "}
-            <code>interface.10-8systems.com</code>, Basic auth (field: <i>10-8 New Incident API base
-            URL</i>).
+            <b>10-8 New Incident API v1.0.0</b> — only <i>Create incident</i> (Basic auth). Set via
+            the <i>10-8 New Incident API base URL</i> field.
           </li>
         </ul>
         <p className="muted">
-          Reads run live against 10-8. WRITE actions (add / remove / create / update) only hit 10-8
-          for real when the agency has <b>10-8 live CAD writes</b> enabled — otherwise they shadow,
-          and the response shows <code>shadow: true</code> with the sanitized body that would have
-          been sent. A <b>502 “Internal server error”</b> here means the configured base URL is not
-          answering — check the host for the API shown beside the action.
+          The <b>host</b> pill below shows the actual base URL the server used once you run an action
+          (it respects the per-agency override). Reads run live against 10-8. WRITE actions (add /
+          remove / create / update) only hit 10-8 for real when the agency has <b>10-8 live CAD
+          writes</b> enabled — otherwise they shadow, and the response shows <code>shadow: true</code>{" "}
+          with the sanitized body that would have been sent. A <b>502 “Internal server error”</b> here
+          means that base URL’s host is not answering — check the host shown in the pill.
         </p>
       </header>
 
@@ -385,7 +410,10 @@ export function Ten8ApiTestPanel() {
 
         <div className="ai-test-summary-row">
           <span className="ai-test-pill">{apiInfo.label}</span>
-          <span className="ai-test-pill">host: {apiInfo.host}</span>
+          <span className="ai-test-pill">
+            host: {shownHost}
+            {resolvedHost ? " (actual)" : ""}
+          </span>
           <span className="ai-test-pill">setting: {apiInfo.setting}</span>
         </div>
 

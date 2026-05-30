@@ -178,6 +178,7 @@ import { listTen8MapIncidents } from "./ten8/mapIncidents.js";
 import { listTen8ActiveIncidents, listTen8WebhookLog } from "./ten8/store.js";
 import {
   ten8Configured,
+  ten8ResolvedHosts,
   ten8Health,
   ten8GetIncident,
   ten8ListIncidents,
@@ -3066,6 +3067,7 @@ export function createApiRouter(): Router {
         status: result.status ?? null,
         shadow: result.shadow === true,
         data: result.data ?? null,
+        hosts: await ten8ResolvedHosts(agencyId),
       });
     } catch (error) {
       fail(res, error);

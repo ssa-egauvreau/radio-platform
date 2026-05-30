@@ -221,6 +221,8 @@ export interface Ten8ApiTestResult {
   /** True when the write was shadowed (live CAD writes are OFF for the agency). */
   shadow?: boolean;
   data: unknown;
+  /** Actual base URLs the server resolved for this agency (after per-agency overrides). */
+  hosts?: { cadBaseUrl: string | null; newIncidentBaseUrl: string | null };
 }
 
 export interface Transmission {
