@@ -29,6 +29,7 @@ import {
 } from "../ten8/client.js";
 import { buildCadPersonLinkBody } from "../ten8/cadRadioLookup.js";
 import { buildTen8NewIncidentBody } from "../ten8/incidentPayload.js";
+import { buildTen8IncidentSeedCoords } from "../ten8/geocode.js";
 import {
   extractCallIdFromCreateResponse,
   formatTen8RadioComment,
@@ -312,6 +313,7 @@ export async function runAiDispatchDryRun(
                         status: "active",
                         units: callsign ? [{ unit: callsign }] : [],
                         location: seedLocation,
+                        ...buildTen8IncidentSeedCoords(body),
                         ...(seedPriority ? { priority: seedPriority } : {}),
                       },
                     },

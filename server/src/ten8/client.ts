@@ -124,9 +124,19 @@ function sanitizeTen8Body(value: unknown): unknown {
  * 10-8 workflows can reject it as not valid for that agency.
  */
 export function prepareTen8NewIncidentBody(body: Record<string, unknown>): Record<string, unknown> {
+  const preservedCoords =
+    typeof body.coordinates === "string" ? body.coordinates : undefined;
+  const preservedLatlng = typeof body.latlng === "string" ? body.latlng : undefined;
   const sanitized = sanitizeTen8Body(body) as Record<string, unknown>;
   if (typeof body.type === "string") {
     sanitized.type = body.type;
+  }
+  // Parentheses and commas in coordinates/latlng are required by 10-8 but stripped by sanitizeForTen8.
+  if (preservedCoords) {
+    sanitized.coordinates = preservedCoords;
+  }
+  if (preservedLatlng) {
+    sanitized.latlng = preservedLatlng;
   }
   return finalizeTen8NewIncidentBody(sanitized);
 }

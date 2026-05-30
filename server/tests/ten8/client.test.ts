@@ -31,3 +31,14 @@ test("prepareTen8NewIncidentBody keeps strict sanitization when no type is suppl
   assert.equal(out.summary, "Check lot 3 side door west");
   assert.equal(out.location, "2000 E Gene Autry Way, Anaheim, CA 92806");
 });
+
+test("prepareTen8NewIncidentBody preserves coordinates parentheses and commas", () => {
+  const coords = "(33.79990119110902, -117.88240038784782)";
+  const out = prepareTen8NewIncidentBody({
+    type: "Suspicious Person",
+    summary: "unit on scene",
+    location: "2000 E Gene Autry Way, Anaheim, CA 92806",
+    coordinates: coords,
+  });
+  assert.equal(out.coordinates, coords);
+});

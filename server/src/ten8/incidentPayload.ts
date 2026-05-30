@@ -3,6 +3,7 @@ import { accountCodeLocnotesForm } from "../aiDispatch/speech/numbers.js";
 import { lookupSsaProperty } from "../aiDispatch/ssaProperties.js";
 import { isWebSearchConfigured, webSearchAnswer } from "../aiDispatch/webSearch.js";
 import { resolveTen8IncidentType, resolveTen8PriorityForCode, clampPriority } from "./callTypes.js";
+import { geocodeAddressForAgency, formatTen8Coordinates } from "./geocode.js";
 
 /** Fields 10-8 / Google Maps geocoding expect (see New Incident API `location` example). */
 export type Ten8LocationFields = {
@@ -217,6 +218,18 @@ function applyLocationFields(body: Record<string, unknown>, loc: Ten8LocationFie
   if (loc.locnotes) body.locnotes = loc.locnotes;
 }
 
+/** Resolve lat/lon for 10-8 `coordinates` (New Incident API) from the full location line. */
+async function applyCoordinatesToBody(
+  agencyId: number,
+  body: Record<string, unknown>,
+  locationLine: string,
+): Promise<void> {
+  const coords = await geocodeAddressForAgency(agencyId, locationLine);
+  if (coords) {
+    body.coordinates = formatTen8Coordinates(coords.lat, coords.lon);
+  }
+}
+
 async function resolveLocationFields(
   _agencyId: number,
   parsed: AiDispatchParseResult,
@@ -287,6 +300,7 @@ export async function buildTen8NewIncidentBody(
   const loc = await resolveLocationFields(agencyId, parsed, { transcript: opts?.transcript });
   if (loc) {
     applyLocationFields(body, loc);
+    await applyCoordinatesToBody(agencyId, body, loc.location);
   }
 
   return body;

@@ -1,8 +1,5 @@
-import { getAgencyIntegrationValue } from "../store.js";
+import { geocodeAddressForAgency, parseTen8CoordinateString } from "./geocode.js";
 import { listTen8ActiveIncidents } from "./store.js";
-
-const GEO_CACHE = new Map<string, { lat: number; lon: number; at: number }>();
-const GEO_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 export type Ten8MapIncident = {
   call_id: string;
@@ -51,74 +48,14 @@ function coordsFromPayload(payload: unknown): { lat: number; lon: number } | nul
       return { lat, lon };
     }
   }
-  return null;
-}
 
-async function geocodeAddress(
-  agencyId: number,
-  address: string,
-): Promise<{ lat: number; lon: number } | null> {
-  const key = address.trim().toLowerCase();
-  if (!key) {
-    return null;
-  }
-  const cached = GEO_CACHE.get(key);
-  if (cached && Date.now() - cached.at < GEO_CACHE_TTL_MS) {
-    return { lat: cached.lat, lon: cached.lon };
-  }
-
-  const googleKey =
-    (await getAgencyIntegrationValue(agencyId, "google_maps_geocoding_api_key"))?.trim() ||
-    process.env.GOOGLE_MAPS_GEOCODING_API_KEY?.trim() ||
-    "";
-
-  if (googleKey) {
-    try {
-      const url = new URL("https://maps.googleapis.com/maps/api/geocode/json");
-      url.searchParams.set("address", address);
-      url.searchParams.set("key", googleKey);
-      const r = await fetch(url.toString(), { signal: AbortSignal.timeout(8000) });
-      if (r.ok) {
-        const data = (await r.json()) as {
-          status?: string;
-          results?: Array<{ geometry?: { location?: { lat?: number; lng?: number } } }>;
-        };
-        const loc = data.results?.[0]?.geometry?.location;
-        const lat = Number(loc?.lat);
-        const lon = Number(loc?.lng);
-        if (data.status === "OK" && Number.isFinite(lat) && Number.isFinite(lon)) {
-          GEO_CACHE.set(key, { lat, lon, at: Date.now() });
-          return { lat, lon };
-        }
-      }
-    } catch {
-      /* try nominatim */
+  for (const key of ["coordinates", "latlng", "latLng"] as const) {
+    const parsed = parseTen8CoordinateString(incident[key]);
+    if (parsed) {
+      return parsed;
     }
   }
 
-  try {
-    const url = new URL("https://nominatim.openstreetmap.org/search");
-    url.searchParams.set("q", address);
-    url.searchParams.set("format", "json");
-    url.searchParams.set("limit", "1");
-    url.searchParams.set("countrycodes", "us");
-    const r = await fetch(url.toString(), {
-      headers: { "User-Agent": "SafeT-PTT-Console/1.0 (10-8 map pins)" },
-      signal: AbortSignal.timeout(8000),
-    });
-    if (r.ok) {
-      const data = (await r.json()) as Array<{ lat?: string; lon?: string }>;
-      const hit = data[0];
-      const lat = Number(hit?.lat);
-      const lon = Number(hit?.lon);
-      if (Number.isFinite(lat) && Number.isFinite(lon)) {
-        GEO_CACHE.set(key, { lat, lon, at: Date.now() });
-        return { lat, lon };
-      }
-    }
-  } catch {
-    return null;
-  }
   return null;
 }
 
@@ -130,7 +67,7 @@ export async function listTen8MapIncidents(agencyId: number): Promise<Ten8MapInc
   for (const row of rows) {
     let coords = coordsFromPayload(row.payload);
     if (!coords && row.location?.trim()) {
-      coords = await geocodeAddress(agencyId, row.location);
+      coords = await geocodeAddressForAgency(agencyId, row.location);
     }
     if (!coords) {
       continue;
