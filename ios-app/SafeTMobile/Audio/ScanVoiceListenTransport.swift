@@ -101,6 +101,12 @@ final class ScanVoiceListenTransport {
         connections.removeAll()
     }
 
+    /// Cancels backoff timers and immediately reopens any dropped scan sockets.
+    /// Called when the network path monitor reports connectivity returned.
+    func retryNow() {
+        for (_, conn) in connections { conn.retryNow() }
+    }
+
     // MARK: - per-channel connection
 
     @MainActor
@@ -173,6 +179,14 @@ final class ScanVoiceListenTransport {
             reconnectTask = nil
             task?.cancel(with: .goingAway, reason: nil)
             task = nil
+        }
+
+        func retryNow() {
+            guard !closed, task == nil else { return }
+            reconnectTask?.cancel()
+            reconnectTask = nil
+            reconnectAttempts = 0
+            open()
         }
 
         private func sendJoin() {
@@ -286,7 +300,7 @@ final class ScanVoiceListenTransport {
             guard !closed, isAlive(channelKey) else { return }
             if reconnectTask != nil { return }
             reconnectAttempts += 1
-            let delaySeconds = min(pow(2.0, Double(reconnectAttempts - 1)), 30.0)
+            let delaySeconds = VoiceTiming.backoffDelaySeconds(attempt: reconnectAttempts, cap: 30)
             let nanoseconds = UInt64(delaySeconds * 1_000_000_000)
             reconnectTask = Task { @MainActor [weak self] in
                 try? await Task.sleep(nanoseconds: nanoseconds)

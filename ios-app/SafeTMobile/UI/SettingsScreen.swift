@@ -9,12 +9,14 @@ struct SettingsScreen: View {
     let onSignOut: () -> Void
     let onClose: () -> Void
 
+    @EnvironmentObject private var settings: SettingsStore
     @State private var confirmingSignOut = false
 
     var body: some View {
         NavigationStack {
             List {
                 accountSection
+                controlsSection
                 scanSection
                 gpsSection
                 aboutSection
@@ -51,6 +53,24 @@ struct SettingsScreen: View {
             if !state.agencyName.isEmpty {
                 row("Agency", state.agencyName)
             }
+        }
+        .listRowBackground(Color.safetSurface)
+    }
+
+    private var controlsSection: some View {
+        Section {
+            Toggle("Large PTT button", isOn: $settings.bigPttButtonEnabled)
+                .tint(.safetGreen)
+                .foregroundColor(.safetText)
+            Toggle("Hardware PTT (Volume Down / Action Button)", isOn: $settings.hardwarePttEnabled)
+                .tint(.safetGreen)
+                .foregroundColor(.safetText)
+        } header: {
+            Text("Controls")
+        } footer: {
+            Text("Volume Down (held) keys the mic while the radio screen is open. On iPhone 15 Pro and later, bind the Action Button to the 'Start PTT' / 'Stop PTT' shortcuts via Settings → Action Button.")
+                .font(.system(size: 11))
+                .foregroundColor(.safetTextDim)
         }
         .listRowBackground(Color.safetSurface)
     }
@@ -143,6 +163,12 @@ struct SettingsScreen: View {
             } label: {
                 HStack {
                     Image(systemName: "rectangle.portrait.and.arrow.right")
+                        // Decorative — without this the system folds the SF
+                        // Symbol's localized name into the button's accessibility
+                        // label, so `app.buttons["Sign Out…"]` in the UI test
+                        // (and VoiceOver readout) wouldn't match a plain
+                        // "Sign Out…".
+                        .accessibilityHidden(true)
                     // Ellipsis is the iOS convention for "opens a
                     // confirmation" — and keeps this label distinct from the
                     // confirmation dialog's "Sign Out" so VoiceOver and UI
@@ -152,20 +178,27 @@ struct SettingsScreen: View {
                 }
                 .foregroundColor(.safetRed)
             }
+            // Pin the accessibility label explicitly so a future SwiftUI
+            // revision of how complex Button labels compose can't silently
+            // break `app.buttons["Sign Out…"]` again.
+            .accessibilityLabel("Sign Out…")
         }
         .listRowBackground(Color.safetSurface)
     }
 
     private func row(_ label: String, _ value: String) -> some View {
         HStack {
-            Text(label).foregroundColor(.safetTextDim)
+            Text(label)
+                .font(.body)
+                .foregroundColor(.safetTextDim)
             Spacer()
             Text(value)
-                .font(.system(size: 13, design: .monospaced))
+                .font(.system(.footnote, design: .monospaced))
                 .foregroundColor(.safetText)
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
+        .accessibilityElement(children: .combine)
     }
 
     private var tunedChannel: String? {

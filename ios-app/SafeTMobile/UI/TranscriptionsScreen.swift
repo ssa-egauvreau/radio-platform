@@ -55,13 +55,14 @@ struct TranscriptionsScreen: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            searchBar
             filterBar
             content
         }
         .background(Color.safetBackground.ignoresSafeArea())
         .navigationTitle("TRANSCRIPTS")
         .navigationBarTitleDisplayMode(.inline)
+        .searchable(text: $search, prompt: "Search transcripts")
+        .onChange(of: search) { _ in scheduleSearch() }
         .task {
             await refreshAvailableChannels()
             await reload()
@@ -83,30 +84,6 @@ struct TranscriptionsScreen: View {
                 .presentationDetents([.medium])
                 .preferredColorScheme(.dark)
         }
-    }
-
-    private var searchBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .foregroundColor(.safetTextDim)
-            TextField("Search transcript text", text: $search)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .foregroundColor(.safetText)
-                .onChange(of: search) { _ in scheduleSearch() }
-            if !search.isEmpty {
-                Button {
-                    search = ""
-                    scheduleSearch()
-                } label: {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundColor(.safetTextDim)
-                }
-            }
-        }
-        .padding(10)
-        .background(Color.safetSurface)
-        .overlay(Rectangle().frame(height: 1).foregroundColor(.safetBorder), alignment: .bottom)
     }
 
     /// Horizontal scrolling row of filter chips. Each chip is tappable and
@@ -340,25 +317,40 @@ struct TranscriptionsScreen: View {
                 .tint(.safetText)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let error, transmissions.isEmpty {
-            VStack(spacing: 12) {
-                Text("CAN'T LOAD TRANSCRIPTS")
-                    .font(.system(size: 12, weight: .heavy))
-                    .foregroundColor(.safetRed)
-                Text(error)
-                    .font(.system(size: 11))
-                    .foregroundColor(.safetTextDim)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 24)
-                Button("RETRY") { Task { await reload() } }
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(.safetText)
+            // Wrap in ScrollView + .refreshable so a failed first load can be
+            // retried with a pull-down without the operator having to hunt
+            // for the RETRY button. Mirrors UnitsScreen's empty-state.
+            ScrollView {
+                VStack(spacing: 12) {
+                    Spacer(minLength: 80)
+                    Text("CAN'T LOAD TRANSCRIPTS")
+                        .font(.system(size: 12, weight: .heavy))
+                        .foregroundColor(.safetRed)
+                    Text(error)
+                        .font(.system(size: 11))
+                        .foregroundColor(.safetTextDim)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 24)
+                    Button("RETRY") { Task { await reload() } }
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(.safetText)
+                    Spacer(minLength: 80)
+                }
+                .frame(maxWidth: .infinity, minHeight: 400)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .refreshable { await reload() }
         } else if transmissions.isEmpty {
-            Text(search.isEmpty ? "NO RECENT TRANSMISSIONS" : "NO MATCHES")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(.safetTextDim)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ScrollView {
+                VStack {
+                    Spacer(minLength: 80)
+                    Text(search.isEmpty ? "NO RECENT TRANSMISSIONS" : "NO MATCHES")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.safetTextDim)
+                    Spacer(minLength: 80)
+                }
+                .frame(maxWidth: .infinity, minHeight: 400)
+            }
+            .refreshable { await reload() }
         } else {
             list
         }

@@ -1,20 +1,63 @@
+import AVFoundation
 import SwiftUI
+import UIKit
 
 /// The safeT Mobile radio shell — status strip, channel display, controls,
 /// emergency, and a press-and-hold PTT bar.
 struct RadioScreen: View {
-    @StateObject var viewModel: RadioViewModel
+    @StateObject private var viewModel: RadioViewModel
     @EnvironmentObject private var session: AuthSession
+    @EnvironmentObject private var settings: SettingsStore
     @State private var pttDown = false
     @State private var showingDispatch = false
     @State private var showingMap = false
     @State private var showingUnits = false
     @State private var showingTranscripts = false
     @State private var showingSettings = false
+    @State private var micStatus: AVAudioSession.RecordPermission = Self.initialMicStatus()
+    /// SF Symbol name reflecting whichever AVAudioSession output the OS has
+    /// actually picked right now (not just the saved preference). Updated on
+    /// appear and on AVAudioSession.routeChangeNotification so plugging in
+    /// BT headphones flips the glyph live.
+    @State private var liveRouteIcon: String = "speaker.wave.2"
+
+    /// Construct the view-model lazily inside the StateObject autoclosure so
+    /// SwiftUI retains the instance across re-renders. Building the view-model
+    /// in the caller (e.g. `RadioScreen(viewModel: RadioViewModel(...))`)
+    /// instantiates a fresh VM every body invocation; the autoclosure form
+    /// only fires once per `.id(user.id)` lifetime.
+    init(user: AuthenticatedUser, token: String) {
+        _viewModel = StateObject(wrappedValue: RadioViewModel(user: user, token: token))
+    }
+
+    private static func initialMicStatus() -> AVAudioSession.RecordPermission {
+        if ProcessInfo.processInfo.arguments.contains("-uitest-logged-in") { return .granted }
+        return AVAudioSession.sharedInstance().recordPermission
+    }
 
     var body: some View {
+        Group {
+            switch micStatus {
+            case .denied: micDeniedCard
+            // .undetermined intentionally renders the radio shell — the
+            // view-model's `requestRecordPermission()` triggers the OS prompt
+            // organically on the first PTT-related call. An in-app "Allow
+            // Microphone" card here used to fire alongside the OS prompt,
+            // double-stacking the dialog on first launch.
+            case .undetermined: radioShell
+            case .granted: radioShell
+            @unknown default: radioShell
+            }
+        }
+        .onAppear { micStatus = Self.initialMicStatus() }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in
+            micStatus = Self.initialMicStatus()
+        }
+    }
+
+    private var radioShell: some View {
         let state = viewModel.uiState
-        ZStack {
+        return ZStack {
             Color.safetBackground.ignoresSafeArea()
             VStack(spacing: 12) {
                 statusStrip(state)
@@ -24,9 +67,29 @@ struct RadioScreen: View {
                 channelRow(state)
                 Spacer(minLength: 12)
                 emergencyButton(state)
-                pttBar(state)
+                if settings.bigPttButtonEnabled {
+                    // RESERVE space at the bottom so the bottom-trailing
+                    // BigPttButton overlay (140 pt circle) doesn't cover the
+                    // EMERGENCY button or the channel ▲/▼ row on small
+                    // phones. Without this spacer the overlay floats over
+                    // the controls above it.
+                    Color.clear.frame(height: 160)
+                } else {
+                    pttBar(state)
+                }
             }
             .padding(16)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            if settings.bigPttButtonEnabled {
+                BigPttButton(
+                    isPressed: state.isTransmitting || state.isPttPressed,
+                    onPress: { viewModel.handle(.pttPressed) },
+                    onRelease: { viewModel.handle(.pttReleased) }
+                )
+                .padding(.trailing, 20)
+                .padding(.bottom, 24)
+            }
         }
         .sheet(isPresented: $showingDispatch) { sheetWrap("DISPATCH", isPresented: $showingDispatch) {
             if let token = session.token {
@@ -53,11 +116,60 @@ struct RadioScreen: View {
                 state: viewModel.uiState,
                 onEvent: { viewModel.handle($0) },
                 onSignOut: {
-                    showingSettings = false
+                    // Drive teardown purely off the auth state: clearing the
+                    // session flips RootView to LoginScreen, which removes this
+                    // RadioScreen (and the settings sheet presented from it)
+                    // wholesale. Do NOT also toggle `showingSettings` here —
+                    // animating the sheet's dismissal in the same pass that the
+                    // presenter is torn down races the two transactions and can
+                    // wedge the modal session, leaving the login screen onscreen
+                    // but uninteractive (the sign-out UI test hangs at "SIGN IN").
                     session.logout()
                 },
                 onClose: { showingSettings = false }
             )
+            // Re-inject the SettingsStore explicitly on the sheet
+            // content. Environment objects usually propagate across
+            // sheet presentations, but the explicit injection is the
+            // robust path — without it, an env-object lookup failure
+            // inside SettingsScreen.controlsSection crashes the app
+            // when the user taps SETTINGS.
+            .environmentObject(settings)
+            .environmentObject(session)
+        }
+    }
+
+    @ViewBuilder
+    private var micDeniedCard: some View {
+        ZStack {
+            Color.safetBackground.ignoresSafeArea()
+            VStack(spacing: 16) {
+                Image(systemName: "mic.slash.fill")
+                    .font(.system(size: 48, weight: .bold))
+                    .foregroundColor(.safetRed)
+                Text("MICROPHONE BLOCKED")
+                    .font(.system(size: 16, weight: .heavy))
+                    .foregroundColor(.safetText)
+                Text("safeT can't transmit voice without the mic. Open Settings to allow microphone access.")
+                    .font(.system(size: 13))
+                    .foregroundColor(.safetTextDim)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 24)
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Text("OPEN SETTINGS")
+                        .font(.system(size: 14, weight: .heavy))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 12)
+                        .background(Color.safetBlue)
+                        .cornerRadius(8)
+                }
+            }
+            .padding(24)
         }
     }
 
@@ -83,7 +195,7 @@ struct RadioScreen: View {
     // MARK: - status strip
 
     private func statusStrip(_ state: RadioUiState) -> some View {
-        HStack {
+        HStack(spacing: 8) {
             Text("UNIT \(state.localShortUnitId)")
                 .font(.system(size: 12, weight: .semibold, design: .monospaced))
                 .foregroundColor(.safetTextDim)
@@ -92,7 +204,54 @@ struct RadioScreen: View {
                 .font(.system(size: 13, weight: .semibold, design: .monospaced))
                 .foregroundColor(.safetText)
             Spacer()
-            networkPill(state.networkLabel)
+            audioRouteMenu
+            networkPill(state)
+        }
+    }
+
+    private var audioRouteMenu: some View {
+        Menu {
+            ForEach(SettingsStore.AudioRoute.allCases, id: \.self) { route in
+                Button {
+                    settings.audioRoute = route
+                    AudioSessionManager.applyRoute(route)
+                    refreshLiveRouteIcon()
+                } label: {
+                    Label(route.label, systemImage: route.icon)
+                }
+            }
+        } label: {
+            Image(systemName: liveRouteIcon)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.safetTextDim)
+                .frame(width: 24, height: 24)
+        }
+        .onAppear { refreshLiveRouteIcon() }
+        .onReceive(NotificationCenter.default.publisher(for: AVAudioSession.routeChangeNotification)) { _ in
+            refreshLiveRouteIcon()
+        }
+        .accessibilityLabel("Audio route")
+        .accessibilityValue(settings.audioRoute.label)
+    }
+
+    /// Maps the AVAudioSession's currently selected output port to an SF
+    /// Symbol so the status-strip glyph reflects what the OS is actually
+    /// playing through, not just the saved preference. Falls through to the
+    /// generic speaker icon for ports we haven't categorised.
+    private func refreshLiveRouteIcon() {
+        let session = AVAudioSession.sharedInstance()
+        let port = session.currentRoute.outputs.first?.portType
+        switch port {
+        case .some(.headphones):
+            liveRouteIcon = "headphones"
+        case .some(.bluetoothA2DP), .some(.bluetoothHFP), .some(.bluetoothLE):
+            liveRouteIcon = "headphones"
+        case .some(.builtInSpeaker):
+            liveRouteIcon = "speaker.wave.2"
+        case .some(.builtInReceiver):
+            liveRouteIcon = "ear"
+        default:
+            liveRouteIcon = "speaker.wave.2"
         }
     }
 
@@ -165,14 +324,32 @@ struct RadioScreen: View {
         .accessibilityLabel(label)
     }
 
-    private func networkPill(_ label: String) -> some View {
-        let color: Color = label == "ONLINE" ? .safetGreen : (label == "OFFLINE" ? .safetRed : .safetAmber)
-        return Text(label)
-            .font(.system(size: 10, weight: .bold))
-            .foregroundColor(color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .overlay(Capsule().stroke(color.opacity(0.6), lineWidth: 1))
+    @ViewBuilder
+    private func networkPill(_ state: RadioUiState) -> some View {
+        if state.isReconnecting {
+            pillBody(text: "Reconnecting", color: .safetAmber)
+        } else if state.networkLabel == "OFFLINE" {
+            pillBody(text: "Offline", color: .safetRed)
+        } else if let started = state.connectionStartedAt {
+            TimelineView(.periodic(from: started, by: 1)) { context in
+                let secs = max(0, Int(context.date.timeIntervalSince(started)))
+                pillBody(text: "Connected · \(secs)s", color: .safetGreen)
+            }
+        } else {
+            pillBody(text: state.networkLabel, color: .safetAmber)
+        }
+    }
+
+    private func pillBody(text: String, color: Color) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(color).frame(width: 6, height: 6)
+            Text(text)
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(color)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .overlay(Capsule().stroke(color.opacity(0.6), lineWidth: 1))
     }
 
     // MARK: - LCD display
@@ -199,7 +376,7 @@ struct RadioScreen: View {
                 .foregroundColor(.safetSignal)
 
             Text(state.channelLabel)
-                .font(.system(size: 34, weight: .heavy, design: .rounded))
+                .font(.system(.largeTitle, design: .rounded).weight(.heavy))
                 .foregroundColor(.safetText)
                 .lineLimit(1)
                 .minimumScaleFactor(0.5)
@@ -312,9 +489,13 @@ struct RadioScreen: View {
             controlButton(title: "CH \u{25BC}", enabled: !state.channelsLoading) {
                 viewModel.handle(.channelDown)
             }
+            .accessibilityLabel("Channel down")
+            .accessibilityValue("Currently \(state.channelLabel)")
             controlButton(title: "CH \u{25B2}", enabled: !state.channelsLoading) {
                 viewModel.handle(.channelUp)
             }
+            .accessibilityLabel("Channel up")
+            .accessibilityValue("Currently \(state.channelLabel)")
         }
     }
 
@@ -381,6 +562,10 @@ struct RadioScreen: View {
                     viewModel.handle(.pttReleased)
                 }
         )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Push to talk")
+        .accessibilityHint("Hold to transmit on channel \(state.channelLabel)")
+        .accessibilityValue(state.isTransmitting ? "Transmitting" : "Idle")
     }
 
     /// While transmitting, render "XMIT" with the lightning-bolt SF Symbol so

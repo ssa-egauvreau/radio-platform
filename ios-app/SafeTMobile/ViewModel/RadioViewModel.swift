@@ -1,4 +1,5 @@
 import AVFoundation
+import Combine
 import Foundation
 import os
 
@@ -31,6 +32,9 @@ final class RadioViewModel: ObservableObject {
     private var inboxPrimed = false
     private var voiceStarted = false
     private var pttAirPollTask: Task<Void, Never>?
+    private var hardwarePtt: HardwarePttController?
+    private var hardwarePttCancellable: AnyCancellable?
+    private var remotePttObserver: NSObjectProtocol?
 
     private let clockFormatter: DateFormatter = {
         let formatter = DateFormatter()
@@ -68,6 +72,38 @@ final class RadioViewModel: ObservableObject {
         }
         locationReporter.start()
         wireVoiceCallbacks()
+        NetworkPathMonitor.shared.onChange = { [weak self] reachable in
+            Task { @MainActor in
+                guard reachable, let self else { return }
+                self.voiceTransport.retryNow()
+                self.scanTransport.retryNow()
+            }
+        }
+
+        hardwarePtt = HardwarePttController(
+            onPress: { [weak self] in self?.handle(.pttPressed) },
+            onRelease: { [weak self] in self?.handle(.pttReleased) }
+        )
+        let store = SettingsStore.shared
+        if store.hardwarePttEnabled { hardwarePtt?.enable() }
+        hardwarePttCancellable = store.$hardwarePttEnabled
+            .receive(on: RunLoop.main)
+            .sink { [weak self] enabled in
+                if enabled { self?.hardwarePtt?.enable() } else { self?.hardwarePtt?.disable() }
+            }
+
+        remotePttObserver = NotificationCenter.default.addObserver(
+            forName: .safetPttRemote,
+            object: nil,
+            queue: nil
+        ) { [weak self] note in
+            let action = (note.userInfo?["action"] as? String) ?? ""
+            Task { @MainActor in
+                guard let self else { return }
+                if action == "press" { self.handle(.pttPressed) }
+                else if action == "release" { self.handle(.pttReleased) }
+            }
+        }
         scanTransport.onScanRx = { [weak self] channel in
             self?.handleScanRx(channel: channel)
         }
@@ -80,10 +116,27 @@ final class RadioViewModel: ObservableObject {
     }
 
     deinit {
+        if let observer = remotePttObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        // Tear the Live Activity down synchronously so a quick re-login
+        // (which constructs a fresh RVM and calls `startOrUpdate`) can't race
+        // with the prior RVM's async end(). Calling `end()` from MainActor
+        // here is safe — deinit may be called off-main, but
+        // RadioLiveActivityController.end() flips its currentActivity to nil
+        // synchronously inside the Task we dispatch below.
         Task { @MainActor [voiceTransport, voiceAudio, scanTransport] in
             voiceTransport.disconnect()
             scanTransport.disconnect()
             voiceAudio.stop()
+            if #available(iOS 16.2, *) {
+                RadioLiveActivityController.shared.end()
+            }
+            // Drop the network callback so a stale `[weak self]` capture
+            // doesn't keep firing into a half-torn-down VM after deinit. The
+            // RootView's `.id(user.id)` switch can otherwise leave the
+            // singleton pointing at a deallocated closure.
+            NetworkPathMonitor.shared.onChange = nil
         }
     }
 
@@ -118,6 +171,19 @@ final class RadioViewModel: ObservableObject {
             uiState.channelSyncError = nil
             uiState.networkLabel = "ONLINE"
             uiState.channelCatalog = channelNames
+            // Only stamp the connection start on the rising edge — `loadCatalog()`
+            // runs every 15s from the polling loop, and resetting `connectionStartedAt`
+            // unconditionally would snap the "Connected · Ns" counter back to 0
+            // every refresh.
+            if uiState.connectionStartedAt == nil { uiState.connectionStartedAt = Date() }
+            uiState.isReconnecting = false
+            if #available(iOS 16.2, *), let channel = channelNames.indices.contains(channelIndex) ? channelNames[channelIndex] : channelNames.first {
+                RadioLiveActivityController.shared.startOrUpdate(
+                    channel: channel,
+                    callsign: nil,
+                    stateLabel: "IDLE"
+                )
+            }
             // Drop any scan entries that no longer exist in the catalog so the
             // picker / transport never tries to listen to a removed channel.
             let validKeys = Set(channelNames.map { $0.lowercased() })
@@ -136,6 +202,7 @@ final class RadioViewModel: ObservableObject {
             uiState.networkLabel = "OFFLINE"
             uiState.channelSyncError = "Channel sync failed"
             uiState.statusMessage = "SYNC FAILED"
+            uiState.connectionStartedAt = nil
             refreshScanTransport()
         }
     }
@@ -164,6 +231,13 @@ final class RadioViewModel: ObservableObject {
         locationReporter.setChannel(currentChannel)
         if let channel = currentChannel {
             voiceTransport.join(channel: channel)
+            if #available(iOS 16.2, *) {
+                RadioLiveActivityController.shared.startOrUpdate(
+                    channel: channel,
+                    callsign: nil,
+                    stateLabel: "IDLE"
+                )
+            }
         }
         // The home channel is excluded from the scan listen set, so a tune
         // change has to refresh the transport even if the scan list itself
@@ -182,12 +256,45 @@ final class RadioViewModel: ObservableObject {
             guard let self else { return }
             self.uiState.canTransmit = joined.permission != .listenOnly
             self.uiState.statusMessage = joined.permission == .listenOnly ? "MONITOR ONLY" : "READY"
+            // Only stamp the connection start on (re)connect — set it when
+            // we don't have one yet, OR when we were just reconnecting (the
+            // transition out of the amber pill is the natural "reset clock"
+            // moment). Steady-state `joined` frames must NOT reset the timer.
+            if self.uiState.connectionStartedAt == nil || self.uiState.isReconnecting {
+                self.uiState.connectionStartedAt = Date()
+            }
+            self.uiState.isReconnecting = false
         }
         voiceTransport.onError = { [weak self] code in
-            self?.uiState.statusMessage = "LINK: \(code.uppercased())"
+            guard let self else { return }
+            self.uiState.statusMessage = "LINK: \(code.uppercased())"
+            // Don't flip isReconnecting here — server-pushed `error` frames
+            // are normal traffic and would latch the amber pill forever.
+            // The transport raises `onLinkLost` only when the socket has
+            // actually dropped, which is where the pill belongs.
+        }
+        voiceTransport.onLinkLost = { [weak self] in
+            self?.uiState.isReconnecting = true
         }
         voiceTransport.onReceivingChange = { [weak self] receiving in
-            self?.uiState.isReceivingAudio = receiving
+            guard let self else { return }
+            self.uiState.isReceivingAudio = receiving
+            if #available(iOS 16.2, *), let channel = self.currentChannel {
+                if receiving {
+                    let callsign = self.uiState.activeTalkUnitId.isEmpty ? nil : self.uiState.activeTalkUnitId
+                    RadioLiveActivityController.shared.startOrUpdate(
+                        channel: channel,
+                        callsign: callsign,
+                        stateLabel: "RX"
+                    )
+                } else if !self.uiState.isTransmitting {
+                    RadioLiveActivityController.shared.startOrUpdate(
+                        channel: channel,
+                        callsign: nil,
+                        stateLabel: "IDLE"
+                    )
+                }
+            }
         }
         voiceTransport.onBusy = { [weak self] holder in
             guard let self, self.uiState.isPttPressed else { return }
@@ -254,6 +361,13 @@ final class RadioViewModel: ObservableObject {
             sounds.play(.pttPermit)
             uiState.statusMessage = P25ImbeNative.isAvailable ? "ON AIR · IMBE" : "ON AIR · CLEAR PCM"
             uiState.isTransmitting = true
+            if #available(iOS 16.2, *), let channel = currentChannel {
+                RadioLiveActivityController.shared.startOrUpdate(
+                    channel: channel,
+                    callsign: uiState.localShortUnitId,
+                    stateLabel: "TX"
+                )
+            }
             guard let captureSessionId = voiceAudio.startCapture() else {
                 uiState.isTransmitting = false
                 enterBusy("VOICE UNAVAILABLE")
@@ -297,6 +411,13 @@ final class RadioViewModel: ObservableObject {
         // stale PCM/IMBE data into the next transmission.
         voiceTransport.stopUplinkCapture()
         uiState.statusMessage = "RX IDLE"
+        if #available(iOS 16.2, *), let channel = currentChannel {
+            RadioLiveActivityController.shared.startOrUpdate(
+                channel: channel,
+                callsign: nil,
+                stateLabel: "IDLE"
+            )
+        }
     }
 
     // MARK: - emergency / GPS

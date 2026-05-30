@@ -113,16 +113,30 @@ jobs:
             }
             const text = fs.readFileSync(path, 'utf-8');
             const lines = text.split('\n');
+            // Most specific / definitely-fatal first. Generic `error:`
+            // is last because Xcode's AppIntentsSSUTraining and other
+            // build phases log non-fatal lines like
+            // "error: Unable to parse extract.actionsdata" that would
+            // otherwise anchor the excerpt away from the real failure.
             const patterns = [
-              /^.*error:\s/i,
-              /^.*\.swift:\d+:\d+: error:/,
-              /^.*\.[chm]p?p?:\d+:\d+: error:/,
-              /Undefined symbols/,
-              /^ld: /,
-              /^Error: /,
+              // XCTest assertion failures look like
+              //   "RadioScreenUITests.swift:70: error: -[...] XCTAssertTrue failed"
+              // — a SINGLE line number (no column), which distinguishes them
+              // from compile errors (file:line:col:) and from the non-fatal
+              // AppIntentsSSUTraining "error:" noise. Anchor on these first so a
+              // failing test surfaces the actual assertion instead of the
+              // "** TEST FAILED **" banner that prints hundreds of lines later.
+              /\.swift:\d+: error:/,
+              /Assertion Failure:/,
               /\*\* (BUILD|TEST) FAILED \*\*/,
               /Testing failed:/,
               /xcodebuild: error:/,
+              /Undefined symbols/,
+              /^ld: /,
+              /^.*\.swift:\d+:\d+: error:/,
+              /^.*\.[chm]p?p?:\d+:\d+: error:/,
+              /^Error: /,
+              /^.*error:\s/i,
             ];
             let anchor = -1;
             for (const re of patterns) {

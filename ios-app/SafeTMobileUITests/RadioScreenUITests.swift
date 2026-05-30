@@ -25,7 +25,9 @@ final class RadioScreenUITests: XCTestCase {
 
     func test_radio_launchesAndShowsCoreControls() {
         let app = XCUIApplication()
-        app.launchArguments += ["-uitest-logged-in"]
+        // Force the legacy PTT bar so HOLD TO TALK is rendered (the big PTT
+        // button has its own coverage in PttControlsRegressionUITests).
+        app.launchArguments += ["-uitest-logged-in", "-uitest-big-ptt-off"]
         app.launch()
 
         // Status strip shows the stubbed unit id.
@@ -47,10 +49,8 @@ final class RadioScreenUITests: XCTestCase {
     func test_radio_signOut_returnsToLogin() throws {
         let app = XCUIApplication()
         // -uitest-big-ptt-off forces the legacy PTT bar so the big always-
-        // thumbable PTT button does not overlap the SETTINGS tab strip — the
-        // big-PTT layout was added in commit 9c7b653 and was found to block
-        // the SETTINGS tap on the CI simulator (see commit af8ce87 for the
-        // sibling test).
+        // thumbable PTT button does not overlap the SETTINGS tab strip. The
+        // big-PTT layout is covered separately in PttControlsRegressionUITests.
         app.launchArguments += ["-uitest-logged-in", "-uitest-big-ptt-off"]
         app.launch()
 
@@ -58,11 +58,15 @@ final class RadioScreenUITests: XCTestCase {
         XCTAssertTrue(settings.waitForExistence(timeout: 5))
         settings.tap()
 
-        // CI simulators are 3-5x slower than dev hardware on first-paint of
-        // a sheet; the previous 3 s ceiling tripped intermittently on the
-        // Sign Out… confirm.
+        XCTAssertTrue(app.navigationBars["SETTINGS"].waitForExistence(timeout: 5),
+                      "SETTINGS sheet did not present")
+
+        // Sign Out lives at the bottom of a tall grouped list (Account,
+        // Controls, Scan, Location, About). CI simulators don't auto-scroll
+        // it into the accessibility tree until we swipe.
         let openConfirm = app.buttons["Sign Out…"]
-        XCTAssertTrue(openConfirm.waitForExistence(timeout: 5), "Sign Out… not found in SETTINGS sheet")
+        XCTAssertTrue(scrollUntilVisible(openConfirm, in: app, maxSwipes: 8),
+                      "Sign Out… not found in SETTINGS sheet")
         openConfirm.tap()
 
         let confirm = app.buttons["Sign Out"]
@@ -70,5 +74,14 @@ final class RadioScreenUITests: XCTestCase {
         confirm.tap()
 
         XCTAssertTrue(app.buttons["SIGN IN"].waitForExistence(timeout: 5))
+    }
+
+    /// Swipe up until `element` appears in the accessibility tree (or give up).
+    private func scrollUntilVisible(_ element: XCUIElement, in app: XCUIApplication, maxSwipes: Int) -> Bool {
+        for _ in 0..<maxSwipes {
+            if element.waitForExistence(timeout: 1) { return true }
+            app.swipeUp()
+        }
+        return element.waitForExistence(timeout: 2)
     }
 }

@@ -130,6 +130,10 @@ targets:
         includes:
           - "*.c"
         compilerFlags: "-DOPUS_BUILD -DUSE_ALLOCA -DVAR_ARRAYS -DHAVE_LRINTF"
+    dependencies:
+      - target: SafeTMobileLiveActivity
+        embed: true
+        codeSign: true
     configFiles:
       Debug: Local.xcconfig
       Release: Local.xcconfig
@@ -179,6 +183,7 @@ targets:
         RadioAPIKey: ""
         NSLocationWhenInUseUsageDescription: "Your location is shared with dispatch so your unit appears on the live map."
         NSMicrophoneUsageDescription: "Microphone access is required to transmit voice on the radio channel."
+        NSSupportsLiveActivities: true
         UIBackgroundModes:
           - audio
         UILaunchScreen: {}
@@ -188,6 +193,24 @@ targets:
           - UIInterfaceOrientationPortrait
           - UIInterfaceOrientationLandscapeLeft
           - UIInterfaceOrientationLandscapeRight
+
+  SafeTMobileLiveActivity:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.2"
+    sources:
+      - path: SafeTMobileLiveActivity
+      # Shared attribute type ONLY — do NOT add other directories from
+      # SafeTMobile/ here. RadioLiveActivityController calls
+      # Activity.request(...) which is host-app-only and will not be
+      # available in the widget extension at runtime.
+      - path: SafeTMobile/LiveActivity
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.safetptt.mobile.liveactivity
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
+        INFOPLIST_FILE: SafeTMobileLiveActivity/Info.plist
 
   SafeTMobileTests:
     type: bundle.unit-test

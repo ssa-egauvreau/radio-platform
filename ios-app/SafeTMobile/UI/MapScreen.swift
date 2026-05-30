@@ -3,11 +3,8 @@ import MapKit
 import SwiftUI
 
 /// Live unit map. Polls `GET /v1/locations` every 5 s while visible and
-/// renders one pin per unit on Apple Maps. Auto-fits the viewport on first
-/// load, then leaves zoom/pan under user control on subsequent refreshes.
-///
-/// Uses the iOS-16 `Map(coordinateRegion:annotationItems:)` API — the newer
-/// MapContentBuilder syntax needs iOS 17, and the app targets iOS 16.
+/// renders one marker per unit via MKMapView (clustering at zoom-out, follow-me
+/// toggle). Auto-fits the viewport on first load.
 struct MapScreen: View {
     let api: RadioApiClient
 
@@ -20,17 +17,19 @@ struct MapScreen: View {
     @State private var pollTask: Task<Void, Never>?
     @State private var selectedUnit: String?
     @State private var loadError: String?
+    @State private var followMe = false
 
     /// Polling cadence — mirrors the web console.
     private static let pollInterval: Duration = .seconds(5)
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            Map(coordinateRegion: $region, annotationItems: positions) { position in
-                MapAnnotation(coordinate: CLLocationCoordinate2D(latitude: position.lat, longitude: position.lon)) {
-                    pin(position)
-                }
-            }
+            MapKitMap(
+                region: $region,
+                positions: positions,
+                followMe: $followMe,
+                selectedUnit: $selectedUnit
+            )
             .ignoresSafeArea(edges: .bottom)
             .overlay(alignment: .top) {
                 if let loadError {
@@ -51,6 +50,15 @@ struct MapScreen: View {
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
+                    followMe.toggle()
+                } label: {
+                    Image(systemName: followMe ? "location.fill" : "location")
+                        .foregroundColor(.safetText)
+                }
+                .accessibilityLabel(followMe ? "Stop following me" : "Follow me")
+            }
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
                     fitToPositions(animated: true)
                 } label: {
                     Image(systemName: "scope")
@@ -66,30 +74,6 @@ struct MapScreen: View {
         .onDisappear {
             pollTask?.cancel()
             pollTask = nil
-        }
-    }
-
-    private func pin(_ position: UnitPosition) -> some View {
-        let isSelected = selectedUnit == position.unitId
-        return Button {
-            selectedUnit = isSelected ? nil : position.unitId
-        } label: {
-            VStack(spacing: 2) {
-                if isSelected {
-                    Text(position.unitId)
-                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.safetRed)
-                        .cornerRadius(4)
-                }
-                Image(systemName: "antenna.radiowaves.left.and.right.circle.fill")
-                    .resizable()
-                    .frame(width: isSelected ? 32 : 24, height: isSelected ? 32 : 24)
-                    .foregroundColor(.safetRed)
-                    .background(Circle().fill(Color.white))
-            }
         }
     }
 

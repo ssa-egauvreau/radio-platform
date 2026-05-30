@@ -24,39 +24,19 @@ struct UnitsScreen: View {
     private static let pollInterval: Duration = .seconds(10)
 
     var body: some View {
-        VStack(spacing: 0) {
-            searchBar
-            content
-        }
-        .background(Color.safetBackground.ignoresSafeArea())
-        .navigationTitle("UNITS")
-        .navigationBarTitleDisplayMode(.inline)
-        .task {
-            await refresh()
-            startPolling()
-        }
-        .onDisappear {
-            pollTask?.cancel()
-            pollTask = nil
-        }
-    }
-
-    private var searchBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass").foregroundColor(.safetTextDim)
-            TextField("Search by unit or name", text: $search)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .foregroundColor(.safetText)
-            if !search.isEmpty {
-                Button { search = "" } label: {
-                    Image(systemName: "xmark.circle.fill").foregroundColor(.safetTextDim)
-                }
+        content
+            .background(Color.safetBackground.ignoresSafeArea())
+            .navigationTitle("UNITS")
+            .navigationBarTitleDisplayMode(.inline)
+            .searchable(text: $search, placement: .automatic, prompt: "Search by unit or name")
+            .task {
+                await refresh()
+                startPolling()
             }
-        }
-        .padding(10)
-        .background(Color.safetSurface)
-        .overlay(Rectangle().frame(height: 1).foregroundColor(.safetBorder), alignment: .bottom)
+            .onDisappear {
+                pollTask?.cancel()
+                pollTask = nil
+            }
     }
 
     @ViewBuilder
@@ -64,20 +44,34 @@ struct UnitsScreen: View {
         if loading && units.isEmpty {
             ProgressView().tint(.safetText).frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if let error, units.isEmpty {
-            VStack(spacing: 12) {
-                Text("CAN'T LOAD UNITS")
-                    .font(.system(size: 12, weight: .heavy)).foregroundColor(.safetRed)
-                Text(error)
-                    .font(.system(size: 11)).foregroundColor(.safetTextDim)
-                    .multilineTextAlignment(.center).padding(.horizontal, 24)
-                Button("RETRY") { Task { await refresh() } }
-                    .font(.system(size: 12, weight: .bold)).foregroundColor(.safetText)
+            ScrollView {
+                VStack(spacing: 12) {
+                    Text("CAN'T LOAD UNITS")
+                        .font(.system(size: 12, weight: .heavy)).foregroundColor(.safetRed)
+                    Text(error)
+                        .font(.system(size: 11)).foregroundColor(.safetTextDim)
+                        .multilineTextAlignment(.center).padding(.horizontal, 24)
+                    Button("RETRY") { Task { await refresh() } }
+                        .font(.system(size: 12, weight: .bold)).foregroundColor(.safetText)
+                }
+                .frame(maxWidth: .infinity, minHeight: 300)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .refreshable { await refresh() }
         } else if filteredUnits.isEmpty {
-            Text(units.isEmpty ? "NO UNITS REPORTING" : "NO MATCHES")
-                .font(.system(size: 12, weight: .semibold)).foregroundColor(.safetTextDim)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            ScrollView {
+                // Spacers + minHeight keep the empty-state text vertically
+                // centered inside the scroll viewport (the way it was before
+                // `.refreshable` forced the ScrollView wrapper). Without the
+                // Spacers the text glues to the top of the visible area.
+                VStack {
+                    Spacer(minLength: 80)
+                    Text(units.isEmpty ? "NO UNITS REPORTING" : "NO MATCHES")
+                        .font(.system(size: 12, weight: .semibold)).foregroundColor(.safetTextDim)
+                    Spacer(minLength: 80)
+                }
+                .frame(maxWidth: .infinity, minHeight: 400)
+            }
+            .refreshable { await refresh() }
         } else {
             list
         }

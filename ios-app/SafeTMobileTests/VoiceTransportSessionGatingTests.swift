@@ -112,4 +112,20 @@ final class VoiceTransportSessionGatingTests: XCTestCase {
         transport.startUplinkCapture(sessionId: UInt64.max)
         XCTAssertEqual(transport.activeCaptureSessionId, UInt64.max)
     }
+
+    // MARK: - retryNow
+
+    func test_retryNow_isNoOp_whenNoChannel() {
+        let transport = makeTransport()
+        transport.retryNow()
+        // No crash; no socket constructed (we'd see it on the URLSession config).
+        XCTAssertNil(transport.activeCaptureSessionId)
+    }
+
+    func test_retryNow_isNoOp_afterDisconnect() {
+        let transport = makeTransport()
+        transport.disconnect()
+        transport.retryNow()
+        XCTAssertNil(transport.activeCaptureSessionId)
+    }
 }

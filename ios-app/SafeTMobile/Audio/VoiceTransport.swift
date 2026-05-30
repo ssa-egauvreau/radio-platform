@@ -21,6 +21,12 @@ final class VoiceTransport {
     var onError: ((String) -> Void)?
     var onBusy: ((String?) -> Void)?
     var onReceivingChange: ((Bool) -> Void)?
+    /// Fires only when the underlying socket link actually dropped (i.e.
+    /// we're about to schedule a reconnect). UI uses this to enter the
+    /// "Reconnecting" pill state — it must NOT fire on every server-pushed
+    /// `error` frame, since transient errors during normal operation would
+    /// then latch the pill amber forever.
+    var onLinkLost: (() -> Void)?
     /// Admin flipped the channel's transmit codec; the encoder swaps on the
     /// next frame. UI can surface the change via this callback.
     var onCodecChange: ((VoiceCodec) -> Void)?
@@ -143,6 +149,18 @@ final class VoiceTransport {
         // in-flight window are carried over to the next start(), so a quick
         // disconnect / reconnect cycle doesn't lose data.
         VoiceLinkTelemetryReporter.shared.stop()
+    }
+
+    /// Cancels any pending backoff and reopens the socket immediately. Used by
+    /// the network-path monitor when connectivity returns. No-op when there's
+    /// no channel joined or the socket is already up.
+    func retryNow() {
+        guard task == nil, currentChannel != nil else { return }
+        reconnectTask?.cancel()
+        reconnectTask = nil
+        reconnectAttempts = 0
+        openSocket()
+        sendJoinFrame()
     }
 
     func startUplinkCapture(sessionId: UInt64) {
@@ -339,8 +357,12 @@ final class VoiceTransport {
         guard let channel = currentChannel else { return }
         if reconnectTask != nil { return }
         reconnectAttempts += 1
-        let delaySeconds = min(pow(2.0, Double(reconnectAttempts - 1)), 16.0)
+        let delaySeconds = VoiceTiming.backoffDelaySeconds(attempt: reconnectAttempts, cap: 16)
         onError?("link lost — reconnecting in \(Int(delaySeconds))s")
+        // Fire onLinkLost only here — this is the one site that knows the
+        // socket actually dropped. Generic `error` frames pushed by the
+        // server during normal operation must not flip the Reconnecting pill.
+        onLinkLost?()
         let nanoseconds = UInt64(delaySeconds * 1_000_000_000)
         reconnectTask = Task { @MainActor [weak self] in
             try? await Task.sleep(nanoseconds: nanoseconds)

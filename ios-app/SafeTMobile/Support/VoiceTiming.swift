@@ -15,4 +15,10 @@ enum VoiceTiming {
     static let inboxPollSeconds: TimeInterval = 2.0
     static let catalogPollSeconds: TimeInterval = 15.0
     static let presencePollSeconds: TimeInterval = 12.0
+
+    /// Exponential backoff for WebSocket reconnect, in seconds.
+    /// Attempt 1 returns 1, attempt 2 returns 2, capped at `cap`.
+    static func backoffDelaySeconds(attempt: Int, cap: Double) -> Double {
+        min(pow(2.0, Double(max(0, attempt - 1))), cap)
+    }
 }
