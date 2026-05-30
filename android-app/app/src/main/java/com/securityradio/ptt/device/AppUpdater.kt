@@ -312,6 +312,24 @@ class AppUpdater(
         val fullUrl = resolveApkUrl(available.apkUrl) ?: return null
         val dir = File(context.cacheDir, "updates").apply { mkdirs() }
         val out = File(dir, "update.apk")
+
+        // Short-circuit: if a prior run already downloaded this exact APK and
+        // the install just hasn't confirmed yet (auto-confirm missed the
+        // dialog, operator deferred, etc.), reuse the cached file. Without
+        // this every 30-minute version poll re-downloads the same ~50 MB
+        // APK as long as the install stays pending — devices in that state
+        // were burning hundreds of MB/day of cellular re-downloading the
+        // same bytes. Emit a synthetic "100 %" progress event so the banner
+        // sees the file as complete rather than freezing at "DOWNLOADING…".
+        if (out.exists() && out.length() > 0) {
+            val cachedHash = sha256Hex(out)
+            if (cachedHash.equals(available.sha256, ignoreCase = true)) {
+                Log.i(TAG, "Reusing cached APK v${available.versionName} (hash matches; skipping network)")
+                onProgress?.invoke(out.length(), out.length())
+                return out
+            }
+        }
+
         val request = Request.Builder().url(fullUrl).build()
         client.newCall(request).execute().use { response ->
             if (!response.isSuccessful) return null
