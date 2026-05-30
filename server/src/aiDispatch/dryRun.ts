@@ -8,6 +8,7 @@ import {
 } from "./platformConfig.js";
 import { buildDeterministicDispatchAck } from "./dispatchAck.js";
 import { applyOutWithCadRules } from "./outWithCad.js";
+import { applyCadDispatchRules } from "./cadDispatchRules.js";
 import {
   buildInfoRequestAck,
   buildInfoRequestResponse,
@@ -234,6 +235,7 @@ export async function runAiDispatchDryRun(
         listTen8ActiveIncidents(opts.agencyId),
       );
       parsed = applyOutWithCadRules(parsed, transcript, activeIncidents, unitId);
+      parsed = applyCadDispatchRules(parsed, transcript);
       result.parsed = parsed;
     }
 
@@ -438,7 +440,7 @@ export async function runAiDispatchDryRun(
         }
       }
 
-      if (parsed.cad_person_link || parsed.cad_tag) {
+      if (parsed.cad_person_link || parsed.cad_tag || parsed.cad_tag_remove) {
         const linkMatch = findMatchingOpenIncident(active, parsed, unitId);
         const linkCallId = linkMatch?.call_id?.trim() || newCallIdFromCreate;
         if (!linkCallId || !isVerifiedOpenCallId(linkCallId, active)) {
@@ -469,6 +471,16 @@ export async function runAiDispatchDryRun(
               note: "DRY RUN — tag would be added on this call.",
             };
           }
+        }
+        if (parsed.cad_tag_remove && linkCallId && isVerifiedOpenCallId(linkCallId, active)) {
+          ten8Actions.ten8_tag_remove = {
+            call_id: linkCallId,
+            tag: parsed.cad_tag_remove,
+            would_post: sendForReal,
+            note: sendForReal
+              ? "Would remove tag if present on call."
+              : "DRY RUN — tag would be removed from this call.",
+          };
         }
       }
     }

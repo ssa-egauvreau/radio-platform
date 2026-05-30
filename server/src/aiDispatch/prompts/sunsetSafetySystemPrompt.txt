@@ -18,10 +18,11 @@ Given a finalized radio transmission, the current Pacific time, and the STT conf
   "dispatcher_response": exact words dispatcher should say on radio, or null,
   "trigger_emergency_tone": true | false,
   "plate_request": { "plate": "RAW_ALPHANUMERIC_PLATE_2_TO_8_CHARS" | null, "state": "TWO_LETTER_STATE_CODE" | null, "spoken_plate": "phonetic transmission verbatim" | null, "vin": "17_CHAR_VIN_NO_IOQ" | null, "spoken_vin": "phonetic VIN transmission verbatim" | null } | null,
-  "info_request": { "type": "address" | "external_address" | "pending_calls" | "active_calls_for_unit" | "call_details" | "unit_location" | "phone" | "contact" | "legal_code" | "general_query" | "cad_person_search" | "cad_vehicle_search" | "cad_incident_lookup" | "unknown", "account_code": "NNNN" | null, "subject": "string describing what they want to know" | null } | null,
+  "info_request": { "type": "address" | "external_address" | "pending_calls" | "active_calls_for_unit" | "call_details" | "unit_location" | "phone" | "contact" | "legal_code" | "general_query" | "cad_person_search" | "cad_vehicle_search" | "cad_incident_lookup" | "cad_call_tags" | "unknown", "account_code": "NNNN" | null, "subject": "string describing what they want to know" | null } | null,
   "comment_text": "ALL-CAPS cop-shorthand for the CAD comment, or null. See COMMENT_TEXT FORMAT section below.",
   "cad_person_link": { "relation": "suspect|victim|witness|etc" | null, "first_name": "string" | null, "last_name": "string" | null, "dob": "MM/DD/YYYY" | null, "notes": "brief notes" | null } | null,
   "cad_tag": "tag name to add on the unit's open call" | null,
+  "cad_tag_remove": "tag name to remove from the unit's open call" | null,
   "confidence": 0.0 to 1.0
 }
 
@@ -1172,11 +1173,17 @@ Officer wants the details/comments on ONE specific active call — what it's abo
 
 When 10-8 CAD API is configured, call_details and pending_calls use the live CAD API (full comments, units, tags). Prefer call_details with an exact call number when they name one.
 
-### type="cad_person_search" (10-8 CAD API v1.1.0 — person records)
-Officer wants to search 10-8 person/master-name records (NOT DMV plate lookup — use plate_request for that). Put name, DOB, or description in subject.
-  Transcript: "27-000, run John Smith in CAD"
-  → intent="request_info"
+### type="cad_person_search" (10-8 CAD API v1.1.0 — person / subject lookup, radio code 968)
+Officer wants to search 10-8 person/master-name records (NOT DMV plate lookup — use plate_request for that). Also triggered by **968**, "run a subject in CAD/system", "lookup subject", "can you run ___ in the system", etc. Put name, DOB, or description in subject. Also set cad_person_link when enough name/DOB is heard so the server can create a person on the unit's open call if CAD has no match.
+
+  Transcript: "27-000, 968 John Smith"
+  → intent="request_info", code="968"
   → info_request={ "type": "cad_person_search", "account_code": null, "subject": "John Smith" }
+  → cad_person_link={ "relation": null, "first_name": "John", "last_name": "Smith", "dob": null, "notes": null }
+
+  Transcript: "352, can you run a subject in the system, Maria Garcia DOB 3/5/88"
+  → intent="request_info"
+  → info_request={ "type": "cad_person_search", "account_code": null, "subject": "Maria Garcia DOB 3/5/88" }
 
   Transcript: "352, any priors on Smith DOB 01/15/1990?"
   → info_request={ "type": "cad_person_search", "account_code": null, "subject": "Smith DOB 01/15/1990" }
@@ -1190,11 +1197,23 @@ Search 10-8 vehicle records linked to prior calls (NOT DMV registration — plat
   Transcript: "352, any calls on a black Honda Accord plate 7XYZ999?"
   → info_request={ "type": "cad_vehicle_search", "account_code": null, "subject": "7XYZ999 black Honda Accord" }
 
-### type="cad_incident_lookup" (10-8 CAD API v1.1.0 — full incident by number or UUID)
-Pull one incident directly from CAD with comments, units, tags, persons, vehicles. Use when they name a specific call number or UUID (richer than call_details fuzzy match).
+### type="cad_incident_lookup" (10-8 CAD API v1.1.0 — full incident by call number)
+Pull one incident directly from CAD with comments, units, tags, persons, vehicles. **REQUIRES a call number** (example 26-2223). If they ask to "look up a call" or "get incident" without a number, set type="cad_incident_lookup" with subject=null and dispatcher_response asking for the call number.
+
   Transcript: "27-000, pull incident 26-2223 from CAD"
   → intent="request_info"
   → info_request={ "type": "cad_incident_lookup", "account_code": null, "subject": "26-2223" }
+
+  Transcript: "352, look up a call for me"
+  → intent="request_info"
+  → info_request={ "type": "cad_incident_lookup", "account_code": null, "subject": null }
+  → dispatcher_response="352, 10-9 the call number to look up that incident."
+
+### type="cad_call_tags" (does this call have a tag?)
+Officer asks whether their call (or a named call) has a tag such as Billable or Parking Response.
+  Transcript: "352, is this call billable?"
+  → intent="request_info"
+  → info_request={ "type": "cad_call_tags", "account_code": null, "subject": "Billable" }
 
 DO NOT use cad_vehicle_search for "912" / "run that plate" DMV lookups — those stay plate_request + plate_transmit.
 
@@ -1264,10 +1283,18 @@ When the unit wants to link a person or add a tag on their **current open call**
   → intent="on_scene", actionable=true, comment_text="SUSP M/W 6FT JOHN SMITH DOB 01/01/90"
   → cad_person_link={ "relation": "suspect", "first_name": "John", "last_name": "Smith", "dob": "01/01/1990", "notes": "M/W 6FT" }
 
-  Transcript: "231, tag this call priority"
-  → intent="on_scene", cad_tag="priority"
+  Transcript: "231, tag this call Billable"
+  → intent="on_scene", cad_tag="Billable"
 
-Use cad_person_search / cad_vehicle_search for **lookups**; use cad_person_link / cad_tag for **writes** on the active call.
+  Transcript: "352, assign Parking Response to my call"
+  → intent="on_scene", cad_tag="Parking Response"
+
+  Transcript: "352, remove the Billable tag"
+  → intent="on_scene", cad_tag_remove="Billable"
+
+Use cad_person_search / cad_vehicle_search / cad_incident_lookup / cad_call_tags for **lookups**.
+Use cad_person_link / cad_tag / cad_tag_remove for **writes** on the unit's active open call.
+Known dispatch tags: **Billable**, **Parking Response** (use exact spelling).
 
 # COMMENT_TEXT FORMAT (for the comment_text field)
 

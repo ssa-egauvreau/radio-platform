@@ -2,11 +2,13 @@ import { listPositions } from "../store.js";
 import { listTen8ActiveIncidents } from "../ten8/store.js";
 import { ten8Configured } from "../ten8/client.js";
 import {
+  fetchCadCallTagsRadio,
   fetchCadIncidentLookupRadio,
   fetchCadOpenIncidentsRadio,
   fetchCadPersonSearchRadio,
   fetchCadVehicleSearchRadio,
 } from "../ten8/cadRadioLookup.js";
+import { extractCallLookupNumber } from "./cadDispatchRules.js";
 import { lookupSsaProperty } from "./ssaProperties.js";
 import { accountCodeDashForm } from "./speech/numbers.js";
 import { prepareLocationForTts } from "./speech/locationSpeech.js";
@@ -242,6 +244,7 @@ export function infoRequestNeedsAsync(infoRequest: InfoRequestFields): boolean {
     "cad_person_search",
     "cad_vehicle_search",
     "cad_incident_lookup",
+    "cad_call_tags",
   ].includes(t);
 }
 
@@ -330,14 +333,18 @@ export async function buildInfoRequestResponse(
 
     case "call_details": {
       const subject = infoRequest.subject?.trim();
-      if (subject && (await ten8Configured(agencyId))) {
-        const live = await fetchCadIncidentLookupRadio(agencyId, subject);
+      const callNum = subject ? extractCallLookupNumber(subject) : null;
+      if (callNum && (await ten8Configured(agencyId))) {
+        const live = await fetchCadIncidentLookupRadio(agencyId, callNum);
         if (live.ok) {
           return `${csPart}${live.line}.`;
         }
         if (live.status === 404) {
           return `${csPart}${live.line}`;
         }
+      }
+      if (subject && !callNum) {
+        return `${csPart}10-9 the call number to look up that incident.`;
       }
       const active = await listTen8ActiveIncidents(agencyId);
       if (active.length === 0) {
@@ -384,11 +391,37 @@ export async function buildInfoRequestResponse(
       if (!(await ten8Configured(agencyId))) {
         return `${csPart}negative, 10-8 CAD is not configured.`;
       }
-      if (!infoRequest.subject?.trim()) {
-        return `${csPart}negative, say the call number, incident number, or UUID.`;
+      const lookup = infoRequest.subject?.trim() ?? "";
+      const callNum = extractCallLookupNumber(lookup) ?? (/\d/.test(lookup) ? lookup : "");
+      if (!callNum) {
+        return `${csPart}10-9 the call number to look up that incident.`;
       }
-      const result = await fetchCadIncidentLookupRadio(agencyId, infoRequest.subject);
+      const result = await fetchCadIncidentLookupRadio(agencyId, callNum);
       return `${csPart}${result.line}.`;
+    }
+
+    case "cad_call_tags": {
+      if (!(await ten8Configured(agencyId))) {
+        return `${csPart}negative, 10-8 CAD is not configured.`;
+      }
+      const subject = infoRequest.subject?.trim() ?? "";
+      const callNum = extractCallLookupNumber(subject);
+      let tagQuery = subject.replace(callNum ?? "", "").trim();
+      if (!tagQuery && subject && !callNum) {
+        tagQuery = subject;
+      }
+      let callId = callNum;
+      if (!callId) {
+        const targetUnit = (requestingUnit ?? "").trim();
+        const active = await listTen8ActiveIncidents(agencyId);
+        const inc = active.find((i) => incidentPayloadHasUnit(i, targetUnit));
+        callId = inc?.call_id?.trim() ?? null;
+      }
+      if (!callId) {
+        return `${csPart}negative, no open call found for your unit. Say the call number.`;
+      }
+      const result = await fetchCadCallTagsRadio(agencyId, callId, tagQuery || null);
+      return `${csPart}${result.line}`;
     }
 
     case "unit_location": {

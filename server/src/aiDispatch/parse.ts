@@ -22,6 +22,7 @@ export interface InfoRequestFields {
     | "cad_person_search"
     | "cad_vehicle_search"
     | "cad_incident_lookup"
+    | "cad_call_tags"
     | "unknown";
   account_code: string | null;
   subject: string | null;
@@ -56,6 +57,8 @@ export interface AiDispatchParseResult {
   cad_person_link: CadPersonLinkFields | null;
   /** Add a tag by name on the matched open call (requires live CAD writes). */
   cad_tag: string | null;
+  /** Remove a tag by name from the matched open call. */
+  cad_tag_remove: string | null;
 }
 
 const VALID_INTENTS = new Set([
@@ -154,6 +157,7 @@ export function normalizeAiDispatchParse(raw: unknown): AiDispatchParseResult | 
       "cad_person_search",
       "cad_vehicle_search",
       "cad_incident_lookup",
+      "cad_call_tags",
       "unknown",
     ]);
     if (t && validTypes.has(t)) {
@@ -203,6 +207,10 @@ export function normalizeAiDispatchParse(raw: unknown): AiDispatchParseResult | 
 
   const cad_tag =
     typeof ai.cad_tag === "string" && ai.cad_tag.trim() ? ai.cad_tag.trim().slice(0, 80) : null;
+  const cad_tag_remove =
+    typeof ai.cad_tag_remove === "string" && ai.cad_tag_remove.trim()
+      ? ai.cad_tag_remove.trim().slice(0, 80)
+      : null;
 
   return {
     actionable: ai.actionable,
@@ -221,6 +229,7 @@ export function normalizeAiDispatchParse(raw: unknown): AiDispatchParseResult | 
     comment_text,
     cad_person_link,
     cad_tag,
+    cad_tag_remove,
   };
 }
 

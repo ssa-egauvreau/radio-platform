@@ -18,6 +18,12 @@ import {
 import { playMp3UrlOnChannel } from "./playback.js";
 import { buildDeterministicDispatchAck } from "./dispatchAck.js";
 import { applyOutWithCadRules } from "./outWithCad.js";
+import { applyCadDispatchRules } from "./cadDispatchRules.js";
+import {
+  buildCadPersonLinkFromSubject,
+  createPersonOnCallAfterMiss,
+  personSearchHadNoMatch,
+} from "./cadPersonHelpers.js";
 import {
   buildInfoRequestAck,
   buildInfoRequestResponse,
@@ -42,9 +48,11 @@ import {
   ten8AddVehicle,
   ten8Configured,
   ten8CreateIncident,
+  ten8GetIncident,
   ten8NewIncidentConfigured,
+  ten8RemoveTag,
 } from "../ten8/client.js";
-import { buildCadPersonLinkBody } from "../ten8/cadRadioLookup.js";
+import { buildCadPersonLinkBody, findTagIdOnIncident } from "../ten8/cadRadioLookup.js";
 import { buildTen8NewIncidentBody } from "../ten8/incidentPayload.js";
 import { buildTen8IncidentSeedCoords } from "../ten8/geocode.js";
 import {
@@ -434,6 +442,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
     if (parsed && (await ten8Configured(tx.agency_id))) {
       activeIncidents = await listTen8ActiveIncidents(tx.agency_id);
       parsed = applyOutWithCadRules(parsed, transcript, activeIncidents, unitId);
+      parsed = applyCadDispatchRules(parsed, transcript);
     }
 
     if (allowOnAir && isEmergencyClear(emergencyRegex, parsed)) {
@@ -608,7 +617,7 @@ async function processTransmission(transmissionId: number): Promise<void> {
           }
         }
 
-        if (parsed.cad_person_link || parsed.cad_tag) {
+        if (parsed.cad_person_link || parsed.cad_tag || parsed.cad_tag_remove) {
           const linkMatch = findMatchingOpenIncident(active, parsed, unitId);
           const linkCallId = linkMatch?.call_id?.trim() || newCallIdFromCreate;
           if (!linkCallId || !isVerifiedOpenCallId(linkCallId, active)) {
@@ -622,6 +631,28 @@ async function processTransmission(transmissionId: number): Promise<void> {
             if (parsed.cad_tag) {
               const res = await ten8AddTag(tx.agency_id, linkCallId, { tag: parsed.cad_tag });
               ten8Actions.ten8_tag = { call_id: linkCallId, tag: parsed.cad_tag, ...res };
+            }
+            if (parsed.cad_tag_remove) {
+              const out: Record<string, unknown> = {
+                call_id: linkCallId,
+                tag: parsed.cad_tag_remove,
+              };
+              const got = await ten8GetIncident(tx.agency_id, linkCallId);
+              if (got.ok && got.data && typeof got.data === "object") {
+                const tagId = findTagIdOnIncident(
+                  got.data as Record<string, unknown>,
+                  parsed.cad_tag_remove,
+                );
+                if (tagId != null) {
+                  const res = await ten8RemoveTag(tx.agency_id, linkCallId, tagId);
+                  Object.assign(out, res);
+                } else {
+                  out.skipped = "tag_not_on_call";
+                }
+              } else {
+                out.skipped = "incident_fetch_failed";
+              }
+              ten8Actions.ten8_tag_remove = out;
             }
           }
         }
@@ -821,11 +852,37 @@ async function runAsyncInfoLookup(
     return;
   }
   try {
-    const answer = await buildInfoRequestResponse(
+    let answer = await buildInfoRequestResponse(
       tx.agency_id,
       parsed.info_request,
       parsed.unit ?? unitId,
     );
+    let followUpTen8: Record<string, unknown> | null = null;
+
+    if (
+      parsed.info_request.type === "cad_person_search" &&
+      parsed.info_request.subject?.trim() &&
+      (await ten8Configured(tx.agency_id)) &&
+      personSearchHadNoMatch(answer ?? "")
+    ) {
+      const active = await listTen8ActiveIncidents(tx.agency_id);
+      const match = findMatchingOpenIncident(active, parsed, unitId);
+      const link =
+        parsed.cad_person_link ??
+        buildCadPersonLinkFromSubject(parsed.info_request.subject);
+      const callId = match?.call_id?.trim();
+      if (callId && link && isVerifiedOpenCallId(callId, active)) {
+        followUpTen8 = await createPersonOnCallAfterMiss({
+          agencyId: tx.agency_id,
+          callId,
+          callsign: (parsed.unit ?? unitId).trim(),
+          subject: parsed.info_request.subject.trim(),
+          link,
+        });
+        answer = `${answer ?? ""} Created a new person on your call and logged it.`;
+      }
+    }
+
     const reply = adaptDispatcherResponseForChannel(
       answer || `${parsed.unit ?? unitId}, negative, lookup failed.`,
       tx.channel_name,
@@ -855,9 +912,10 @@ async function runAsyncInfoLookup(
         comment_text: null,
         cad_person_link: null,
         cad_tag: null,
+        cad_tag_remove: null,
       },
       plateLookup: null,
-      ten8Actions: null,
+      ten8Actions: followUpTen8,
       error: null,
       outcome: "followup_info",
       durationMs: 0,

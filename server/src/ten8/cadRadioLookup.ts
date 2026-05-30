@@ -5,6 +5,43 @@ import {
   ten8SearchVehicles,
 } from "./client.js";
 
+/** Map spoken tag phrases to 10-8 tag names. */
+export function normalizeCadTagName(spoken: string): string | null {
+  const key = spoken.trim().toLowerCase().replace(/\s+/g, " ");
+  if (key === "billable") {
+    return "Billable";
+  }
+  if (key === "parking response" || key === "parking") {
+    return "Parking Response";
+  }
+  return spoken.trim() || null;
+}
+
+export function findTagIdOnIncident(
+  incident: Record<string, unknown>,
+  tagName: string,
+): number | null {
+  const want = tagName.trim().toLowerCase();
+  const tags = incident.tags;
+  if (!Array.isArray(tags)) {
+    return null;
+  }
+  for (const t of tags) {
+    if (!t || typeof t !== "object") {
+      continue;
+    }
+    const row = t as Record<string, unknown>;
+    const label = str(row.tag);
+    if (label.toLowerCase() === want) {
+      const id = Number(row.tagID ?? row.tagId ?? row.id);
+      if (Number.isFinite(id) && id > 0) {
+        return id;
+      }
+    }
+  }
+  return null;
+}
+
 function callCodeForRadio(incidentType: string | null): string {
   const t = (incidentType ?? "").trim();
   if (!t) {
@@ -187,7 +224,7 @@ function vehicleLabel(v: Record<string, unknown>): string {
 export async function fetchCadPersonSearchRadio(
   agencyId: number,
   subject: string,
-): Promise<{ ok: boolean; line: string; status?: number }> {
+): Promise<{ ok: boolean; line: string; status?: number; found: boolean; matchCount: number }> {
   const res = await ten8SearchPersons(agencyId, buildCadPersonSearchParams(subject));
   if (!res.ok) {
     const err =
@@ -198,26 +235,67 @@ export async function fetchCadPersonSearchRadio(
     if (res.status === 0 && res.data && typeof res.data === "object") {
       const d = res.data as Record<string, unknown>;
       if (d.error === "ten8_unreachable") {
-        return { ok: false, line: "negative, cannot reach 10-8 CAD right now.", status: res.status };
+        return {
+          ok: false,
+          line: "negative, cannot reach 10-8 CAD right now.",
+          status: res.status,
+          found: false,
+          matchCount: 0,
+        };
       }
     }
     return {
       ok: false,
       line: err ? `negative, CAD person search failed, ${err}.` : "negative, CAD person search failed.",
       status: res.status,
+      found: false,
+      matchCount: 0,
     };
   }
   const data = res.data as Record<string, unknown> | null;
   const results = Array.isArray(data?.results) ? (data!.results as Record<string, unknown>[]) : [];
   if (results.length === 0) {
-    return { ok: true, line: "no matching persons in CAD." };
+    return { ok: true, line: "no matching persons in CAD.", found: false, matchCount: 0 };
   }
   const items = results.slice(0, 3).map(personLabel);
   let body = results.length === 1 ? `one match: ${items[0]}` : `${results.length} matches: ${items.join("; ")}`;
   if (data?.truncated === true) {
     body += "; narrow the search for more";
   }
-  return { ok: true, line: body };
+  return { ok: true, line: body, found: true, matchCount: results.length };
+}
+
+/** Read tags on an incident; optional filter by tag name. */
+export async function fetchCadCallTagsRadio(
+  agencyId: number,
+  callLookup: string,
+  tagQuery?: string | null,
+): Promise<{ ok: boolean; line: string; status?: number }> {
+  const res = await ten8GetIncident(agencyId, callLookup.trim());
+  if (!res.ok) {
+    if (res.status === 404) {
+      return { ok: false, line: "negative, incident not found in CAD.", status: res.status };
+    }
+    return { ok: false, line: "negative, could not read call tags from CAD.", status: res.status };
+  }
+  const inc = (res.data && typeof res.data === "object" ? res.data : {}) as Record<string, unknown>;
+  const tags = Array.isArray(inc.tags)
+    ? (inc.tags as Record<string, unknown>[]).map((t) => str(t.tag)).filter(Boolean)
+    : [];
+  const want = tagQuery ? normalizeCadTagName(tagQuery) ?? tagQuery.trim() : null;
+  if (want) {
+    const has = tags.some((t) => t.toLowerCase() === want.toLowerCase());
+    return {
+      ok: true,
+      line: has
+        ? `affirm, call ${callLookup} has tag ${want}.`
+        : `negative, call ${callLookup} does not have tag ${want}.`,
+    };
+  }
+  if (tags.length === 0) {
+    return { ok: true, line: `call ${callLookup} has no tags.` };
+  }
+  return { ok: true, line: `call ${callLookup} tags: ${tags.slice(0, 6).join(", ")}.` };
 }
 
 export type CadPlateLookupHit = {
