@@ -4,6 +4,8 @@ import {
   describeError,
   VOICE_CODEC_LABEL,
   VOICE_CODECS,
+  coerceVoiceCodecClient,
+  voiceCodecLabel,
   type AudioLabPresetSummary,
   type UserChannel,
   type VoiceCodec,
@@ -747,9 +749,10 @@ export function AudioLabPanel() {
       return;
     }
     const channelRow = channels.find((c) => c.name === pushChannel);
-    if (channelRow && channelRow.codec !== labCodec && !confirmingPush) {
+    const channelCodec = channelRow ? coerceVoiceCodecClient(channelRow.codec) : null;
+    if (channelRow && channelCodec !== labCodec && !confirmingPush) {
       setError_(
-        `Channel "${pushChannel}" uses ${VOICE_CODEC_LABEL[channelRow.codec]}, but you are testing ${VOICE_CODEC_LABEL[labCodec]}. ` +
+        `Channel "${pushChannel}" uses ${voiceCodecLabel(channelCodec)}, but you are testing ${voiceCodecLabel(labCodec)}. ` +
           "Change the Test codec dropdown to match, or pick a different channel. Click Push again to force anyway.",
       );
       setConfirmingPush(true);
@@ -859,8 +862,9 @@ export function AudioLabPanel() {
             onClick={() => {
               const ch = channels.find((c) => c.name === pushChannel);
               if (ch) {
-                setLabCodec(ch.codec);
-                setInfo_(`Test codec set to ${VOICE_CODEC_LABEL[ch.codec]} (matches ${pushChannel}).`);
+                const next = coerceVoiceCodecClient(ch.codec);
+                setLabCodec(next);
+                setInfo_(`Test codec set to ${voiceCodecLabel(next)} (matches ${pushChannel}).`);
               }
             }}
             title="Set the test codec to match the selected push channel."
@@ -1586,7 +1590,9 @@ export function AudioLabPanel() {
         <p className="muted small">
           Press <b>Process & play</b> first, then key the same processed clip onto a real channel
           to hear how it sounds on a handset. The push appears as a transmission from unit{" "}
-          <code>LAB</code>.
+          <code>LAB</code>. If the <b>Test codec</b> does not match the channel&apos;s codec (set under
+          Admin → Channels), the app will warn you before pushing — wrong codec means handsets may not
+          play it.
         </p>
         <div className="audio-lab-push-row">
           <label>
@@ -1595,7 +1601,7 @@ export function AudioLabPanel() {
               {channels.length === 0 && <option value="">(no talk-capable channels)</option>}
               {channels.map((c) => (
                 <option key={c.name} value={c.name}>
-                  {c.name}
+                  {c.name} ({voiceCodecLabel(coerceVoiceCodecClient(c.codec))})
                 </option>
               ))}
             </select>

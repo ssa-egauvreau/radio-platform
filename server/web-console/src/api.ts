@@ -68,6 +68,21 @@ export const VOICE_CODEC_LABEL: Record<VoiceCodec, string> = {
   opus: "Opus (wideband)",
 };
 
+/** Safe label when codec may be missing from an API row (e.g. older cached payloads). */
+export function voiceCodecLabel(codec: unknown): string {
+  if (typeof codec === "string" && (VOICE_CODECS as readonly string[]).includes(codec)) {
+    return VOICE_CODEC_LABEL[codec as VoiceCodec];
+  }
+  return "unknown codec";
+}
+
+export function coerceVoiceCodecClient(raw: unknown): VoiceCodec {
+  if (typeof raw === "string" && (VOICE_CODECS as readonly string[]).includes(raw)) {
+    return raw as VoiceCodec;
+  }
+  return "imbe";
+}
+
 export interface Channel {
   id: number;
   name: string;

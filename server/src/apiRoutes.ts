@@ -23,7 +23,7 @@ import {
   type PresenceStatus,
   type RosterMember,
 } from "./voiceRelay.js";
-import { isVoiceCodec, type VoiceCodec } from "./voiceCodecs.js";
+import { coerceVoiceCodec, isVoiceCodec, type VoiceCodec } from "./voiceCodecs.js";
 import { getBridgeStatus } from "./bridgeWorker.js";
 import {
   AGENCY_ROLES,
@@ -723,9 +723,12 @@ export function createApiRouter(): Router {
     try {
       const me = req.authUser!;
       if (me.role === "admin" || me.role === "dispatcher") {
-        const all = await listChannels(me.agencyId!);
-        const sims = await listSimulcasts(me.agencyId!);
-        const aiEnabled = new Set(await listChannelAiDispatchEnabled(me.agencyId!));
+        const agencyId = me.agencyId!;
+        const all = await listChannels(agencyId);
+        const sims = await listSimulcasts(agencyId);
+        const aiEnabled = new Set(await listChannelAiDispatchEnabled(agencyId));
+        const agency = await getAgencyById(agencyId);
+        const simulcastCodec = coerceVoiceCodec(agency?.default_codec);
         res.json({
           channels: [
             ...all.map((c) => ({
@@ -733,6 +736,7 @@ export function createApiRouter(): Router {
               name: c.name,
               color: c.color,
               zone: c.zone,
+              codec: c.codec,
               permission: "talk_priority",
               simulcast: false,
               ai_dispatch_enabled: aiEnabled.has(c.name),
@@ -744,6 +748,7 @@ export function createApiRouter(): Router {
               name: s.name,
               color: null,
               zone: "Simulcast",
+              codec: simulcastCodec,
               permission: "talk_priority",
               simulcast: true,
             })),
