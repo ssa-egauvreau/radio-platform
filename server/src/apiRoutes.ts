@@ -138,6 +138,12 @@ import {
 import { normalizeClientType } from "./clientType.js";
 import { deriveDeviceAudioConfig } from "./audioConfig.js";
 import { getPool } from "./db.js";
+import {
+  insertVoiceLinkTelemetry,
+  listVoiceLinkUnitSummaries,
+  listVoiceLinkUnitTimeseries,
+  type VoiceLinkTelemetryInsert,
+} from "./voiceLinkTelemetryStore.js";
 import { getCachedAuth, invalidateCachedAuth, setCachedAuth } from "./sessionCache.js";
 import {
   handleIntegrationHealth,
@@ -239,6 +245,106 @@ function asAgencyRole(value: unknown): Role | null {
 
 function asPermission(value: unknown): Permission | null {
   return PERMISSIONS.includes(value as Permission) ? (value as Permission) : null;
+}
+
+/** Maximum INT we'll accept for a single counter — caps a buggy / hostile
+ *  client at the Postgres `INT4` ceiling so a single oversize value can't make
+ *  the insert fail with a numeric-out-of-range error and burn a retry loop. */
+const VOICE_LINK_TELEMETRY_COUNTER_MAX = 2_000_000_000;
+
+/** Upper bound for one telemetry POST. Real client reports are ~200-400 bytes;
+ *  cap at 4 KB so a buggy or hostile client can't smuggle a large blob through
+ *  this endpoint. */
+const VOICE_LINK_TELEMETRY_MAX_BODY_BYTES = 4 * 1024;
+
+/** Hard cap on per-codec entries in one report so a buggy client can't smuggle
+ *  thousands of synthetic codec keys (one per report = O(N) JSONB merge work on
+ *  the aggregation query). 16 is comfortably larger than the 3 codecs we
+ *  actually ship (`imbe`, `codec2_3200`, `opus`) with room for future entries. */
+const VOICE_LINK_TELEMETRY_MAX_CODECS = 16;
+
+function clampCounter(value: unknown): number {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return 0;
+  if (n > VOICE_LINK_TELEMETRY_COUNTER_MAX) return VOICE_LINK_TELEMETRY_COUNTER_MAX;
+  return Math.floor(n);
+}
+
+/** Strict, side-effect-free parser for `POST /v1/telemetry/voice-link`. Returns
+ *  either a normalized {counters, codecBreakdown, clientTs} or an `error` code
+ *  for the route to surface with a 400. Validates body size, counter range,
+ *  and codec-breakdown shape — no exceptions inside the route. Exported so
+ *  the unit tests can pin the contract independently of the live router. */
+export function parseVoiceLinkTelemetryBody(body: Record<string, unknown>): {
+  ok: true;
+  counters: {
+    framesReceived: number;
+    framesDecoded: number;
+    decodeFailures: number;
+    plcFramesSynthesized: number;
+    bufferUnderruns: number;
+    maxBufferDepthFrames: number;
+    talkSpurtsStarted: number;
+    talkSpurtsEnded: number;
+    bytesReceived: number;
+    wallMsObservation: number;
+  };
+  codecBreakdown: Record<string, { framesReceived: number; framesDecoded: number }>;
+  clientTs: string | null;
+} | { ok: false; error: string } {
+  // Reject oversize JSON up front so a buggy/hostile client can't slip a large
+  // blob through this endpoint. We measure the JSON size of the parsed body
+  // rather than the raw Content-Length so the cap also covers cases where
+  // express.json() accepted a larger payload than we want here.
+  try {
+    const serialized = JSON.stringify(body);
+    if (serialized.length > VOICE_LINK_TELEMETRY_MAX_BODY_BYTES) {
+      return { ok: false, error: "payload_too_large" };
+    }
+  } catch {
+    return { ok: false, error: "invalid_json" };
+  }
+  const rawCounters = body.counters;
+  if (!rawCounters || typeof rawCounters !== "object") {
+    return { ok: false, error: "missing_counters" };
+  }
+  const c = rawCounters as Record<string, unknown>;
+  const counters = {
+    framesReceived: clampCounter(c.framesReceived),
+    framesDecoded: clampCounter(c.framesDecoded),
+    decodeFailures: clampCounter(c.decodeFailures),
+    plcFramesSynthesized: clampCounter(c.plcFramesSynthesized),
+    bufferUnderruns: clampCounter(c.bufferUnderruns),
+    maxBufferDepthFrames: clampCounter(c.maxBufferDepthFrames),
+    talkSpurtsStarted: clampCounter(c.talkSpurtsStarted),
+    talkSpurtsEnded: clampCounter(c.talkSpurtsEnded),
+    bytesReceived: clampCounter(c.bytesReceived),
+    wallMsObservation: clampCounter(c.wallMsObservation),
+  };
+  const codecBreakdown: Record<string, { framesReceived: number; framesDecoded: number }> = {};
+  const raw = body.codecBreakdown;
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    let count = 0;
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+      if (count >= VOICE_LINK_TELEMETRY_MAX_CODECS) break;
+      if (typeof k !== "string" || !k || k.length > 32) continue;
+      if (!v || typeof v !== "object") continue;
+      const entry = v as Record<string, unknown>;
+      codecBreakdown[k.slice(0, 32)] = {
+        framesReceived: clampCounter(entry.framesReceived),
+        framesDecoded: clampCounter(entry.framesDecoded),
+      };
+      count += 1;
+    }
+  }
+  let clientTs: string | null = null;
+  if (typeof body.clientTs === "string" && body.clientTs.length > 0 && body.clientTs.length <= 64) {
+    const parsed = Date.parse(body.clientTs);
+    if (Number.isFinite(parsed)) {
+      clientTs = new Date(parsed).toISOString();
+    }
+  }
+  return { ok: true, counters, codecBreakdown, clientTs };
 }
 
 /** Requires a signed-in account that belongs to an agency (blocks platform owners). */
@@ -2200,6 +2306,133 @@ export function createApiRouter(): Router {
     try {
       const limit = Number(req.query.limit ?? 200);
       res.json({ entries: await listAudit(req.authUser!.agencyId!, Number.isFinite(limit) ? limit : 200) });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  // --- voice-link telemetry ------------------------------------------------
+  //
+  // Counters-only report a client emits roughly every 30 s describing its
+  // inbound voice link quality (jitter buffer underruns, PLC frames
+  // synthesized, decode failures, frames received per codec, talk-spurt
+  // count). The admin "Link Health" dashboard reads aggregates back so an
+  // operator can answer "is unit 42 having voice problems?" with data
+  // instead of trusting an end-user report. The POST body is intentionally
+  // tiny (≤ ~500 bytes typical; capped at 4 KB by the validator) so the
+  // telemetry channel itself doesn't add measurable cellular cost — the
+  // whole point of this surface is to SAVE data by enabling triage.
+  router.post("/telemetry/voice-link", async (req, res) => {
+    try {
+      const body = (req.body ?? {}) as Record<string, unknown>;
+      // Two auth paths: signed-in account (JWT) or the legacy handset path
+      // (x-radio-key + a unit id in the body). Either resolves the agency we
+      // bill the row to. We do NOT trust the body's `agency` field; a client
+      // that claims to belong to a different tenant than its auth says is
+      // silently rebilled to its real one.
+      let agencyId: number | null = null;
+      let unitId: string | null = null;
+      if (req.authUser?.agencyId != null) {
+        agencyId = req.authUser.agencyId;
+        // For `radio` accounts, lock the report to the unit id baked into
+        // the JWT — a radio must never be able to bill a report against
+        // another unit id. Admins and dispatchers can report on behalf of
+        // any unit in their agency (a dispatch console is multi-unit on
+        // purpose), so they pick the unit from the body and fall back to
+        // their own JWT unitId.
+        if (req.authUser.role === "radio") {
+          unitId = req.authUser.unitId ?? null;
+        } else {
+          const bodyUnit = typeof body.unitId === "string" ? body.unitId.trim() : "";
+          unitId = bodyUnit || req.authUser.unitId || null;
+        }
+      } else {
+        const headerRaw = req.headers["x-radio-key"];
+        const headerVal = Array.isArray(headerRaw) ? headerRaw[0] : headerRaw;
+        const key = headerVal ?? (typeof req.query.key === "string" ? req.query.key : null);
+        const agency = await resolveAgencyByKey(key ?? null, radioApiKey).catch(() => null);
+        if (!agency) {
+          res.status(401).json({ error: "unauthorized" });
+          return;
+        }
+        agencyId = agency.id;
+        const bodyUnit = typeof body.unitId === "string" ? body.unitId.trim() : "";
+        if (!bodyUnit) {
+          res.status(400).json({ error: "missing_unit_id" });
+          return;
+        }
+        unitId = bodyUnit;
+      }
+      if (!unitId) {
+        res.status(400).json({ error: "missing_unit_id" });
+        return;
+      }
+      const parsed = parseVoiceLinkTelemetryBody(body);
+      if (!parsed.ok) {
+        res.status(400).json({ error: parsed.error });
+        return;
+      }
+      const channel = typeof body.channel === "string" ? body.channel.trim().slice(0, 128) : null;
+      const rawClientType = typeof body.clientType === "string" ? body.clientType : null;
+      const clientType = rawClientType ? normalizeClientType(rawClientType) ?? null : null;
+      const insert: VoiceLinkTelemetryInsert = {
+        agencyId,
+        unitId: unitId.slice(0, 64),
+        channel: channel || null,
+        clientType,
+        counters: parsed.counters,
+        codecBreakdown: parsed.codecBreakdown,
+        clientTs: parsed.clientTs,
+      };
+      if (getPool() == null) {
+        // No DB configured: accept-and-drop so the client's reporter loop
+        // doesn't retry forever in local dev / DB-less smoke tests. The 202
+        // distinguishes this from a normal 200 so a curious caller sees it
+        // was a soft drop, not a persisted insert.
+        res.status(202).json({ ok: true, persisted: false });
+        return;
+      }
+      await insertVoiceLinkTelemetry(insert);
+      res.json({ ok: true, persisted: true });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get("/admin/voice-link-telemetry", requireAdmin, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const sinceMs = clampNumber(req.query.since, 60_000, 7 * 24 * 60 * 60 * 1000, 24 * 60 * 60 * 1000);
+      const channel =
+        typeof req.query.channel === "string" && req.query.channel.trim()
+          ? req.query.channel.trim()
+          : undefined;
+      const units = await listVoiceLinkUnitSummaries(agencyId, sinceMs, channel);
+      res.json({ units, sinceMs });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+
+  router.get("/admin/voice-link-telemetry/:unitId", requireAdmin, async (req, res) => {
+    try {
+      const agencyId = req.authUser!.agencyId!;
+      const rawUnit = String(req.params.unitId ?? "").trim();
+      if (!rawUnit) {
+        res.status(400).json({ error: "missing_unit_id" });
+        return;
+      }
+      const sinceMs = clampNumber(req.query.since, 60_000, 7 * 24 * 60 * 60 * 1000, 24 * 60 * 60 * 1000);
+      const channel =
+        typeof req.query.channel === "string" && req.query.channel.trim()
+          ? req.query.channel.trim()
+          : undefined;
+      const windows = await listVoiceLinkUnitTimeseries(agencyId, rawUnit, sinceMs, channel);
+      // SQL returns newest-first; the chart wants chronological order so the
+      // X axis reads left → right. Reverse here so every consumer sees the
+      // same order without each having to remember.
+      windows.reverse();
+      res.json({ unit: rawUnit, windows, sinceMs });
     } catch (error) {
       fail(res, error);
     }

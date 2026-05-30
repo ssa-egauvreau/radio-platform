@@ -70,6 +70,10 @@ class InboundJitterBuffer(
             }
             lastEnqueueMs = now
             queue.addLast(pcm)
+            // Voice-link telemetry: track the peak buffer depth this window so
+            // the dashboard can flag a unit that's been driving the queue
+            // toward the MAX_BUFFER_FRAMES cap (chronic upstream burstiness).
+            VoiceLinkTelemetryReporter.recordBufferDepth(queue.size)
             // Hard cap on accumulated latency. If the producer outpaces the
             // playout (sustained burst with no drain), drop the oldest frame
             // rather than letting the buffer grow without bound.
@@ -180,6 +184,15 @@ class InboundJitterBuffer(
                 f
             } else {
                 val plc = synthesizePlc()
+                // Voice-link telemetry: every queue-empty playout tick is one
+                // PLC frame synthesised; the first PLC frame in a contiguous
+                // underrun event is also counted as one "buffer underrun" so
+                // the dashboard can distinguish outage frequency (underruns)
+                // from concealment volume (plc frames).
+                if (plcCount == 0) {
+                    VoiceLinkTelemetryReporter.recordBufferUnderrun()
+                }
+                VoiceLinkTelemetryReporter.recordPlcSynthesized()
                 plcCount++
                 plc
             }

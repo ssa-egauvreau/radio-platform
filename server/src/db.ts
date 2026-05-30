@@ -516,6 +516,40 @@ export async function ensureSchema(): Promise<void> {
     );
   `);
 
+  // Inbound voice-link quality counters reported by every handset / browser
+  // client every ~30 s. Counters only — no audio, no transcript, no PCM. The
+  // admin "Link Health" dashboard reads aggregates from this table so an
+  // operator can answer "is unit 42 having voice problems?" with data instead
+  // of trusting an end-user report. 7-day rolling retention sweep keeps the
+  // table bounded; the dashboard's longest window is "last 24 hours" so 7 d
+  // gives the on-call a usable evidence range for off-hours triage.
+  await p.query(`
+    CREATE TABLE IF NOT EXISTS voice_link_telemetry (
+      id BIGSERIAL PRIMARY KEY,
+      agency_id INT NOT NULL REFERENCES agencies(id) ON DELETE CASCADE,
+      unit_id TEXT NOT NULL,
+      channel TEXT,
+      client_type TEXT,
+      frames_received INT NOT NULL DEFAULT 0,
+      frames_decoded INT NOT NULL DEFAULT 0,
+      decode_failures INT NOT NULL DEFAULT 0,
+      plc_frames_synthesized INT NOT NULL DEFAULT 0,
+      buffer_underruns INT NOT NULL DEFAULT 0,
+      max_buffer_depth_frames INT NOT NULL DEFAULT 0,
+      talk_spurts_started INT NOT NULL DEFAULT 0,
+      talk_spurts_ended INT NOT NULL DEFAULT 0,
+      bytes_received INT NOT NULL DEFAULT 0,
+      wall_ms_observation INT NOT NULL DEFAULT 0,
+      codec_breakdown JSONB NOT NULL DEFAULT '{}',
+      client_ts TIMESTAMPTZ,
+      server_ts TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_vlt_agency_unit_ts
+      ON voice_link_telemetry (agency_id, unit_id, server_ts DESC);
+    CREATE INDEX IF NOT EXISTS idx_vlt_agency_ts
+      ON voice_link_telemetry (agency_id, server_ts DESC);
+  `);
+
   // --- migrate any pre-existing single-tenant data into the default agency ---
   const def = await p.query<{ id: number }>(
     `INSERT INTO agencies (name, slug)

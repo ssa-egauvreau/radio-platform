@@ -498,6 +498,82 @@ export class ApiError extends Error {
   }
 }
 
+/** Per-codec counter pair the dashboard renders as a codec mix legend. */
+export interface VoiceLinkCodecEntry {
+  framesReceived: number;
+  framesDecoded: number;
+}
+
+/** One per-window report a client emits roughly every 30 s. Counters only — no
+ *  audio, no transcript, no PCM. Kept tiny on the wire (~200-400 bytes
+ *  typical; 4 KB server-side cap). */
+export interface VoiceLinkTelemetryReport {
+  unitId?: string;
+  channel?: string;
+  clientType?: string;
+  counters: {
+    framesReceived: number;
+    framesDecoded: number;
+    decodeFailures: number;
+    plcFramesSynthesized: number;
+    bufferUnderruns: number;
+    maxBufferDepthFrames: number;
+    talkSpurtsStarted: number;
+    talkSpurtsEnded: number;
+    bytesReceived: number;
+    wallMsObservation: number;
+  };
+  codecBreakdown: Record<string, VoiceLinkCodecEntry>;
+  clientTs: string;
+}
+
+export interface VoiceLinkUnitSummary {
+  unit_id: string;
+  last_seen: string;
+  reports: number;
+  frames_received: number;
+  frames_decoded: number;
+  decode_failures: number;
+  plc_frames_synthesized: number;
+  buffer_underruns: number;
+  max_buffer_depth_frames: number;
+  talk_spurts_started: number;
+  talk_spurts_ended: number;
+  bytes_received: number;
+  wall_ms_observation: number;
+  codec_mix: Record<string, VoiceLinkCodecEntry>;
+  channels: string[];
+  client_types: string[];
+}
+
+export interface VoiceLinkUnitsResponse {
+  units: VoiceLinkUnitSummary[];
+  sinceMs: number;
+}
+
+export interface VoiceLinkTimeseriesPoint {
+  server_ts: string;
+  channel: string | null;
+  client_type: string | null;
+  frames_received: number;
+  frames_decoded: number;
+  decode_failures: number;
+  plc_frames_synthesized: number;
+  buffer_underruns: number;
+  max_buffer_depth_frames: number;
+  talk_spurts_started: number;
+  talk_spurts_ended: number;
+  bytes_received: number;
+  wall_ms_observation: number;
+  codec_breakdown: Record<string, VoiceLinkCodecEntry>;
+}
+
+export interface VoiceLinkTimeseriesResponse {
+  unit: string;
+  windows: VoiceLinkTimeseriesPoint[];
+  sinceMs: number;
+}
+
 export interface GlobalAudioConfigResponse {
   config: unknown | null;
   updatedAt: string | null;
@@ -708,6 +784,41 @@ export const api = {
     request<{ ok: boolean }>("DELETE", `/v1/admin/memberships?userId=${userId}&channelId=${channelId}`),
 
   listAudit: (limit = 200) => request<{ entries: AuditEntry[] }>("GET", `/v1/admin/audit?limit=${limit}`),
+
+  listVoiceLinkTelemetry: (opts: { sinceMs?: number; channel?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.sinceMs && opts.sinceMs > 0) {
+      params.set("since", String(opts.sinceMs));
+    }
+    const channel = opts.channel?.trim();
+    if (channel) {
+      params.set("channel", channel);
+    }
+    const qs = params.toString();
+    return request<VoiceLinkUnitsResponse>(
+      "GET",
+      qs ? `/v1/admin/voice-link-telemetry?${qs}` : "/v1/admin/voice-link-telemetry",
+    );
+  },
+  getVoiceLinkUnitTimeseries: (unitId: string, opts: { sinceMs?: number; channel?: string } = {}) => {
+    const params = new URLSearchParams();
+    if (opts.sinceMs && opts.sinceMs > 0) {
+      params.set("since", String(opts.sinceMs));
+    }
+    const channel = opts.channel?.trim();
+    if (channel) {
+      params.set("channel", channel);
+    }
+    const qs = params.toString();
+    const path = `/v1/admin/voice-link-telemetry/${encodeURIComponent(unitId)}`;
+    return request<VoiceLinkTimeseriesResponse>("GET", qs ? `${path}?${qs}` : path);
+  },
+  /** Client → server: counters-only voice-link health report. POSTed every
+   *  ~30 s by every audio client (handsets + web). Body is ≤ ~500 bytes so the
+   *  channel doesn't add measurable cellular cost — the whole point of this
+   *  surface is to SAVE data by enabling triage. */
+  postVoiceLinkTelemetry: (body: VoiceLinkTelemetryReport) =>
+    request<{ ok: boolean; persisted?: boolean }>("POST", "/v1/telemetry/voice-link", body),
 
   transmissions: (
     opts: {
