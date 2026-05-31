@@ -308,11 +308,12 @@ class InboundJitterBuffer(
         // Idle teardown threshold. After this long with no real inbound frame
         // the playout loop releases the AudioTrack so the audio route — and any
         // amplified accessory's built-in amp — powers down instead of buzzing
-        // on an always-on output. Comfortably longer than a natural reply gap
-        // so a back-and-forth conversation does not thrash the track, but short
-        // enough that the route goes quiet ~1 s after the channel falls silent.
-        // The next enqueue() recreates the track with the normal startup cushion.
-        const val IDLE_RELEASE_MS = 1_000L
+        // on an always-on output. Set to the talk-spurt gap: the route goes
+        // quiet ~300 ms after the channel falls silent (buzz barely perceptible)
+        // while a normal back-and-forth, whose frames keep arriving inside that
+        // window, still reuses one track session rather than thrashing it. The
+        // next enqueue() recreates the track with the normal startup cushion.
+        const val IDLE_RELEASE_MS = TALK_SPURT_GAP_MS
 
         // Number of PLC frames synthesised before falling to silence.
         const val PLC_FADE_FRAMES = 3
