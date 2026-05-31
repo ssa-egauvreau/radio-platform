@@ -28,6 +28,14 @@ import kotlin.concurrent.withLock
  * (~60 ms) before starting playout so a brief opening jitter spike does not
  * immediately trigger PLC. Long pauses between transmissions ([TALK_SPURT_GAP_MS])
  * reset state so the next talker starts cleanly without inherited PLC bleed.
+ *
+ * Idle teardown: after [IDLE_RELEASE_MS] with no real inbound frames the playout
+ * loop releases the AudioTrack and exits instead of streaming silence forever.
+ * An always-on output keeps the audio route powered, which on accessories with a
+ * built-in amplifier (e.g. amplified PTT earpieces) is heard as a constant buzz
+ * between transmissions until the device reboots. Releasing the track lets that
+ * route — and the accessory's amp — power down; the next [enqueue] lazily
+ * recreates the track exactly as the first frame did.
  */
 class InboundJitterBuffer(
     private val trackFactory: () -> AudioTrack?,
@@ -125,89 +133,128 @@ class InboundJitterBuffer(
     }
 
     private fun playoutLoop(t: AudioTrack) {
-        // Initial cushion: wait for a small target depth before the first
-        // write so an opening burst-then-stall does not immediately PLC.
-        lock.withLock {
-            val waitStart = SystemClock.elapsedRealtime()
-            while (running && queue.size < INITIAL_TARGET_FRAMES &&
-                SystemClock.elapsedRealtime() - waitStart < INITIAL_TIMEOUT_MS
-            ) {
-                try {
-                    notEmpty.await(WAKE_POLL_MS, TimeUnit.MILLISECONDS)
-                } catch (_: InterruptedException) {
-                    return
+        try {
+            // Initial cushion: wait for a small target depth before the first
+            // write so an opening burst-then-stall does not immediately PLC.
+            lock.withLock {
+                val waitStart = SystemClock.elapsedRealtime()
+                while (running && queue.size < INITIAL_TARGET_FRAMES &&
+                    SystemClock.elapsedRealtime() - waitStart < INITIAL_TIMEOUT_MS
+                ) {
+                    try {
+                        notEmpty.await(WAKE_POLL_MS, TimeUnit.MILLISECONDS)
+                    } catch (_: InterruptedException) {
+                        return
+                    }
                 }
             }
-        }
 
-        // Wall-clock pacing keeps playout cadence independent of how AudioTrack's
-        // internal buffer happens to be sized on this OEM; the AudioTrack
-        // hardware buffer still absorbs sub-frame jitter on top of that.
-        var nextDeadline = SystemClock.elapsedRealtime()
-        while (running) {
-            val sleepMs = nextDeadline - SystemClock.elapsedRealtime()
-            if (sleepMs > 0) {
+            // Wall-clock pacing keeps playout cadence independent of how AudioTrack's
+            // internal buffer happens to be sized on this OEM; the AudioTrack
+            // hardware buffer still absorbs sub-frame jitter on top of that.
+            var nextDeadline = SystemClock.elapsedRealtime()
+            while (running) {
+                val sleepMs = nextDeadline - SystemClock.elapsedRealtime()
+                if (sleepMs > 0) {
+                    try {
+                        Thread.sleep(sleepMs)
+                    } catch (_: InterruptedException) {
+                        break
+                    }
+                }
+
+                // null = stop or idle teardown: leave the loop and release the
+                // track in the finally below so the audio route powers down.
+                val frame = nextPlayoutFrame() ?: break
+
                 try {
-                    Thread.sleep(sleepMs)
-                } catch (_: InterruptedException) {
+                    t.write(frame, 0, frame.size)
+                } catch (_: IllegalStateException) {
                     break
                 }
+
+                // Pace by the real audio duration of the frame so variable-size
+                // chunks (e.g. clear-PCM fallback when the JNI vocoder is missing)
+                // still play out at the correct rate.
+                nextDeadline += frameDurationMs(frame.size)
             }
-
-            val frame = nextPlayoutFrame() ?: return
-
-            try {
-                t.write(frame, 0, frame.size)
-            } catch (_: IllegalStateException) {
-                break
-            }
-
-            // Pace by the real audio duration of the frame so variable-size
-            // chunks (e.g. clear-PCM fallback when the JNI vocoder is missing)
-            // still play out at the correct rate.
-            nextDeadline += frameDurationMs(frame.size)
+        } finally {
+            releaseTrackIfCurrent(t)
         }
+    }
+
+    /**
+     * Release [t] iff it is still this buffer's current track. Whoever nulls
+     * `track` under the lock owns the release, so this is safe to race against
+     * [stop]: exactly one of them finds `track === t` and releases it, the
+     * other no-ops — the AudioTrack is never double-released.
+     */
+    private fun releaseTrackIfCurrent(t: AudioTrack) {
+        lock.withLock {
+            if (track !== t) return
+            running = false
+            track = null
+            thread = null
+        }
+        runCatching {
+            if (t.playState == AudioTrack.PLAYSTATE_PLAYING) {
+                t.pause()
+                t.flush()
+            }
+        }
+        runCatching { t.release() }
     }
 
     /** Pulls one frame from the queue (real audio) or synthesises a PLC
      *  frame when the queue is empty at playout time. Returns null when the
-     *  pacer should exit (the buffer has been stopped). Split out of
+     *  pacer should exit — either the buffer has been stopped or it has been
+     *  idle past [IDLE_RELEASE_MS] (in which case `running` is cleared here so
+     *  the track is released and the route powers down). Split out of
      *  [playoutLoop] so the synchronized section has a clear scope and the
      *  control-flow stays linear. */
     private fun nextPlayoutFrame(): ByteArray? {
         lock.withLock {
             if (!running) return null
-            return if (queue.isNotEmpty()) {
+            if (queue.isNotEmpty()) {
                 val f = queue.removeFirst()
                 lastGoodFrame = f
                 plcCount = 0
-                f
-            } else {
-                val plc = synthesizePlc()
-                // Voice-link telemetry: only count concealment that happens
-                // DURING an active talk-spurt (within TALK_SPURT_GAP_MS of the
-                // last received frame). The playout loop runs continuously for
-                // the whole session, so between transmissions the queue is
-                // empty on every tick too — counting that dead air would swamp
-                // the PLC ratio with channel idle time and a merely-quiet unit
-                // would read ~99% "loss" on the Link Health dashboard. The PLC
-                // fade itself still runs unconditionally so audio is unchanged;
-                // only the counters are gated.
-                val now = SystemClock.elapsedRealtime()
-                val inActiveSpurt = lastEnqueueMs != 0L && now - lastEnqueueMs <= TALK_SPURT_GAP_MS
-                if (inActiveSpurt) {
-                    // First PLC frame in a contiguous underrun event is also
-                    // counted as one "buffer underrun" so the dashboard can
-                    // distinguish outage frequency (underruns) from concealment
-                    // volume (plc frames).
-                    if (plcCount == 0) {
-                        VoiceLinkTelemetryReporter.recordBufferUnderrun()
-                    }
-                    VoiceLinkTelemetryReporter.recordPlcSynthesized()
-                }
-                plcCount++
-                plc
+                return f
             }
+
+            // Queue empty. Once we've been idle past the release threshold,
+            // stop the loop (return null) so the finally releases the track and
+            // the audio route — and any amplified accessory's amp — powers down
+            // instead of buzzing on the always-on output. The next enqueue()
+            // lazily recreates the track, mirroring first-frame startup.
+            val now = SystemClock.elapsedRealtime()
+            if (lastEnqueueMs != 0L && now - lastEnqueueMs >= IDLE_RELEASE_MS) {
+                running = false
+                return null
+            }
+
+            val plc = synthesizePlc()
+            // Voice-link telemetry: only count concealment that happens
+            // DURING an active talk-spurt (within TALK_SPURT_GAP_MS of the
+            // last received frame). Between transmissions the queue is empty on
+            // every tick too — counting that dead air would swamp the PLC ratio
+            // with channel idle time and a merely-quiet unit would read ~99%
+            // "loss" on the Link Health dashboard. The PLC fade itself still
+            // runs unconditionally so audio is unchanged; only the counters are
+            // gated.
+            val inActiveSpurt = lastEnqueueMs != 0L && now - lastEnqueueMs <= TALK_SPURT_GAP_MS
+            if (inActiveSpurt) {
+                // First PLC frame in a contiguous underrun event is also
+                // counted as one "buffer underrun" so the dashboard can
+                // distinguish outage frequency (underruns) from concealment
+                // volume (plc frames).
+                if (plcCount == 0) {
+                    VoiceLinkTelemetryReporter.recordBufferUnderrun()
+                }
+                VoiceLinkTelemetryReporter.recordPlcSynthesized()
+            }
+            plcCount++
+            return plc
         }
     }
 
@@ -257,6 +304,15 @@ class InboundJitterBuffer(
         // Talk-spurt boundary; matches the relay air-claim window so an
         // operator gap between transmissions clears stale state cleanly.
         const val TALK_SPURT_GAP_MS = 300L
+
+        // Idle teardown threshold. After this long with no real inbound frame
+        // the playout loop releases the AudioTrack so the audio route — and any
+        // amplified accessory's built-in amp — powers down instead of buzzing
+        // on an always-on output. Comfortably longer than a natural reply gap
+        // so a back-and-forth conversation does not thrash the track, but short
+        // enough that the route goes quiet ~1 s after the channel falls silent.
+        // The next enqueue() recreates the track with the normal startup cushion.
+        const val IDLE_RELEASE_MS = 1_000L
 
         // Number of PLC frames synthesised before falling to silence.
         const val PLC_FADE_FRAMES = 3
