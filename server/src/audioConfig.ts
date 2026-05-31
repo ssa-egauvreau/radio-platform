@@ -170,7 +170,13 @@ export function deriveDeviceAudioConfig(input: unknown): DeviceAudioConfig {
     noiseSuppression,
     gainMultiplier: Math.round(rawMultiplier * 100) / 100,
     bypassMicProcessing,
-    postDecode: derivePostDecodeBlock(cfg.postDecode),
+    // Post-decode shaping is force-disabled for the whole fleet: every client
+    // plays raw decoded IMBE at the legacy sample-duplicate path, which is the
+    // original "sounds good" voicing from before the Audio Lab post-decode
+    // chain landed. The shaping derivation is preserved (and still unit-tested)
+    // in `derivePostDecodeBlock` below; to re-enable agency-pushed shaping,
+    // restore `postDecode: derivePostDecodeBlock(cfg.postDecode)` here.
+    postDecode: null,
   };
 }
 
@@ -189,7 +195,7 @@ const VALID_UPSAMPLE_MODES: ReadonlySet<DevicePostDecodeConfig["upsampleMode"]> 
  * `null` when shaping would be a no-op so the client takes the legacy
  * sample-duplicate fast path with no branching cost.
  */
-function derivePostDecodeBlock(
+export function derivePostDecodeBlock(
   raw: Record<string, unknown> | undefined,
 ): DevicePostDecodeConfig | null {
   if (!raw || typeof raw !== "object") {
