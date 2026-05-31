@@ -227,6 +227,8 @@ export function AudioLabPanel() {
   });
   const [applyingGlobal, setApplyingGlobal] = useState(false);
   const [confirmingGlobal, setConfirmingGlobal] = useState(false);
+  const [resettingBaseline, setResettingBaseline] = useState(false);
+  const [confirmingBaseline, setConfirmingBaseline] = useState(false);
 
   // Channel push state.
   const [channels, setChannels] = useState<UserChannel[]>([]);
@@ -822,6 +824,45 @@ export function AudioLabPanel() {
     }
   }
 
+  // One-click revert to the no-DSP baseline: push DEFAULT_PRESET (duplicate
+  // upsample, every post-decode shaping toggle off) to all users + handsets.
+  // The server's deriver collapses that to a null post-decode block, so
+  // clients drop back to the plain decode → duplicate-upsample fast path on
+  // their next reconnect — i.e. the original "sounded great on IMBE" voice
+  // before any Audio Lab tuning. Two-click confirm, same as Apply live.
+  async function handleResetToBaseline(): Promise<void> {
+    if (!confirmingBaseline) {
+      setConfirmingGlobal(false);
+      setConfirmingBaseline(true);
+      return;
+    }
+    setConfirmingBaseline(false);
+    setResettingBaseline(true);
+    setError_(null);
+    setInfo_(null);
+    try {
+      const baseline = cloneConfig(DEFAULT_PRESET);
+      const res = await api.setGlobalAudioConfig(baseline);
+      setConfig(baseline);
+      setActivePresetName("Default IMBE");
+      setGlobalConfig({
+        updatedAt: res.updatedAt,
+        updatedBy: res.updatedBy,
+        liveBypassMicProcessing: Boolean(baseline.preImbe.bypassMicProcessing ?? false),
+      });
+      setInfo_(
+        "Reset to baseline — the post-decode DSP chain is now OFF for everyone. " +
+          "Handsets and web clients fall back to the plain decode → duplicate-upsample path " +
+          "on their next reconnect, so voice returns to the original IMBE baseline. " +
+          "Save it as a preset if you want a one-click anchor for future A/B tuning.",
+      );
+    } catch (err) {
+      setError_(`Could not reset to baseline: ${describeError(err)}`);
+    } finally {
+      setResettingBaseline(false);
+    }
+  }
+
   const busy = state === "recording" || state === "processing" || state === "playing" || state === "pushing";
 
   return (
@@ -1052,6 +1093,23 @@ export function AudioLabPanel() {
         </button>
         {confirmingGlobal && (
           <button className="btn sm" onClick={() => setConfirmingGlobal(false)}>
+            Cancel
+          </button>
+        )}
+        <button
+          className={"btn sm" + (confirmingBaseline ? " danger" : "")}
+          onClick={() => void handleResetToBaseline()}
+          disabled={resettingBaseline || applyingGlobal}
+          title="Turn off the entire post-decode DSP chain for everyone and return to the plain IMBE baseline (duplicate upsample, no EQ/presence/saturation)."
+        >
+          {resettingBaseline
+            ? "Resetting…"
+            : confirmingBaseline
+              ? "Reset everyone to the no-DSP baseline? Click again to confirm"
+              : "Reset to baseline (no DSP)"}
+        </button>
+        {confirmingBaseline && (
+          <button className="btn sm" onClick={() => setConfirmingBaseline(false)}>
             Cancel
           </button>
         )}
