@@ -37,7 +37,7 @@ import os
 private let OPUS_SAMPLE_RATE: Int32 = 16_000
 private let OPUS_CHANNELS: Int32 = 1
 private let OPUS_FRAME_SAMPLES: Int = 320  // 20 ms @ 16 kHz
-private let OPUS_BITRATE: Int32 = 32_000
+private let OPUS_BITRATE: Int32 = 20_000
 private let OPUS_PACKET_LOSS_PERC: Int32 = 10
 private let OPUS_COMPLEXITY: Int32 = 8
 /// Generous upper bound on a 20 ms 32 kbps Opus packet. Measured ~80-160 B

@@ -47,7 +47,7 @@ static OpusDecoder* g_decoder = NULL;
 #define OPUS_SAMPLE_RATE        16000
 #define OPUS_CHANNELS               1
 #define OPUS_FRAME_SAMPLES        320   /* 20 ms @ 16 kHz */
-#define OPUS_BITRATE_BPS        32000
+#define OPUS_BITRATE_BPS        20000
 #define OPUS_PACKET_LOSS_PERC      10   /* sensible FEC budget */
 #define OPUS_VOIP_COMPLEXITY        8   /* good quality, low CPU */
 

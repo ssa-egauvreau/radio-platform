@@ -45,7 +45,7 @@ OpusDecoder* gDecoder = nullptr;
 constexpr int OPUS_SAMPLE_RATE   = 16000;
 constexpr int OPUS_CHANNELS      = 1;
 constexpr int OPUS_FRAME_SAMPLES = 320;   // 20 ms @ 16 kHz
-constexpr int OPUS_BITRATE       = 32000; // matches iOS + web
+constexpr int OPUS_BITRATE       = 20000; // matches iOS + web
 constexpr int OPUS_PACKET_LOSS_PERC = 10; // sensible FEC redundancy budget
 constexpr int OPUS_COMPLEXITY    = 8;     // good quality, low CPU for rugged handsets
 /** Generous bound on a 20 ms 32 kbps Opus packet. libopus measured at
