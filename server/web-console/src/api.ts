@@ -208,6 +208,9 @@ export interface AiDispatchTestResult {
   dispatcherReply: string;
   ttsKind: string;
   ttsMp3Base64: string | null;
+  followUpDispatcherReply?: string;
+  followUpTtsKind?: string;
+  followUpTtsMp3Base64?: string | null;
   errors: string[];
 }
 

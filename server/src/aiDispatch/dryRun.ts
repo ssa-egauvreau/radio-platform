@@ -84,6 +84,10 @@ export interface AiDispatchDryRunResult {
   dispatcherReply: string;
   ttsKind: TtsSpeechKind;
   ttsMp3Base64: string | null;
+  /** Second on-air line after an async CAD/web lookup (mirrors live `runAsyncInfoLookup`). */
+  followUpDispatcherReply: string;
+  followUpTtsKind: TtsSpeechKind;
+  followUpTtsMp3Base64: string | null;
   errors: string[];
 }
 
@@ -174,6 +178,9 @@ export async function runAiDispatchDryRun(
     dispatcherReply: "",
     ttsKind: "auto",
     ttsMp3Base64: null,
+    followUpDispatcherReply: "",
+    followUpTtsKind: "info_lookup",
+    followUpTtsMp3Base64: null,
     errors,
   };
 
@@ -511,10 +518,25 @@ export async function runAiDispatchDryRun(
             buildInfoRequestResponse(opts.agencyId, parsed!.info_request!, parsed!.unit ?? unitId),
           );
           if (asyncAnswer) {
+            const followUp = adaptDispatcherResponseForChannel(asyncAnswer, channelName);
             ten8Actions.info_request_async_followup = {
-              note: "Async lookup completed — on a live transmission this would be spoken as a follow-up.",
+              note: "Async lookup — on live radio this is a second transmission after the standby ack.",
               answer: asyncAnswer,
             };
+            result.followUpDispatcherReply = followUp;
+            result.followUpTtsKind = "info_lookup";
+            if (synthesizeTts && followUp) {
+              const followMp3 = await phase("tts_synthesize_followup", () =>
+                synthesizeElevenLabsMp3(opts.agencyId, followUp, { speechKind: "info_lookup" }),
+              );
+              if (followMp3) {
+                result.followUpTtsMp3Base64 = followMp3.toString("base64");
+              } else {
+                errors.push(
+                  "Follow-up lookup TTS failed (check ElevenLabs API key + voice ID in Integrations).",
+                );
+              }
+            }
           }
         } catch (e) {
           errors.push(`info_request async lookup failed: ${e instanceof Error ? e.message : String(e)}`);

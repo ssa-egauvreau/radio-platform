@@ -31,6 +31,7 @@ export function AiTestPanel() {
   const [result, setResult] = useState<AiDispatchTestResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const followUpAudioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,9 +66,21 @@ export function AiTestPanel() {
       });
       setResult(res);
       if (synthesizeTts && res.ttsMp3Base64) {
-        // Auto-play the dispatcher response.
+        // Auto-play immediate reply, then async lookup follow-up (CAD incident, plate search, etc.).
         setTimeout(() => {
-          audioRef.current?.play().catch(() => undefined);
+          const first = audioRef.current;
+          if (!first) return;
+          const playFollowUp = () => {
+            followUpAudioRef.current?.play().catch(() => undefined);
+          };
+          if (res.followUpTtsMp3Base64) {
+            first.addEventListener("ended", playFollowUp, { once: true });
+          }
+          first.play().catch(() => undefined);
+        }, 50);
+      } else if (synthesizeTts && res.followUpTtsMp3Base64) {
+        setTimeout(() => {
+          followUpAudioRef.current?.play().catch(() => undefined);
         }, 50);
       }
     } catch (err) {
@@ -95,6 +108,11 @@ export function AiTestPanel() {
     if (!result?.ttsMp3Base64) return null;
     return `data:audio/mpeg;base64,${result.ttsMp3Base64}`;
   }, [result?.ttsMp3Base64]);
+
+  const followUpAudioSrc = useMemo(() => {
+    if (!result?.followUpTtsMp3Base64) return null;
+    return `data:audio/mpeg;base64,${result.followUpTtsMp3Base64}`;
+  }, [result?.followUpTtsMp3Base64]);
 
   return (
     <div className="ai-test-panel">
@@ -237,18 +255,47 @@ export function AiTestPanel() {
 
           <div className="ai-test-section">
             <h3>Dispatcher reply</h3>
-            {result.dispatcherReply ? (
+            {result.dispatcherReply || result.followUpDispatcherReply ? (
               <>
-                <blockquote className="ai-test-quote">{result.dispatcherReply}</blockquote>
-                <div className="ai-test-meta-line">
-                  TTS kind: <code>{result.ttsKind}</code>
-                  {!result.ttsMp3Base64 && synthesizeTts && (
-                    <span className="ai-test-mute"> · no audio (check ElevenLabs key)</span>
-                  )}
-                </div>
-                {audioSrc && (
-                  <audio ref={audioRef} controls src={audioSrc} className="ai-test-audio" />
-                )}
+                {result.dispatcherReply ? (
+                  <>
+                    <p className="ai-test-meta-line muted" style={{ marginBottom: "0.35rem" }}>
+                      Immediate (on the air first)
+                    </p>
+                    <blockquote className="ai-test-quote">{result.dispatcherReply}</blockquote>
+                    <div className="ai-test-meta-line">
+                      TTS kind: <code>{result.ttsKind}</code>
+                      {!result.ttsMp3Base64 && synthesizeTts && (
+                        <span className="ai-test-mute"> · no audio (check ElevenLabs key)</span>
+                      )}
+                    </div>
+                    {audioSrc && (
+                      <audio ref={audioRef} controls src={audioSrc} className="ai-test-audio" />
+                    )}
+                  </>
+                ) : null}
+                {result.followUpDispatcherReply ? (
+                  <>
+                    <p className="ai-test-meta-line muted" style={{ marginTop: "1rem", marginBottom: "0.35rem" }}>
+                      Follow-up after lookup (second transmission on live radio)
+                    </p>
+                    <blockquote className="ai-test-quote">{result.followUpDispatcherReply}</blockquote>
+                    <div className="ai-test-meta-line">
+                      TTS kind: <code>{result.followUpTtsKind ?? "info_lookup"}</code>
+                      {!result.followUpTtsMp3Base64 && synthesizeTts && (
+                        <span className="ai-test-mute"> · no follow-up audio (check ElevenLabs key)</span>
+                      )}
+                    </div>
+                    {followUpAudioSrc && (
+                      <audio
+                        ref={followUpAudioRef}
+                        controls
+                        src={followUpAudioSrc}
+                        className="ai-test-audio"
+                      />
+                    )}
+                  </>
+                ) : null}
               </>
             ) : (
               <p className="muted">
