@@ -40,6 +40,16 @@ export function getPool(): pg.Pool | null {
       ssl: isLocal ? false : { rejectUnauthorized: false },
       max,
     });
+    // Railway / Postgres restarts drop idle sockets; without these listeners node-postgres
+    // emits an uncaught `error` on the pool and the API process exits (deploy crash loop).
+    pool.on("error", (err) => {
+      console.warn("[db] idle pool client error (connection will be discarded)", err.message);
+    });
+    pool.on("connect", (client) => {
+      client.on("error", (err) => {
+        console.warn("[db] pool client error", err.message);
+      });
+    });
     // Statement-level timeout would be nice to bound a runaway query against the shared pool,
     // but setting it on the Pool would also apply to ensureSchema()'s bootstrap migrations
     // (full-table backfills, CREATE INDEX) that can legitimately exceed any short ceiling on

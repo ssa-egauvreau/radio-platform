@@ -71,6 +71,19 @@ After the latest server update, skipped rows appear as **“Skipped — AI OFF o
 
 - **AI DISPATCH** toggle is **ON** for the channel you are testing
 
+## Railway keeps crashing / restarting (crash loop)
+
+**PR #232 and other recent Android-only merges do not change the Node server.** If the API service restarts over and over right after a deploy, check these first:
+
+| Log line | What to do |
+|----------|------------|
+| `FATAL: JWT_SECRET env is not set in production` | In Railway → API service → **Variables**, set **`JWT_SECRET`** to a long random string (save, redeploy). |
+| `idle pool client error` or `Connection terminated unexpectedly` | Postgres blip or wrong **`DATABASE_URL`**. Confirm the variable is **linked** to your Postgres service (not a stale copy). Redeploy after fixing. |
+| `JavaScript heap out of memory` / process killed with no message | Whisper + knowledge-base models may OOM on small plans. Set **`TRANSCRIPTION=off`** and **`KB_ENABLED=off`** temporarily, redeploy, then upgrade memory or keep them off. |
+| Build failed | Open the failed deployment log; fix the compile error, or set **Root Directory** to **`server`**. |
+
+**Quick check:** open `https://safet-ptt.com/health` (or your Railway URL + `/health`). If the page never loads, the process is not staying up — use the log lines above.
+
 ## Railway logs (2 minutes)
 
 1. Railway → safeT service → **Deployments** → latest → **View logs**.
@@ -80,6 +93,7 @@ After the latest server update, skipped rows appear as **“Skipped — AI OFF o
 - `Transcriber unavailable` — Whisper failed (try larger plan or redeploy)
 - `Whisper model load exceeded` — the model took too long to load (slow/blocked HF download or OOM). The queue no longer freezes; affected transmissions are marked failed and the load keeps retrying. Tune with `WHISPER_LOAD_TIMEOUT_MS` (default 180000).
 - `Database bootstrap failed` — Postgres problem
+- `[db] idle pool client error` — Postgres connection dropped; server should stay up after the pool error-handler fix
 - `[ai-dispatch]` lines — AI ran or skipped
 
 ### Stuck on "Transcribing…" forever
