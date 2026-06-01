@@ -143,6 +143,7 @@ import { normalizeClientType } from "./clientType.js";
 import { deriveDeviceAudioConfig } from "./audioConfig.js";
 import { isValidPresetName, summarizePreset } from "./audioLabPresets.js";
 import { getPool } from "./db.js";
+import { isPostgresDiskFullError } from "./postgresErrors.js";
 import {
   insertVoiceLinkTelemetry,
   listVoiceLinkUnitSummaries,
@@ -251,6 +252,14 @@ function fail(res: Response, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   if (message === "database_unavailable") {
     res.status(503).json({ error: "database_unavailable" });
+    return;
+  }
+  if (isPostgresDiskFullError(error)) {
+    console.error("API error (postgres disk full)", error);
+    res.status(503).json({
+      error: "database_disk_full",
+      hint: "PostgreSQL volume is full. Free space or upgrade disk on Railway, then redeploy.",
+    });
     return;
   }
   if ((error as { code?: string } | null)?.code === "23505") {

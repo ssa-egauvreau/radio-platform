@@ -1,4 +1,4 @@
-import { requirePool } from "../db.js";
+import { getPool, requirePool } from "../db.js";
 
 // AI-created seed rows exist only to bridge the short gap until the real 10-8 webhook lands.
 // If that webhook never arrives, the seed should age out so we don't keep matching/posting to
@@ -156,4 +156,15 @@ export async function listTen8WebhookLog(agencyId: number, limit: number): Promi
     [agencyId, cap],
   );
   return res.rows;
+}
+
+/** Deletes debug webhook log rows older than `retentionMs`. */
+export async function sweepTen8WebhookLog(retentionMs: number): Promise<number> {
+  const p = getPool();
+  if (!p) {
+    return 0;
+  }
+  const cutoff = new Date(Date.now() - retentionMs).toISOString();
+  const res = await p.query(`DELETE FROM ten8_webhook_log WHERE received_at < $1;`, [cutoff]);
+  return res.rowCount ?? 0;
 }

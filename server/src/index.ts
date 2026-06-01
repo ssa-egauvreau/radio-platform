@@ -29,15 +29,10 @@ import { getTranscriptionDiagnostics } from "./transcribe.js";
 import { getEmbeddingDiagnostics, warmEmbeddings } from "./aiDispatch/knowledgeBase/embeddings.js";
 import { recoverPendingKbIngests } from "./aiDispatch/knowledgeBase/ingest.js";
 import { startBridgeWorker } from "./bridgeWorker.js";
-import { sweepVoiceLinkTelemetry } from "./voiceLinkTelemetryStore.js";
+import { runDataRetentionSweeps } from "./dataRetention.js";
 
-/** Rolling retention for voice-link telemetry rows. 7 days lines up with the
- *  dashboard's "last 24 h" detail-view ceiling × a 1-week off-hours triage
- *  window — the on-call still has yesterday's data Monday morning. */
-const VOICE_LINK_TELEMETRY_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
-/** How often the sweep runs. ~10 min is small enough to keep table growth
- *  bounded between sweeps without firing a DELETE every minute. */
-const VOICE_LINK_TELEMETRY_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
+/** How often retention DELETE sweeps run (~10 min). */
+const DATA_RETENTION_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
 /** Knowledge-base retrieval is on unless explicitly disabled (mirrors KB_ENABLED in retrieve.ts). */
 const KB_ENABLED = (process.env.KB_ENABLED ?? "on").trim().toLowerCase() !== "off";
@@ -323,17 +318,15 @@ async function main(): Promise<void> {
     }
   })();
 
-  // 7-day rolling retention for voice-link telemetry. Idempotent — safe to
-  // run from every Node instance behind a load balancer; the DELETE matches
-  // zero rows after the first sweep clears them.
-  void sweepVoiceLinkTelemetry(VOICE_LINK_TELEMETRY_RETENTION_MS).catch((e) => {
-    console.warn("[voice-link-telemetry] initial sweep failed", e);
+  // Rolling retention sweeps (telemetry, webhook debug log, AI activity log, optional transmissions).
+  void runDataRetentionSweeps().catch((e) => {
+    console.warn("[data-retention] initial sweep failed", e);
   });
   setInterval(() => {
-    void sweepVoiceLinkTelemetry(VOICE_LINK_TELEMETRY_RETENTION_MS).catch((e) => {
-      console.warn("[voice-link-telemetry] periodic sweep failed", e);
+    void runDataRetentionSweeps().catch((e) => {
+      console.warn("[data-retention] periodic sweep failed", e);
     });
-  }, VOICE_LINK_TELEMETRY_SWEEP_INTERVAL_MS).unref();
+  }, DATA_RETENTION_SWEEP_INTERVAL_MS).unref();
 
   const server = createServer(app);
   // Match an upstream LB / edge proxy's idle timeout (Railway / Cloudflare default ~60 s).

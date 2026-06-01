@@ -1,5 +1,6 @@
 import type { Request, Response } from "express";
 import { getPool } from "../db.js";
+import { isPostgresDiskFullError } from "../postgresErrors.js";
 import { getAgencyBySlug, getAgencyIntegrationValue } from "../store.js";
 import { upsertTen8Incident, insertTen8WebhookLog } from "./store.js";
 
@@ -81,24 +82,37 @@ export async function handleTen8Webhook(req: Request, res: Response): Promise<vo
   const incident = (body.incident ?? null) as Record<string, unknown> | null;
   const callId = incident ? String(incident.callID ?? incident.callId ?? "").trim() : "";
 
-  await insertTen8WebhookLog({ agencyId, action, callId: callId || null, payload: body });
+  try {
+    await insertTen8WebhookLog({ agencyId, action, callId: callId || null, payload: body });
 
-  if (callId) {
-    const isClosed = Number(incident?.isClosed) === 1 || action === "closed";
-    await upsertTen8Incident({
-      agencyId,
-      callId,
-      action,
-      isClosed,
-      incidentType: incident?.type ? String(incident.type) : null,
-      priority: incident?.priority ? String(incident.priority) : null,
-      status: incident?.status ? String(incident.status) : null,
-      location: incident?.location ? String(incident.location) : null,
-      payload: body,
-    });
+    if (callId) {
+      const isClosed = Number(incident?.isClosed) === 1 || action === "closed";
+      await upsertTen8Incident({
+        agencyId,
+        callId,
+        action,
+        isClosed,
+        incidentType: incident?.type ? String(incident.type) : null,
+        priority: incident?.priority ? String(incident.priority) : null,
+        status: incident?.status ? String(incident.status) : null,
+        location: incident?.location ? String(incident.location) : null,
+        payload: body,
+      });
+    }
+
+    res.json({ ok: true, callId: callId || null, action });
+  } catch (error) {
+    if (isPostgresDiskFullError(error)) {
+      console.error("[ten8-webhook] postgres disk full", error);
+      res.status(503).json({
+        error: "database_disk_full",
+        hint: "PostgreSQL volume is full. Free space or upgrade disk on Railway.",
+      });
+      return;
+    }
+    console.error("[ten8-webhook] handler failed", error);
+    res.status(500).json({ error: "server_error" });
   }
-
-  res.json({ ok: true, callId: callId || null, action });
 }
 
 export async function handleTen8WebhookGet(_req: Request, res: Response): Promise<void> {

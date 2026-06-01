@@ -79,6 +79,7 @@ After the latest server update, skipped rows appear as **“Skipped — AI OFF o
 |----------|------------|
 | `FATAL: JWT_SECRET env is not set in production` | In Railway → API service → **Variables**, set **`JWT_SECRET`** to a long random string (save, redeploy). |
 | `idle pool client error` or `Connection terminated unexpectedly` | Postgres blip or wrong **`DATABASE_URL`**. Confirm the variable is **linked** to your Postgres service (not a stale copy). Redeploy after fixing. |
+| `No space left on device` or Postgres code **`53100`** | **Database disk is full.** See **`docs/railway-postgres-disk-full.md`** — upgrade Postgres volume or delete old `transmissions` rows, then set **`TRANSMISSION_RETENTION_DAYS=90`** on the API service. |
 | `JavaScript heap out of memory` / process killed with no message | Whisper + knowledge-base models may OOM on small plans. Set **`TRANSCRIPTION=off`** and **`KB_ENABLED=off`** temporarily, redeploy, then upgrade memory or keep them off. |
 | Build failed | Open the failed deployment log; fix the compile error, or set **Root Directory** to **`server`**. |
 
@@ -94,6 +95,8 @@ After the latest server update, skipped rows appear as **“Skipped — AI OFF o
 - `Whisper model load exceeded` — the model took too long to load (slow/blocked HF download or OOM). The queue no longer freezes; affected transmissions are marked failed and the load keeps retrying. Tune with `WHISPER_LOAD_TIMEOUT_MS` (default 180000).
 - `Database bootstrap failed` — Postgres problem
 - `[db] idle pool client error` — Postgres connection dropped; server should stay up after the pool error-handler fix
+- `No space left on device` / `could not extend file` — Postgres volume full; see **`docs/railway-postgres-disk-full.md`**
+- `[data-retention]` — automatic DELETE sweeps (telemetry, webhook log, optional old transmissions)
 - `[ai-dispatch]` lines — AI ran or skipped
 
 ### Stuck on "Transcribing…" forever

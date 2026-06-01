@@ -1,4 +1,4 @@
-import { requirePool } from "../db.js";
+import { getPool, requirePool } from "../db.js";
 import type { AiDispatchParseResult } from "./parse.js";
 import type { PlateLookupResult } from "./plateLookup.js";
 
@@ -95,4 +95,15 @@ export async function listAiDispatchLog(agencyId: number, limit: number): Promis
     ten8_actions:
       typeof r.ten8_actions === "string" ? JSON.parse(r.ten8_actions) : r.ten8_actions,
   }));
+}
+
+/** Deletes AI dispatch activity rows older than `retentionMs`. */
+export async function sweepAiDispatchLog(retentionMs: number): Promise<number> {
+  const p = getPool();
+  if (!p) {
+    return 0;
+  }
+  const cutoff = new Date(Date.now() - retentionMs).toISOString();
+  const res = await p.query(`DELETE FROM ai_dispatch_log WHERE created_at < $1;`, [cutoff]);
+  return res.rowCount ?? 0;
 }

@@ -1033,6 +1033,21 @@ export async function insertTransmission(input: {
   return res.rows[0]!.id;
 }
 
+/**
+ * Deletes transmission rows (including stored audio) older than `retentionMs`.
+ * Only runs when `TRANSMISSION_RETENTION_DAYS` is set on the host — see
+ * `runDataRetentionSweeps` in `dataRetention.ts`.
+ */
+export async function sweepTransmissions(retentionMs: number): Promise<number> {
+  const p = getPool();
+  if (!p) {
+    return 0;
+  }
+  const cutoff = new Date(Date.now() - retentionMs).toISOString();
+  const res = await p.query(`DELETE FROM transmissions WHERE started_at < $1;`, [cutoff]);
+  return res.rowCount ?? 0;
+}
+
 export type TransmissionSort = "newest" | "oldest" | "longest" | "shortest" | "speaker";
 
 const TX_SORT_SQL: Record<TransmissionSort, string> = {
