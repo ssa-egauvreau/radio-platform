@@ -1,3 +1,4 @@
+import { CALL_TYPE_SPOKEN } from "../aiDispatch/speech/callTypeSpoken.js";
 import {
   ten8GetIncident,
   ten8ListIncidents,
@@ -93,23 +94,238 @@ function incidentLocation(inc: Ten8Incident): string {
   return parts.join(", ");
 }
 
-function incidentComments(inc: Ten8Incident, max = 3): string | null {
+const MONTH_NAMES = [
+  "January",
+  "February",
+  "March",
+  "April",
+  "May",
+  "June",
+  "July",
+  "August",
+  "September",
+  "October",
+  "November",
+  "December",
+] as const;
+
+function ordinalDay(n: number): string {
+  const mod100 = n % 100;
+  if (mod100 >= 11 && mod100 <= 13) {
+    return `${n}th`;
+  }
+  switch (n % 10) {
+    case 1:
+      return `${n}st`;
+    case 2:
+      return `${n}nd`;
+    case 3:
+      return `${n}rd`;
+    default:
+      return `${n}th`;
+  }
+}
+
+/** "on May 29th, 2026 at 2:31 PM" for radio readback. */
+export function formatIncidentWhenForRadio(inc: Ten8Incident): string {
+  let month = 0;
+  let day = 0;
+  let year = 0;
+
+  const dateRaw = str(inc.date);
+  const mdy = dateRaw.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (mdy) {
+    month = Number(mdy[1]);
+    day = Number(mdy[2]);
+    year = Number(mdy[3]);
+  } else {
+    const ts = Number(inc.timestamp);
+    if (Number.isFinite(ts) && ts > 0) {
+      const d = new Date(ts * 1000);
+      month = d.getMonth() + 1;
+      day = d.getDate();
+      year = d.getFullYear();
+    }
+  }
+
+  let hour = 0;
+  let minute = 0;
+  const timeRaw = str(inc.time);
+  const hms = timeRaw.match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (hms) {
+    hour = Number(hms[1]);
+    minute = Number(hms[2]);
+  } else if (Number.isFinite(Number(inc.timestamp)) && Number(inc.timestamp) > 0) {
+    const d = new Date(Number(inc.timestamp) * 1000);
+    hour = d.getHours();
+    minute = d.getMinutes();
+  }
+
+  const datePart =
+    month >= 1 && month <= 12 && day >= 1
+      ? `on ${MONTH_NAMES[month - 1]!} ${ordinalDay(day)}${year ? `, ${year}` : ""}`
+      : "";
+  let timePart = "";
+  if (hour >= 0 && hour <= 23) {
+    const h12 = hour % 12 || 12;
+    const ampm = hour < 12 ? "AM" : "PM";
+    timePart = minute > 0 ? `at ${h12}:${String(minute).padStart(2, "0")} ${ampm}` : `at ${h12} ${ampm}`;
+  }
+  return [datePart, timePart].filter(Boolean).join(" ");
+}
+
+/** Spoken call type — uses SSA code table when possible, otherwise a short plain phrase. */
+export function humanIncidentTypeForRadio(raw: string | null): string {
+  const t = (raw ?? "").trim();
+  if (!t) {
+    return "call";
+  }
+  const code = callCodeForRadio(t);
+  const spoken =
+    CALL_TYPE_SPOKEN[code] ??
+    CALL_TYPE_SPOKEN[code.toLowerCase()] ??
+    CALL_TYPE_SPOKEN[code.toUpperCase()];
+  if (spoken) {
+    return spoken;
+  }
+  let plain = t.replace(/\s*\([^)]*\)\s*/g, " ").replace(/\s+/g, " ").trim();
+  const sep = plain.match(/^(.+?)\s+[-–—]\s+(.+)$/);
+  if (sep) {
+    const left = sep[1]!.trim();
+    const desc = sep[2]!.trim();
+    const leftSpoken =
+      CALL_TYPE_SPOKEN[left] ??
+      CALL_TYPE_SPOKEN[left.toLowerCase()] ??
+      CALL_TYPE_SPOKEN[left.toUpperCase()];
+    if (leftSpoken) {
+      return leftSpoken;
+    }
+    return desc.toLowerCase() || left.toLowerCase();
+  }
+  if (/test/i.test(plain)) {
+    return "test call";
+  }
+  return plain.toLowerCase();
+}
+
+function compressDispositionPhrases(text: string): string | null {
+  const lower = text.toLowerCase();
+  const phrases: string[] = [];
+  if (/\bgoa\b|gone on arrival/i.test(lower)) {
+    phrases.push("gone on arrival");
+  }
+  if (/\butl\b|unable to locate/i.test(lower)) {
+    phrases.push("unable to locate");
+  }
+  if (/\bcode\s*4\b|all clear/i.test(lower)) {
+    phrases.push("code four, all clear");
+  }
+  if (phrases.length) {
+    return phrases.join(", ");
+  }
+  return null;
+}
+
+function humanizeCommentSnippet(text: string): string {
+  let s = text.trim();
+  if (!s) {
+    return "";
+  }
+  const compressed = compressDispositionPhrases(s);
+  if (compressed) {
+    return compressed;
+  }
+  s = s.replace(/^Incident closed:\s*/i, "");
+  s = s.replace(/\bCODE\s*4\b/gi, "code four");
+  s = s.replace(/\bGOA\b/gi, "gone on arrival");
+  s = s.replace(/\bUTL\b/gi, "unable to locate");
+  s = s.replace(/\s*[-–—]\s*GOA\s*\([^)]*\)\s*/gi, ", gone on arrival");
+  s = s.replace(/\s*\/\s*UTL\s*\([^)]*\)\s*/gi, ", unable to locate");
+  s = s.replace(/\s+/g, " ").trim();
+  return s.length > 160 ? `${s.slice(0, 157).trim()}…` : s;
+}
+
+/** One short closing line — not the full CAD comment thread. */
+export function pickIncidentSummaryForRadio(inc: Ten8Incident): string | null {
+  const summary = str(inc.summary);
+  if (summary) {
+    return humanizeCommentSnippet(summary);
+  }
+
+  const dispositions = inc.dispositions;
+  let dispositionOnly: string | null = null;
+  if (Array.isArray(dispositions) && dispositions.length > 0) {
+    const last = dispositions[dispositions.length - 1] as Record<string, unknown>;
+    const label = str(last.disposition);
+    const notes = str(last.notes);
+    if (notes) {
+      return humanizeCommentSnippet(notes);
+    }
+    if (label && !/^(call\s+)?cleared?$/i.test(label.trim())) {
+      dispositionOnly = /clear/i.test(label) ? "cleared" : label.toLowerCase();
+    }
+  }
+
   const comments = inc.comments;
   if (!Array.isArray(comments) || comments.length === 0) {
     return null;
   }
-  const texts = comments
-    .map((c) => {
-      if (!c || typeof c !== "object") {
-        return "";
+  const rows = comments
+    .filter((c) => c && typeof c === "object")
+    .map((c) => c as Record<string, unknown>);
+  const useful = rows
+    .filter((c) => {
+      const type = str(c.type).toLowerCase();
+      const text = str(c.comment);
+      if (!text) {
+        return false;
       }
-      return str((c as Record<string, unknown>).comment);
+      if (type === "system") {
+        return /goa|utl|code\s*4|clear|closed|negative/i.test(text);
+      }
+      return type === "disposition" || type === "" || type === "comment";
     })
-    .filter(Boolean);
-  if (!texts.length) {
-    return null;
+    .map((c) => str(c.comment));
+  const pick =
+    useful.find((t) => /goa|utl|code\s*4|clear|closed/i.test(t)) ?? useful[useful.length - 1];
+  if (pick) {
+    return humanizeCommentSnippet(pick);
   }
-  return texts.slice(-max).join("; ").slice(0, 600);
+  return dispositionOnly;
+}
+
+/**
+ * Natural dispatcher readback for a CAD incident lookup (no unit prefix — caller adds "352, ").
+ * Example: "call 26-2355 was on May 29th, 2026 at 2:31 PM for a test call at 401 W 1st St, Santa Ana. Cleared, gone on arrival."
+ */
+export function formatCadIncidentLookupRadioLine(inc: Ten8Incident): string {
+  const callId = incidentCallId(inc);
+  const when = formatIncidentWhenForRadio(inc);
+  const typePhrase = humanIncidentTypeForRadio(str(inc.type));
+  const loc = shortenLocationForRadio(incidentLocation(inc) || null);
+  const summary = pickIncidentSummaryForRadio(inc);
+  const status = str(inc.status);
+  const closed = inc.isClosed === 1 || /clear/i.test(status);
+
+  let line = callId ? `call ${callId}` : "that call";
+  line += when ? ` was ${when}` : " was logged";
+  line += ` for a ${typePhrase}`;
+  if (loc) {
+    line += ` at ${loc}`;
+  }
+
+  if (summary) {
+    line += `. ${summary.charAt(0).toUpperCase()}${summary.slice(1)}`;
+    if (!/[.!?]$/.test(line)) {
+      line += ".";
+    }
+  } else if (status) {
+    line += closed ? ". Cleared." : `. Status ${status}.`;
+  } else if (!/[.!?]$/.test(line)) {
+    line += ".";
+  }
+
+  return line;
 }
 
 function incidentUnits(inc: Ten8Incident): string[] {
@@ -418,26 +634,7 @@ export async function fetchCadIncidentLookupRadio(
     return { ok: false, line: "negative, CAD incident lookup failed.", status: res.status };
   }
   const inc = (res.data && typeof res.data === "object" ? res.data : {}) as Ten8Incident;
-  const mapped = mapTen8ApiIncident(inc);
-  const typeName = callCodeForRadio(mapped.incident_type);
-  const loc = shortenLocationForRadio(mapped.location);
-  const parts = [loc ? `${typeName} at ${loc}` : typeName];
-  if (mapped.status) {
-    parts.push(`status ${mapped.status}`);
-  }
-  const units = incidentUnits(inc);
-  if (units.length) {
-    parts.push(`units ${units.slice(0, 4).join(", ")}`);
-  }
-  const comments = incidentComments(inc);
-  parts.push(comments ? `comments: ${comments}` : "no comments on the call yet");
-  const tags = Array.isArray(inc.tags)
-    ? (inc.tags as Record<string, unknown>[]).map((t) => str(t.tag)).filter(Boolean)
-    : [];
-  if (tags.length) {
-    parts.push(`tags ${tags.slice(0, 4).join(", ")}`);
-  }
-  return { ok: true, line: parts.join(", ") };
+  return { ok: true, line: formatCadIncidentLookupRadioLine(inc) };
 }
 
 export async function fetchCadOpenIncidentsRadio(
