@@ -21,7 +21,12 @@ import {
   resetOpusDecoderForTalkSpurt,
   resetOpusEncoderForTalkSpurt,
 } from "./opusWasmCodec";
-import { PostDecodeProcessor, endOfTxCue, type PostDecodeConfig } from "./postDecodeChain";
+import {
+  PostDecodeProcessor,
+  endOfTxCue,
+  OPUS_VOICE_SHAPING,
+  type PostDecodeConfig,
+} from "./postDecodeChain";
 import { loadMarker1033Pcm } from "./marker1033";
 import {
   DEFAULT_VOICE_CODEC,
@@ -300,6 +305,11 @@ export class VoiceChannelClient {
    *  wideband (Opus) routing decision and the end-of-TX cue synthesis on
    *  `air_released`. `null` when no shaping is configured. */
   private postDecodeConfig: PostDecodeConfig | null = null;
+  /** Fixed "warm radio voice" shaping for the Opus (wideband) path ONLY — see
+   *  OPUS_VOICE_SHAPING. Independent of the agency post-decode chain (which
+   *  stays off, so IMBE/Codec2 play raw) and built once per client. Reset at
+   *  talk-spurt boundaries alongside postDecodeProcessor. */
+  private opusVoiceProcessor: PostDecodeProcessor = new PostDecodeProcessor(OPUS_VOICE_SHAPING);
   /** Promise resolved once refreshAudioConfig() has settled (success or fail)
    *  for the most recent connect(). startTransmit awaits this so the very
    *  first PTT after connect uses the right getUserMedia constraints instead
@@ -673,6 +683,7 @@ export class VoiceChannelClient {
       // talker's biquad state (especially shelves and the presence bell)
       // can't ring into the first few ms of the new talker's audio.
       this.postDecodeProcessor?.reset();
+      this.opusVoiceProcessor.reset();
       // Same for the libopus decoder: LPC + pitch + FEC LBRR history
       // carries across frames, so a previous talker's tail can colour the
       // first frame of the new one unless we reset. Codec2's per-spurt
@@ -798,10 +809,14 @@ export class VoiceChannelClient {
    *  Otherwise the frame plays unshaped (today's behaviour). Output is always
    *  16 kHz regardless of the config's `upsampleMode`. */
   private playOpusPcm(pcm: Int16Array): void {
+    // Opus always runs through the fixed "warm radio voice" shaping
+    // (OPUS_VOICE_SHAPING) so it sounds full and clear rather than thin.
+    // This is the Opus path only — the 8 kHz vocoders (IMBE/Codec2) play raw.
+    // If an agency ever pushes its own wideband chain, that takes precedence.
     if (this.postDecodeProcessor && this.postDecodeConfig?.wideband === true) {
       this.schedulePcm(this.postDecodeProcessor.processWideband(pcm), { sampleRate: TARGET_RATE });
     } else {
-      this.schedulePcm(pcm);
+      this.schedulePcm(this.opusVoiceProcessor.processWideband(pcm), { sampleRate: TARGET_RATE });
     }
   }
 
@@ -837,6 +852,7 @@ export class VoiceChannelClient {
           resetCodec2DecoderForTalkSpurt();
         }
         this.postDecodeProcessor?.reset();
+        this.opusVoiceProcessor.reset();
         // Voice-link telemetry: a fresh talk-spurt boundary is also a fresh
         // talk-spurt start from a counters POV — the underrun fill above
         // doesn't run for the very first frame of a spurt.
